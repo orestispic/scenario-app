@@ -1,0 +1,53 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "scenario-app",
+  "version": "0.1.6",
+  "identifier": "fr.orepi.scenario",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "scenario-app",
+        "width": 800,
+        "height": 600,
+        "maximized": true
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; connect-src ipc: http://ipc.localhost; img-src 'self' asset: http://asset.localhost data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "resources": {
+      "icons/scenario-file-icon.ico": "scenario-file-icon.ico"
+    },
+    "fileAssociations": [
+      {
+        "ext": ["scenario"],
+        "name": "Projet Scénario",
+        "description": "Projet Scénario",
+        "role": "Editor",
+        "mimeType": "application/x-scenario-project"
+      }
+    ],
+    "windows": {
+      "nsis": {
+        "installerHooks": "installer-hooks.nsh"
+      }
+    },
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ]
+  }
+}
