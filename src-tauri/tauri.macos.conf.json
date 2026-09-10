@@ -1,0 +1,13 @@
+{
+  "productName": "Scénario",
+  "app": {
+    "windows": [
+      {
+        "title": "Scénario"
+      }
+    ]
+  },
+  "bundle": {
+    "targets": ["app"]
+  }
+}

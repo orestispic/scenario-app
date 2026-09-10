@@ -48,20 +48,21 @@ jobs:
       - name: Installer les dépendances
         run: npm ci
       - name: Créer l’application macOS universelle
-        run: npm run tauri build -- --target universal-apple-darwin
-      - name: Préparer l’application et le guide macOS
+        run: npm run tauri build -- --config src-tauri/tauri.macos.conf.json --target universal-apple-darwin
+      - name: Préparer le paquet macOS avec son guide
         run: |
           mkdir -p release
           app_path="$(find src-tauri/target/universal-apple-darwin/release/bundle/macos -maxdepth 1 -type d -name '*.app' -print -quit)"
           test -n "$app_path"
-          ditto -c -k --sequesterRsrc --keepParent "$app_path" "release/Scenario-macOS.zip"
-          cp "docs/Guide-installation-macOS.pdf" "release/Guide-installation-macOS.pdf"
+          package_path="release/Scénario macOS"
+          mkdir -p "$package_path"
+          ditto "$app_path" "$package_path/Scénario.app"
+          cp "docs/Guide-installation-macOS.pdf" "$package_path/Guide-installation-macOS.pdf"
+          ditto -c -k --sequesterRsrc "$package_path" "release/Scenario-macOS.zip"
       - uses: actions/upload-artifact@v4
         with:
           name: macos
-          path: |
-            release/Scenario-macOS.zip
-            release/Guide-installation-macOS.pdf
+          path: release/Scenario-macOS.zip
 
   release:
     name: Publication

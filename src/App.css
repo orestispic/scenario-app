@@ -33,6 +33,7 @@ textarea {
 }
 
 .app-shell {
+  position: relative;
   display: grid;
   grid-template-rows: 34px 36px minmax(0, 1fr);
   height: 100%;
@@ -333,7 +334,7 @@ textarea {
 }
 
 .comment-inline-button {
-  position: fixed;
+  position: absolute;
   z-index: 35;
   display: grid;
   width: 26px;
@@ -349,7 +350,7 @@ textarea {
 }
 
 .comment-margin {
-  position: fixed;
+  position: absolute;
   z-index: 25;
   top: 0;
   left: 0;
@@ -377,7 +378,7 @@ textarea {
 .comment-margin-card footer button { padding: 3px 6px; background: #fff; border: 1px solid #d1c08a; border-radius: 3px; font-size: 10px; }
 
 .comments-panel {
-  position: fixed;
+  position: absolute;
   z-index: 40;
   top: 70px;
   right: 12px;
@@ -635,7 +636,7 @@ textarea {
 }
 
 .scenario-context-menu {
-  position: fixed;
+  position: absolute;
   z-index: 80;
   min-width: 132px;
   padding: 5px;
@@ -697,7 +698,7 @@ textarea {
 }
 
 .smart-type {
-  position: fixed;
+  position: absolute;
   /* Les suggestions suivent leur texte mais restent sous l'en-tête fixe. */
   z-index: 9;
   display: grid;
@@ -756,7 +757,7 @@ textarea {
 }
 
 .ai-inline-button {
-  position: fixed;
+  position: absolute;
   z-index: 18;
   display: grid;
   width: calc(30px * var(--ai-scale, 1));
@@ -775,7 +776,7 @@ textarea {
 }
 
 .ai-paragraph-highlight {
-  position: fixed;
+  position: absolute;
   z-index: 2;
   pointer-events: none;
   background: rgba(65, 79, 88, 0.06);
@@ -796,7 +797,7 @@ textarea {
 }
 
 .transition-inline-button {
-  position: fixed;
+  position: absolute;
   z-index: 18;
   min-width: calc(72px * var(--ai-scale, 1));
   height: calc(22px * var(--ai-scale, 1));
@@ -820,7 +821,7 @@ textarea {
 }
 
 .transition-popover {
-  position: fixed;
+  position: absolute;
   z-index: 22;
   width: 190px;
   overflow: hidden;
@@ -891,7 +892,7 @@ textarea {
 }
 
 .ai-popover {
-  position: fixed;
+  position: absolute;
   z-index: 22;
   width: 220px;
   overflow: hidden;

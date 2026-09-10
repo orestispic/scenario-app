@@ -62,6 +62,7 @@ import {
   paginateScenarioEditor,
   ScenarioPagination,
 } from "./editor/pagination";
+import { clientPointToOverlay, clientRectToOverlay } from "./editor/overlayCoordinates";
 import {
   choosePdfToSave,
   choosePdfToOpen,
@@ -258,15 +259,25 @@ const smartTypeLabels: Record<SmartTypeContext["kind"], string> = {
   TIME: "Moment de la journée",
 };
 
-function getCommentActionPosition(editor: Editor): CommentActionTarget | null {
+function getCommentActionPosition(
+  editor: Editor,
+  zoom: number,
+  appShell: HTMLElement | null,
+): CommentActionTarget | null {
   const { selection } = editor.state;
   if (selection.empty || selection.$from.parent !== selection.$to.parent) {
     return null;
   }
   const coords = editor.view.coordsAtPos(selection.to);
+  const overlay = clientPointToOverlay(
+    coords.left,
+    coords.bottom + 4,
+    zoom,
+    appShell?.getBoundingClientRect(),
+  );
   return {
-    left: Math.max(8, coords.left - 13),
-    top: Math.max(76, coords.bottom + 4),
+    left: Math.max(8, overlay.left - 13),
+    top: Math.max(76, overlay.top),
   };
 }
 
@@ -418,6 +429,7 @@ function App() {
   const textReplacementsEnabledRef = useRef(textReplacementsEnabled);
   const commentsRef = useRef(comments);
   const commentInput = useRef<HTMLTextAreaElement | null>(null);
+  const appShellRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     if (!pdfImportOpen) return;
@@ -507,16 +519,22 @@ function App() {
       return;
     }
     const coordinates = editor.view.coordsAtPos(editor.state.selection.from);
+    const overlay = clientPointToOverlay(
+      coordinates.left,
+      coordinates.bottom + 6,
+      zoom,
+      appShellRef.current?.getBoundingClientRect(),
+    );
 
     setSmartType({
       ...context,
       // La liste est volontairement sans limite d'écran : elle doit rester
       // exactement attachée au curseur, y compris quand celui-ci approche
       // d'un bord de fenêtre.
-      left: coordinates.left,
-      top: coordinates.bottom + 6,
+      left: overlay.left,
+      top: overlay.top,
     });
-  }, []);
+  }, [zoom]);
 
   const refreshCurrentType = useCallback((editor: Editor) => {
     setCurrentType(getCurrentScenarioElementType(editor));
@@ -598,7 +616,7 @@ function App() {
     },
     onSelectionUpdate: ({ editor: activeEditor }) => {
       refreshEditorState(activeEditor);
-      setCommentActionTarget(getCommentActionPosition(activeEditor));
+      setCommentActionTarget(getCommentActionPosition(activeEditor, zoom, appShellRef.current));
     },
     onTransaction: ({ editor: activeEditor, transaction }) => {
       const updatesBlockIds = transaction.getMeta("scenario-block-ids") === true;
@@ -722,6 +740,7 @@ function App() {
       const next: Record<string, { top: number; left: number }> = {};
       const canvas = editor.view.dom.closest<HTMLElement>(".document-canvas");
       const canvasRect = canvas?.getBoundingClientRect();
+      const appShellRect = appShellRef.current?.getBoundingClientRect();
       const anchoredComments = comments
         .filter((item) => item.status === "open" && !item.anchor.lost)
         .flatMap((thread) => {
@@ -730,7 +749,8 @@ function App() {
           return [];
         }
         const coords = editor.view.coordsAtPos(position.from);
-        return [{ thread, desiredTop: Math.max(82, coords.top), coords }];
+        const overlay = clientPointToOverlay(coords.left, coords.top, zoom, appShellRect);
+        return [{ thread, desiredTop: Math.max(82, overlay.top), coords, overlay }];
         })
         .sort((left, right) => left.desiredTop - right.desiredTop);
 
@@ -741,7 +761,10 @@ function App() {
         const top = Math.max(desiredTop, occupiedBottom);
         next[thread.id] = {
           top,
-          left: Math.max(8, (canvasRect?.left ?? coords.left) - 168),
+          left: Math.max(
+            8,
+            clientPointToOverlay(canvasRect?.left ?? coords.left, 0, zoom, appShellRect).left - 168,
+          ),
         };
         occupiedBottom = top + cardHeight + 6;
       }
@@ -751,7 +774,7 @@ function App() {
     const workspace = editor.view.dom.closest<HTMLElement>(".workspace");
     const handleLayoutChange = () => {
       updatePositions();
-      setCommentActionTarget(getCommentActionPosition(editor));
+      setCommentActionTarget(getCommentActionPosition(editor, zoom, appShellRef.current));
     };
     window.addEventListener("resize", handleLayoutChange);
     workspace?.addEventListener("scroll", handleLayoutChange);
@@ -787,7 +810,7 @@ function App() {
           ? target.closest<HTMLElement>("p[data-scenario-type]")
           : null;
       const paragraph =
-        paragraphFromTarget ?? findAiParagraphAtPoint(editor, clientX, clientY);
+        paragraphFromTarget ?? findAiParagraphAtPoint(editor, clientX, clientY, zoom);
       const type = toScenarioElementType(
         paragraph?.getAttribute("data-scenario-type"),
       );
@@ -819,20 +842,23 @@ function App() {
       if (aiTarget && aiTarget.position !== position) {
         setAiPromptMenuOpen(false);
       }
+      const appShellRect = appShellRef.current?.getBoundingClientRect();
+      const paragraphOverlay = clientRectToOverlay(rect, zoom, appShellRect);
+      const canvasOverlay = clientRectToOverlay(canvasRect, zoom, appShellRect);
       setAiTarget({
-        left: Math.min(window.innerWidth - 54, rect.right),
-        transitionLeft: Math.min(window.innerWidth - 92, Math.max(8, rect.right + 36)),
-        top: Math.max(42, rect.top + rect.height / 2),
-        highlightLeft: canvasRect.left,
-        highlightTop: rect.top,
-        highlightWidth: canvasRect.width,
-        highlightHeight: rect.height,
+        left: paragraphOverlay.left + paragraphOverlay.width,
+        transitionLeft: paragraphOverlay.left + paragraphOverlay.width + 36 * (zoom / 100),
+        top: paragraphOverlay.top + paragraphOverlay.height / 2,
+        highlightLeft: canvasOverlay.left,
+        highlightTop: paragraphOverlay.top,
+        highlightWidth: canvasOverlay.width,
+        highlightHeight: paragraphOverlay.height,
         position,
         text: paragraph.textContent ?? "",
         type,
       });
     },
-    [aiBusy, aiTarget, editor, transitionMenuOpen],
+    [aiBusy, aiTarget, editor, transitionMenuOpen, zoom],
   );
 
   useEffect(() => {
@@ -1435,11 +1461,14 @@ function App() {
       return;
     }
     event.preventDefault();
-    setScenarioContextMenu({
-      left: Math.min(event.clientX, window.innerWidth - 150),
-      top: Math.min(event.clientY, window.innerHeight - 48),
-    });
-  }, []);
+    const overlay = clientPointToOverlay(
+      event.clientX,
+      event.clientY,
+      zoom,
+      appShellRef.current?.getBoundingClientRect(),
+    );
+    setScenarioContextMenu({ left: overlay.left, top: overlay.top });
+  }, [zoom]);
 
   const updateCoverDraft = useCallback(
     (field: keyof CoverPageData, value: string) => {
@@ -2162,7 +2191,7 @@ function App() {
     : textReplacementDrafts;
 
   return (
-    <div className={`app-shell ${theme === "dark" ? "theme-dark" : ""}`}>
+    <div ref={appShellRef} className={`app-shell ${theme === "dark" ? "theme-dark" : ""}`}>
       <header className="menu-bar">
         <nav aria-label="Menu principal">
           <div className="file-menu-container">
@@ -3383,6 +3412,7 @@ function findAiParagraphAtPoint(
   editor: Editor,
   clientX: number,
   clientY: number,
+  zoom = 100,
 ): HTMLElement | null {
   const paragraphs = editor.view.dom.querySelectorAll<HTMLElement>(
     'p[data-scenario-type="ACTION"]:not([data-scenario-ending]), p[data-scenario-type="DIALOGUE"]',
@@ -3392,12 +3422,13 @@ function findAiParagraphAtPoint(
     const canvas = paragraph.closest(".document-canvas");
     const canvasRect = canvas?.getBoundingClientRect();
     const paragraphRect = paragraph.getBoundingClientRect();
+    const documentScale = zoom / 100;
     if (
       canvasRect &&
-      clientX >= canvasRect.left &&
-      clientX <= canvasRect.right &&
-      clientY >= paragraphRect.top &&
-      clientY <= paragraphRect.bottom
+      clientX >= canvasRect.left * documentScale &&
+      clientX <= canvasRect.right * documentScale &&
+      clientY >= paragraphRect.top * documentScale &&
+      clientY <= paragraphRect.bottom * documentScale
     ) {
       return paragraph;
     }
