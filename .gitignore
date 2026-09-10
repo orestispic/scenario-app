@@ -23,3 +23,7 @@ src-tauri/target
 *.njsproj
 *.sln
 *.sw?
+
+# Local commercial configuration (examples are versioned)
+.env
+.env.local
