@@ -105,6 +105,8 @@ import {
   type AiPrompt,
   type ScenarioTranslationSegment,
 } from "./document/aiConfig";
+import { AccountLicensePanel } from "./commercial/AccountLicensePanel";
+import { loadDevelopmentAccountState, type DevelopmentAccountState } from "./commercial/developmentBootstrap";
 import "./App.css";
 
 const UNTITLED_DOCUMENT = "Sans titre";
@@ -392,6 +394,9 @@ function App() {
   const [customTransitionOpen, setCustomTransitionOpen] = useState(false);
   const [customTransitionText, setCustomTransitionText] = useState("");
   const [aiBusy, setAiBusy] = useState(false);
+  const [accountPanelOpen, setAccountPanelOpen] = useState(false);
+  const [developmentAccountState, setDevelopmentAccountState] = useState<DevelopmentAccountState | null>(null);
+  const [developmentAccountStatus, setDevelopmentAccountStatus] = useState<"loading" | "ready" | "error">("loading");
   const [scenarioContextMenu, setScenarioContextMenu] =
     useState<ScenarioContextMenuState | null>(null);
   const [theme, setTheme] = useState<Theme>(() =>
@@ -450,6 +455,16 @@ function App() {
   useEffect(() => {
     currentDocumentState.current = documentState;
   }, [documentState]);
+
+  useEffect(() => {
+    const clientVersion = import.meta.env.VITE_SCENARIO_CLIENT_VERSION ?? "0.0.0";
+    void loadDevelopmentAccountState(clientVersion)
+      .then((state) => {
+        setDevelopmentAccountState(state);
+        setDevelopmentAccountStatus("ready");
+      })
+      .catch(() => setDevelopmentAccountStatus("error"));
+  }, []);
 
   useEffect(() => {
     coverPageRef.current = coverPage;
@@ -2391,6 +2406,16 @@ function App() {
             </button>
           </div>
           <div className="file-menu-container">
+            <button
+              className="menu-button"
+              type="button"
+              aria-haspopup="dialog"
+              onClick={() => setAccountPanelOpen(true)}
+            >
+              Compte
+            </button>
+          </div>
+          <div className="file-menu-container">
             <button className="menu-button" type="button" onClick={openHelp}>
               Aide
             </button>
@@ -2781,6 +2806,15 @@ function App() {
             </section>
           </section>
         </div>
+      )}
+
+      {accountPanelOpen && (
+        <AccountLicensePanel
+          overview={developmentAccountState?.overview ?? null}
+          status={developmentAccountStatus}
+          compatibility={developmentAccountState?.compatibility ?? null}
+          onClose={() => setAccountPanelOpen(false)}
+        />
       )}
 
       {commentComposerOpen && (

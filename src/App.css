@@ -1121,6 +1121,40 @@ textarea {
 .help-panel a { color: #1e5c84; }
 .help-panel code { font-size: 11px; }
 
+.account-license-panel {
+  display: grid;
+  gap: 16px;
+  width: min(560px, 100%);
+  padding: 20px;
+  color: #20272c;
+  background: #fff;
+  border: 1px solid #aeb8bf;
+  border-radius: 6px;
+  box-shadow: 0 18px 48px rgba(31, 37, 40, 0.28);
+}
+
+.account-license-panel header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.account-license-panel h2,
+.account-license-panel p { margin: 0; }
+.account-license-panel h2 { font-size: 19px; }
+.account-license-panel header p { margin-top: 3px; color: #64717a; font-size: 12px; }
+.account-license-loading,
+.account-license-error { color: #536069; font-size: 13px; }
+.account-license-error { color: #9d2116; }
+.account-license-details { display: grid; gap: 14px; }
+.account-license-details dl { display: grid; gap: 0; margin: 0; border: 1px solid #d5dde2; border-radius: 5px; overflow: hidden; }
+.account-license-details dl > div { display: grid; grid-template-columns: minmax(145px, 0.8fr) minmax(0, 1.2fr); gap: 12px; padding: 9px 11px; border-bottom: 1px solid #dce3e7; font-size: 13px; }
+.account-license-details dl > div:last-child { border-bottom: 0; }
+.account-license-details dt { color: #64717a; font-weight: 700; }
+.account-license-details dd { margin: 0; color: #26333a; overflow-wrap: anywhere; }
+.account-license-details > p { color: #536069; font-size: 12px; line-height: 1.45; }
+
 .find-replace-panel header,
 .find-replace-panel footer,
 .find-replace-panel footer > div {
@@ -1746,6 +1780,15 @@ textarea {
 .theme-dark .help-panel h3,
 .theme-dark .help-panel a { color: #9fd4f1; }
 .theme-dark .help-panel kbd { color: #e0e7eb; background: #303940; border-color: #4d5960; }
+.theme-dark .account-license-panel { color: #e0e7eb; background: #242a2e; border-color: #4d5960; }
+.theme-dark .account-license-panel header p,
+.theme-dark .account-license-loading,
+.theme-dark .account-license-details > p { color: #b6c3ca; }
+.theme-dark .account-license-error { color: #ffc5bd; }
+.theme-dark .account-license-details dl,
+.theme-dark .account-license-details dl > div { border-color: #435058; }
+.theme-dark .account-license-details dt { color: #b6c3ca; }
+.theme-dark .account-license-details dd { color: #e0e7eb; }
 
 .theme-dark .file-menu button,
 .theme-dark .smart-type button,
