@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createHttpCommercialApi } from "./api";
 import { assessClientCompatibility } from "./compatibility";
-import { developmentAccountOverview } from "./developmentApi";
+import type { AccountOverview } from "./contracts";
 import {
   ENTITLEMENT_CACHE_KEY,
   createEntitlementCachePolicy,
@@ -17,14 +17,26 @@ function memoryStorage() {
   };
 }
 
+const accountOverviewFixture: AccountOverview = {
+  account: { id: "test-account", email: "test@example.invalid", displayName: "Compte test" },
+  entitlementSnapshot: {
+    id: "test-snapshot",
+    configurationVersion: "test-configuration",
+    issuedAt: "2026-01-01T00:00:00.000Z",
+    offlineValidUntil: "2026-01-03T00:00:00.000Z",
+    entitlements: [],
+  },
+  compatibility: { minimumSupportedVersion: "1.0.0", effectiveAt: "2026-01-01T00:00:00.000Z", message: null },
+};
+
 describe("contrat commercial", () => {
   it("valide la réponse de compte de l’adaptateur injecté", async () => {
     const api = createHttpCommercialApi({
-      get: async () => ({ ok: true, status: 200, json: async () => developmentAccountOverview }),
+      get: async () => ({ ok: true, status: 200, json: async () => accountOverviewFixture }),
     });
     await expect(api.getAccountOverview()).resolves.toMatchObject({
-      account: { id: "development-account" },
-      entitlementSnapshot: { configurationVersion: "development-phase-1" },
+      account: { id: "test-account" },
+      entitlementSnapshot: { configurationVersion: "test-configuration" },
     });
   });
 
@@ -40,7 +52,7 @@ describe("cache d’entitlements", () => {
   it("expire selon la tolérance fournie par le serveur", () => {
     const storage = memoryStorage();
     const snapshot = {
-      ...developmentAccountOverview.entitlementSnapshot,
+      ...accountOverviewFixture.entitlementSnapshot,
       issuedAt: "2026-01-01T00:00:00.000Z",
       offlineValidUntil: "2026-01-03T00:00:00.000Z",
     };

@@ -1154,6 +1154,29 @@ textarea {
 .account-license-details dt { color: #64717a; font-weight: 700; }
 .account-license-details dd { margin: 0; color: #26333a; overflow-wrap: anywhere; }
 .account-license-details > p { color: #536069; font-size: 12px; line-height: 1.45; }
+.account-license-section { display: grid; gap: 8px; padding: 11px; border: 1px solid #d5dde2; border-radius: 5px; }
+.account-license-section h3,
+.account-license-section p { margin: 0; }
+.account-license-section h3 { color: #2d628c; font-size: 14px; }
+.account-license-section p,
+.account-license-section li { color: #536069; font-size: 13px; }
+.account-license-section ul { display: grid; gap: 4px; margin: 0; padding-left: 20px; }
+.account-license-section button,
+.account-license-details footer button,
+.account-local-test button,
+.account-auth-tabs button,
+.account-auth-form button { padding: 8px 10px; color: #26333a; background: #eef2f4; border: 1px solid #c7d0d6; border-radius: 4px; cursor: pointer; }
+.account-license-details footer { display: flex; justify-content: flex-end; }
+.account-local-test { display: grid; gap: 7px; padding: 11px; color: #5d4610; background: #fff8e8; border: 1px solid #ead7a2; border-radius: 5px; font-size: 13px; }
+.account-local-test p { margin: 0; }
+.account-local-test > div { display: flex; gap: 6px; }
+.account-auth-tabs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; }
+.account-auth-tabs button.is-active { color: #fff; background: #2d628c; border-color: #2d628c; }
+.account-auth-form { display: grid; gap: 11px; }
+.account-auth-form label { display: grid; gap: 5px; color: #48545c; font-size: 12px; font-weight: 700; }
+.account-auth-form input { width: 100%; padding: 8px 9px; color: #20272c; background: #f8fafb; border: 1px solid #c7d0d6; border-radius: 4px; font-size: 13px; }
+.account-auth-form .primary-button { color: #fff; background: #2d628c; border-color: #2d628c; }
+.account-license-message { padding: 8px 10px; color: #31536b; background: #e5f0f6; border-radius: 4px; font-size: 12px; }
 
 .find-replace-panel header,
 .find-replace-panel footer,
@@ -1789,6 +1812,18 @@ textarea {
 .theme-dark .account-license-details dl > div { border-color: #435058; }
 .theme-dark .account-license-details dt { color: #b6c3ca; }
 .theme-dark .account-license-details dd { color: #e0e7eb; }
+.theme-dark .account-license-section { border-color: #435058; }
+.theme-dark .account-license-section h3 { color: #9fd4f1; }
+.theme-dark .account-license-section p,
+.theme-dark .account-license-section li { color: #c0ccd2; }
+.theme-dark .account-local-test { color: #f0d990; background: #3d341e; border-color: #8c7435; }
+.theme-dark .account-license-section button,
+.theme-dark .account-license-details footer button,
+.theme-dark .account-local-test button,
+.theme-dark .account-auth-tabs button { color: #e0e7eb; background: #303940; border-color: #4d5960; }
+.theme-dark .account-auth-form label { color: #c5d0d6; }
+.theme-dark .account-auth-form input { color: #f1f4f5; background: #1a2024; border-color: #4d5960; }
+.theme-dark .account-license-message { color: #b8d8e9; background: #223c4d; }
 
 .theme-dark .file-menu button,
 .theme-dark .smart-type button,
