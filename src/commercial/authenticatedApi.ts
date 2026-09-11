@@ -5,6 +5,7 @@ import type {
   PublicConfiguration,
   UsageView,
 } from "./contractsV2";
+import type { ActivationRedeemResponse, ActivationStatusResponse, BillingOverviewResponse, BillingPortalResponse, CheckoutSessionRequest, CheckoutSessionResponse } from "./contractsV3";
 
 export interface AuthenticatedCommercialApi {
   getConfiguration(): Promise<PublicConfiguration>;
@@ -15,6 +16,11 @@ export interface AuthenticatedCommercialApi {
   deactivateDevice(deviceId: string): Promise<void>;
   getUsage(): Promise<UsageView[]>;
   logout(): Promise<void>;
+  getBilling(): Promise<BillingOverviewResponse>;
+  createCheckoutSession(input: CheckoutSessionRequest): Promise<CheckoutSessionResponse>;
+  createBillingPortal(returnUrl: string): Promise<BillingPortalResponse>;
+  getActivationStatus(): Promise<ActivationStatusResponse>;
+  redeemActivationKey(input: { key: string; fingerprint: string; label: string; platform: "windows" | "macos" }): Promise<ActivationRedeemResponse>;
 }
 
 export function createAuthenticatedCommercialApi(options: {
@@ -47,5 +53,10 @@ export function createAuthenticatedCommercialApi(options: {
     deactivateDevice: (deviceId) => request<void>("/v1/devices/deactivate", { method: "POST", body: JSON.stringify({ deviceId }) }),
     getUsage: async () => (await request<{ usage: UsageView[] }>("/v1/usage")).usage,
     logout: () => request<void>("/v1/auth/logout", { method: "POST", body: "{}" }),
+    getBilling: () => request<BillingOverviewResponse>("/v2/billing"),
+    createCheckoutSession: (input) => request<CheckoutSessionResponse>("/v2/checkout/sessions", { method: "POST", body: JSON.stringify(input) }),
+    createBillingPortal: (returnUrl) => request<BillingPortalResponse>("/v2/billing/portal-sessions", { method: "POST", body: JSON.stringify({ returnUrl }) }),
+    getActivationStatus: () => request<ActivationStatusResponse>("/v2/activation-keys/status"),
+    redeemActivationKey: (input) => request<ActivationRedeemResponse>("/v2/activation-keys/redeem", { method: "POST", body: JSON.stringify(input) }),
   };
 }

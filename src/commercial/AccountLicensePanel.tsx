@@ -2,6 +2,7 @@ import { useMemo, useState, type FormEvent } from "react";
 import { createAuthenticatedCommercialApi } from "./authenticatedApi";
 import { createLocalTestAuthAdapter, createSupabaseAuthAdapter, type AuthAdapter, type LocalTestAuthAdapter } from "./auth";
 import type { DeviceView, EntitlementsResponse, MeResponse, SessionTokens } from "./contractsV2";
+import type { ActivationRedemptionView, BillingState } from "./contractsV3";
 import { writeVerifiedEntitlementCache } from "./signedEntitlementCache";
 
 interface AccountLicensePanelProps { onClose(): void }
@@ -38,19 +39,23 @@ export function AccountLicensePanel({ onClose }: AccountLicensePanelProps) {
   const [me, setMe] = useState<MeResponse | null>(null);
   const [entitlements, setEntitlements] = useState<EntitlementsResponse | null>(null);
   const [devices, setDevices] = useState<DeviceView[]>([]);
+  const [billing, setBilling] = useState<BillingState | null>(null);
+  const [activations, setActivations] = useState<ActivationRedemptionView[]>([]);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
 
   async function loadAuthenticatedAccount(nextSession: SessionTokens) {
     const api = createAuthenticatedCommercialApi({ baseUrl: apiBaseUrl, accessToken: nextSession.accessToken });
-    const [configuration, nextMe, nextEntitlements, nextDevices] = await Promise.all([
-      api.getConfiguration(), api.getMe(), api.getEntitlements(), api.getDevices(),
+    const [configuration, nextMe, nextEntitlements, nextDevices, nextBilling, nextActivations] = await Promise.all([
+      api.getConfiguration(), api.getMe(), api.getEntitlements(), api.getDevices(), api.getBilling(), api.getActivationStatus(),
     ]);
     await writeVerifiedEntitlementCache(browserStorage(), nextEntitlements.snapshot, nextEntitlements.offlineGrant, configuration.offlineGrantPublicKey, configuration.offlineGrantKeyId);
     setSession(nextSession);
     setMe(nextMe);
     setEntitlements(nextEntitlements);
     setDevices(nextDevices);
+    setBilling(nextBilling.billing);
+    setActivations(nextActivations.activations);
   }
 
   async function run(action: () => Promise<void>, success: string) {
@@ -88,7 +93,26 @@ export function AccountLicensePanel({ onClose }: AccountLicensePanelProps) {
 
   async function signOut() {
     if (session) await createAuthenticatedCommercialApi({ baseUrl: apiBaseUrl, accessToken: session.accessToken }).logout();
-    setSession(null); setMe(null); setEntitlements(null); setDevices([]);
+    setSession(null); setMe(null); setEntitlements(null); setDevices([]); setBilling(null); setActivations([]);
+  }
+
+  async function redeemActivationKey(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!session) return;
+    const data = new FormData(event.currentTarget);
+    const api = createAuthenticatedCommercialApi({ baseUrl: apiBaseUrl, accessToken: session.accessToken });
+    await api.redeemActivationKey({
+      key: String(data.get("activationKey") ?? ""),
+      fingerprint: getDeviceFingerprint(),
+      label: "Cet appareil",
+      platform: /mac/i.test(navigator.userAgent) ? "macos" : "windows",
+    });
+    const [configuration, nextEntitlements, nextBilling, nextActivations, nextDevices] = await Promise.all([
+      api.getConfiguration(), api.getEntitlements(), api.getBilling(), api.getActivationStatus(), api.getDevices(),
+    ]);
+    await writeVerifiedEntitlementCache(browserStorage(), nextEntitlements.snapshot, nextEntitlements.offlineGrant, configuration.offlineGrantPublicKey, configuration.offlineGrantKeyId);
+    setEntitlements(nextEntitlements); setBilling(nextBilling.billing); setActivations(nextActivations.activations); setDevices(nextDevices);
+    event.currentTarget.reset();
   }
 
   return (
@@ -106,7 +130,10 @@ export function AccountLicensePanel({ onClose }: AccountLicensePanelProps) {
               <div><dt>Adresse</dt><dd>{me.account.email}</dd></div>
               <div><dt>Configuration</dt><dd>{entitlements.snapshot.configurationVersion}</dd></div>
               <div><dt>Cache signé jusqu’au</dt><dd>{new Date(entitlements.snapshot.offlineValidUntil).toLocaleString("fr-FR")}</dd></div>
+              <div><dt>Abonnement</dt><dd>{billing?.offerDisplayName ?? "Découverte"} — {billing?.status ?? "indisponible"}</dd></div>
+              {billing?.currentPeriodEndsAt && <div><dt>Fin de période</dt><dd>{new Date(billing.currentPeriodEndsAt).toLocaleDateString("fr-FR")}</dd></div>}
             </dl>
+            <section className="account-license-section"><h3>Clé d’activation</h3><form className="account-auth-form" onSubmit={(event) => void run(() => redeemActivationKey(event), "Clé activée et droits actualisés.")}><label>Clé Scénario<input name="activationKey" autoComplete="off" spellCheck={false} required /></label><button type="submit" disabled={busy}>Activer cette clé</button></form>{activations.length > 0 && <ul>{activations.map((activation) => <li key={activation.id}>•••• {activation.keySuffix} — {activation.status}</li>)}</ul>}</section>
             <section className="account-license-section"><h3>Droits reçus</h3><ul>{entitlements.snapshot.entitlements.map((right) => <li key={right.code}>{right.code} — {right.enabled ? "actif" : "inactif"}</li>)}</ul></section>
             <section className="account-license-section"><h3>Appareils</h3>{devices.length ? <ul>{devices.map((device) => <li key={device.id}>{device.label ?? "Sans nom"} — {device.status}</li>)}</ul> : <p>Aucun appareil actif.</p>}<button type="button" disabled={busy} onClick={() => void run(activateCurrentDevice, "Appareil activé.")}>Activer cet appareil</button></section>
             <footer><button type="button" disabled={busy} onClick={() => void run(signOut, "Session fermée.")}>Se déconnecter</button></footer>
