@@ -107,6 +107,7 @@ import {
   type ScenarioTranslationSegment,
 } from "./document/aiConfig";
 import { AccountLicensePanel } from "./commercial/AccountLicensePanel";
+import type { ScenarioEditorBridge } from "./commercial/collaborationClient";
 import { cloudSyncQueue } from "./commercial/runtime";
 import "./App.css";
 
@@ -430,6 +431,7 @@ function App() {
   const commentsRef = useRef(comments);
   const commentInput = useRef<HTMLTextAreaElement | null>(null);
   const appShellRef = useRef<HTMLDivElement | null>(null);
+  const collaborationListeners = useRef(new Set<(document: JSONContent) => void>());
 
   useEffect(() => {
     if (!pdfImportOpen) return;
@@ -648,6 +650,10 @@ function App() {
     onUpdate: ({ editor: activeEditor, transaction }) => {
       if (transaction.getMeta("scenario-block-ids") !== true) {
         markDocumentChanged();
+        if (!isReplacingDocument.current) {
+          const snapshot = activeEditor.getJSON();
+          for (const listener of collaborationListeners.current) listener(snapshot);
+        }
       }
       requestAnimationFrame(() => {
         if (!activeEditor.isDestroyed) {
@@ -2816,6 +2822,63 @@ function App() {
       {accountPanelOpen && (
         <AccountLicensePanel
           onClose={() => setAccountPanelOpen(false)}
+          collaborationEditor={{
+            read: () => editor?.getJSON() ?? initialContent,
+            applyRemote: (mutation) => {
+              if (!editor || editor.isDestroyed) return;
+              isReplacingDocument.current = true;
+              try {
+                let transaction = editor.state.tr;
+                let currentPosition = -1;
+                let currentSize = 0;
+                transaction.doc.forEach((node, offset) => {
+                  if (node.attrs.blockId === mutation.blockId) {
+                    currentPosition = offset;
+                    currentSize = node.nodeSize;
+                  }
+                });
+                if (mutation.type === "block.delete") {
+                  if (currentPosition >= 0) {
+                    transaction = transaction.delete(currentPosition, currentPosition + currentSize);
+                  }
+                } else {
+                  const remoteNode = editor.schema.nodeFromJSON(mutation.block);
+                  if (currentPosition >= 0) {
+                    transaction = transaction.replaceWith(
+                      currentPosition,
+                      currentPosition + currentSize,
+                      remoteNode,
+                    );
+                  } else {
+                    let insertionPosition = 0;
+                    if (mutation.afterBlockId) {
+                      transaction.doc.forEach((node, offset) => {
+                        if (node.attrs.blockId === mutation.afterBlockId) {
+                          insertionPosition = offset + node.nodeSize;
+                        }
+                      });
+                    }
+                    transaction = transaction.insert(insertionPosition, remoteNode);
+                  }
+                }
+                transaction.setMeta("scenario-collaboration-remote", true);
+                editor.view.dispatch(transaction);
+                ensureScenarioBlockIds(editor);
+                setDocumentState((previous) => ({
+                  ...previous,
+                  isDirty: true,
+                  status: "Modification distante reçue — enregistrement local conseillé",
+                }));
+              } finally {
+                isReplacingDocument.current = false;
+              }
+            },
+            subscribe: (listener) => {
+              collaborationListeners.current.add(listener);
+              return () => collaborationListeners.current.delete(listener);
+            },
+            setReadOnly: (value) => editor?.setEditable(!value),
+          } satisfies ScenarioEditorBridge}
         />
       )}
 

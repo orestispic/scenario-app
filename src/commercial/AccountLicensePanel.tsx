@@ -17,13 +17,15 @@ import {
   authenticatedOperations,
 } from "./runtime";
 import { StudioSection } from "./StudioSection";
+import type { ScenarioEditorBridge } from "./collaborationClient";
 
 interface AccountLicensePanelProps {
   onClose(): void;
+  collaborationEditor?: ScenarioEditorBridge;
 }
 type AuthScreen = "signin" | "signup" | "recover";
 
-export function AccountLicensePanel({ onClose }: AccountLicensePanelProps) {
+export function AccountLicensePanel({ onClose, collaborationEditor }: AccountLicensePanelProps) {
   const [screen, setScreen] = useState<AuthScreen>("signin");
   const [session, setSession] = useState(false);
   const [me, setMe] = useState<MeResponse | null>(null);
@@ -343,7 +345,13 @@ export function AccountLicensePanel({ onClose }: AccountLicensePanelProps) {
                 Activer cet appareil
               </button>
             </section>
-            {!offline && <StudioSection apiFactory={accountApi} currentProfileId={me.account.id} />}
+            {!offline && (
+              <StudioSection
+                apiFactory={accountApi}
+                currentProfileId={me.account.id}
+                editorBridge={collaborationEditor}
+              />
+            )}
             <footer>
               <button
                 type="button"

@@ -1,5 +1,10 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import type { AuthenticatedCommercialApi } from "./authenticatedApi";
+import {
+  StudioCollaborationClient,
+  type CollaborationViewState,
+  type ScenarioEditorBridge,
+} from "./collaborationClient";
 import type {
   StudioDetailResponse,
   StudioInvitationView,
@@ -10,9 +15,11 @@ import type {
 export function StudioSection({
   apiFactory,
   currentProfileId,
+  editorBridge,
 }: {
   apiFactory: () => AuthenticatedCommercialApi;
   currentProfileId: string;
+  editorBridge?: ScenarioEditorBridge;
 }) {
   const [api] = useState(() => apiFactory());
   const [studios, setStudios] = useState<StudioSpace[]>([]);
@@ -21,6 +28,8 @@ export function StudioSection({
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
+  const [collaboration, setCollaboration] = useState<CollaborationViewState | null>(null);
+  const collaborationClient = useRef<StudioCollaborationClient | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -39,8 +48,53 @@ export function StudioSection({
       });
     return () => {
       active = false;
+      void collaborationClient.current?.disconnect();
+      collaborationClient.current = null;
     };
   }, [api]);
+
+  async function connectEditor() {
+    if (!detail || !editorBridge) return;
+    setBusy(true);
+    setMessage("");
+    try {
+      await collaborationClient.current?.disconnect();
+      const versions = await api.listCloudVersions(detail.studio.scenarioId);
+      const baseVersionId = versions.versions.reduce(
+        (latest, candidate) =>
+          !latest || candidate.versionNumber > latest.versionNumber ? candidate : latest,
+        versions.versions[0],
+      )?.id;
+      if (!baseVersionId) throw new Error("Aucune version cloud de base n’est disponible.");
+      const client = new StudioCollaborationClient(
+        api,
+        detail.studio.id,
+        detail.studio.scenarioId,
+        baseVersionId,
+        currentProfileId,
+        editorBridge,
+      );
+      collaborationClient.current = client;
+      client.subscribe(setCollaboration);
+      await client.connect();
+      setMessage("Éditeur relié au canal Studio.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Canal Studio indisponible.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function downloadRecoveryCopy() {
+    const copy = collaborationClient.current?.recoveryCopy();
+    if (!copy) return;
+    const url = URL.createObjectURL(new Blob([JSON.stringify(copy, null, 2)], { type: "application/json" }));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `scenario-collaboration-recovery-${copy.scenarioId}.json`;
+    link.click();
+    URL.revokeObjectURL(url);
+  }
 
   async function refresh(selectedId = detail?.studio.id) {
     const list = await api.listStudios();
@@ -177,6 +231,30 @@ export function StudioSection({
             Rôle courant : {detail.studio.role}. Les changements sont toujours autorisés par le
             serveur.
           </p>
+          {editorBridge && (
+            <div className="studio-collaboration-status" aria-live="polite">
+              <button type="button" disabled={busy || collaboration?.status === "online"} onClick={() => void connectEditor()}>
+                {collaboration?.status === "reconnecting" ? "Reconnexion…" : "Relier l’éditeur en temps réel"}
+              </button>
+              {collaboration && (
+                <p>
+                  Connexion : {collaboration.status} · membres présents : {collaboration.presence.length} · retard : {collaboration.syncLag} événement(s)
+                </p>
+              )}
+              {collaboration?.status === "read_only" && <p>Accès révoqué : l’éditeur distant est en lecture seule. Le fichier local reste intact.</p>}
+              {collaboration?.conflict && (
+                <div role="alert">
+                  <p>Conflit explicite : {collaboration.conflict.reason}. Aucune version n’a été écrasée silencieusement.</p>
+                  <button type="button" onClick={downloadRecoveryCopy}>Télécharger une copie locale de récupération</button>
+                </div>
+              )}
+              {collaboration?.presence.length ? (
+                <ul aria-label="Membres présents">
+                  {collaboration.presence.map((member) => <li key={member.profileId}>{member.displayName} — {member.role}</li>)}
+                </ul>
+              ) : null}
+            </div>
+          )}
           <ul>
             {detail.members.map((member) => (
               <li key={member.profileId}>

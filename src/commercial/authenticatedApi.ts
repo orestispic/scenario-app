@@ -47,6 +47,21 @@ import {
   parseCloudSyncResponse,
   parseCloudVersionListResponse,
 } from "./contractsV6";
+import type {
+  CollaborationConnectionResponse,
+  CollaborationOperationResponse,
+  CollaborationPollResponse,
+  CollaborationSnapshotResponse,
+  CollaborationTicketResponse,
+  CollaborativeOperationRequest,
+} from "./contractsV8";
+import {
+  parseCollaborationConnectionResponse,
+  parseCollaborationOperationResponse,
+  parseCollaborationPollResponse,
+  parseCollaborationSnapshotResponse,
+  parseCollaborationTicketResponse,
+} from "./contractsV8";
 
 export class CommercialHttpError extends Error {
   constructor(
@@ -128,6 +143,13 @@ export interface AuthenticatedCommercialApi {
     profileId: string,
     idempotencyKey: string,
   ): Promise<StudioMutationResponse>;
+  issueCollaborationTicket(studioId: string): Promise<CollaborationTicketResponse>;
+  connectCollaboration(studioId: string, ticket: string, afterCursor: number): Promise<CollaborationConnectionResponse>;
+  heartbeatCollaboration(studioId: string, connectionId: string): Promise<{ cursor: number; presence: CollaborationConnectionResponse["presence"] }>;
+  pollCollaboration(studioId: string, connectionId: string, afterCursor: number): Promise<CollaborationPollResponse>;
+  submitCollaborationOperation(studioId: string, connectionId: string, operation: CollaborativeOperationRequest): Promise<CollaborationOperationResponse>;
+  compactCollaboration(studioId: string, connectionId: string, parentVersionId: string): Promise<CollaborationSnapshotResponse>;
+  disconnectCollaboration(studioId: string, connectionId: string): Promise<void>;
   listStudioEvents(studioId: string, after: number): Promise<StudioEventsResponse>;
 }
 
@@ -419,5 +441,44 @@ export function createAuthenticatedCommercialApi(options: {
           headers: cloudHeaders(),
         }),
       ),
+    issueCollaborationTicket: async (studioId) =>
+      parseCollaborationTicketResponse(
+        await request<unknown>(`/v7/studios/${studioId}/realtime/tickets`, {
+          method: "POST", headers: cloudHeaders(crypto.randomUUID()), body: "{}",
+        }),
+      ),
+    connectCollaboration: async (studioId, ticket, afterCursor) =>
+      parseCollaborationConnectionResponse(
+        await request<unknown>(`/v7/studios/${studioId}/realtime/connect`, {
+          method: "POST", headers: cloudHeaders(crypto.randomUUID()), body: JSON.stringify({ ticket, afterCursor }),
+        }),
+      ),
+    heartbeatCollaboration: (studioId, connectionId) =>
+      request(`/v7/studios/${studioId}/realtime/heartbeat`, {
+        method: "POST", headers: cloudHeaders(crypto.randomUUID()), body: JSON.stringify({ connectionId }),
+      }),
+    pollCollaboration: async (studioId, connectionId, afterCursor) =>
+      parseCollaborationPollResponse(
+        await request<unknown>(`/v7/studios/${studioId}/realtime/poll`, {
+          method: "POST", headers: cloudHeaders(crypto.randomUUID()), body: JSON.stringify({ connectionId, afterCursor }),
+        }),
+      ),
+    submitCollaborationOperation: async (studioId, connectionId, operation) =>
+      parseCollaborationOperationResponse(
+        await request<unknown>(`/v7/studios/${studioId}/realtime/operations`, {
+          method: "POST", headers: cloudHeaders(operation.operationId), body: JSON.stringify({ connectionId, operation }),
+        }),
+      ),
+    compactCollaboration: async (studioId, connectionId, parentVersionId) =>
+      parseCollaborationSnapshotResponse(
+        await request<unknown>(`/v7/studios/${studioId}/realtime/compact`, {
+          method: "POST", headers: cloudHeaders(crypto.randomUUID()), body: JSON.stringify({ connectionId, parentVersionId }),
+        }),
+      ),
+    disconnectCollaboration: async (studioId, connectionId) => {
+      await request<unknown>(`/v7/studios/${studioId}/realtime/disconnect`, {
+        method: "POST", headers: cloudHeaders(crypto.randomUUID()), body: JSON.stringify({ connectionId }),
+      });
+    },
   };
 }
