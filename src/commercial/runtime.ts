@@ -3,6 +3,8 @@ import { createLocalTestAuthAdapter, createSupabaseAuthAdapter, type AuthAdapter
 import { createOfflineTrustStore } from "./offlineTrust";
 import { SessionManager } from "./session";
 import { createRuntimeTokenVault } from "./tokenVault";
+import { CloudSyncQueue, createBrowserSyncQueueStorage } from "./syncQueue";
+import { readScenario } from "../document/persistence";
 
 export const localTestMode =
   import.meta.env.DEV && import.meta.env.VITE_SCENARIO_AUTH_MODE === "local-test";
@@ -59,3 +61,9 @@ export function createRuntimeCommercialApi(onUnauthorized?: () => Promise<void>)
     },
   });
 }
+
+export const cloudSyncQueue = new CloudSyncQueue(
+  createBrowserSyncQueueStorage(),
+  () => createRuntimeCommercialApi(async () => sessions.invalidate()),
+  readScenario,
+);

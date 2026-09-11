@@ -15,6 +15,7 @@ import {
   localTestMode,
   offlineTrust,
   sessions,
+  cloudSyncQueue,
 } from "./runtime";
 
 interface AccountLicensePanelProps {
@@ -115,6 +116,8 @@ export function AccountLicensePanel({ onClose }: AccountLicensePanelProps) {
       publicKey: configuration.offlineGrantPublicKey,
       keyId: configuration.offlineGrantKeyId,
     });
+    await cloudSyncQueue.bindAccount(nextMe.account.id);
+    void cloudSyncQueue.process();
     setOffline(false);
     setSession(true);
     setMe(nextMe);
@@ -186,6 +189,7 @@ export function AccountLicensePanel({ onClose }: AccountLicensePanelProps) {
       setBilling(null);
       setActivations([]);
       await offlineTrust.clear();
+      await cloudSyncQueue.pauseAndForgetAccount();
     }
   }
 

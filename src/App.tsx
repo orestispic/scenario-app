@@ -107,6 +107,7 @@ import {
   type ScenarioTranslationSegment,
 } from "./document/aiConfig";
 import { AccountLicensePanel } from "./commercial/AccountLicensePanel";
+import { cloudSyncQueue } from "./commercial/runtime";
 import "./App.css";
 
 const UNTITLED_DOCUMENT = "Sans titre";
@@ -479,6 +480,13 @@ function App() {
     void readRecentScenarios().then(setRecentScenarios).catch(() => {
       // Les projets récents sont une aide de navigation, pas une dépendance au démarrage.
     });
+  }, []);
+
+  useEffect(() => {
+    const resumeCloudQueue = () => { void cloudSyncQueue.process(); };
+    resumeCloudQueue();
+    window.addEventListener("online", resumeCloudQueue);
+    return () => window.removeEventListener("online", resumeCloudQueue);
   }, []);
 
   const refreshPagination = useCallback((editor: Editor) => {
@@ -1022,9 +1030,9 @@ function App() {
   }, [documentState.isDirty]);
 
   const saveDocument = useCallback(
-    async (saveAs = false) => {
+    async (saveAs = false): Promise<string | null> => {
       if (!editor) {
-        return;
+        return null;
       }
 
       let path = documentState.filePath;
@@ -1032,7 +1040,7 @@ function App() {
         path = await chooseScenarioToSave(documentState.title);
       }
       if (!path) {
-        return;
+        return null;
       }
 
       try {
@@ -1055,8 +1063,10 @@ function App() {
             ? "Enregistré"
             : "Enregistré (sauvegarde de secours indisponible)",
         });
+        return path;
       } catch (error) {
         await showError(error);
+        return null;
       }
     },
     [
@@ -1069,6 +1079,29 @@ function App() {
       showError,
     ],
   );
+
+  const syncDocument = useCallback(async () => {
+    try {
+      const path = await saveDocument();
+      if (!path) return;
+      setDocumentState((previous) => ({ ...previous, status: "Synchronisation cloud…" }));
+      const queued = await cloudSyncQueue.enqueue(path, getFileTitle(path));
+      await cloudSyncQueue.process();
+      const result = (await cloudSyncQueue.list()).find((entry) => entry.id === queued.id);
+      setDocumentState((previous) => ({
+        ...previous,
+        status: result?.state === "synced"
+          ? "Synchronisé dans le cloud"
+          : result?.state === "conflict"
+            ? "Conflit cloud à résoudre"
+            : result?.state === "pending"
+              ? "Synchronisation en attente réseau"
+              : "Synchronisation cloud refusée",
+      }));
+    } catch (error) {
+      await showError(error);
+    }
+  }, [saveDocument, showError]);
 
   const rememberCustomPdfLanguage = useCallback((value: string): string => {
     const language = normalizePdfLanguage(value);
@@ -2200,11 +2233,14 @@ function App() {
                   Ouvrir… <kbd>Ctrl+O</kbd>
                 </button>
                 <hr />
-                <button type="button" role="menuitem" onClick={() => runFileAction(() => saveDocument())}>
+                <button type="button" role="menuitem" onClick={() => runFileAction(async () => { await saveDocument(); })}>
                   Enregistrer <kbd>Ctrl+S</kbd>
                 </button>
-                <button type="button" role="menuitem" onClick={() => runFileAction(() => saveDocument(true))}>
+                <button type="button" role="menuitem" onClick={() => runFileAction(async () => { await saveDocument(true); })}>
                   Enregistrer sous… <kbd>Ctrl+Maj+S</kbd>
+                </button>
+                <button type="button" role="menuitem" onClick={() => runFileAction(syncDocument)}>
+                  Synchroniser dans le cloud…
                 </button>
                 <hr />
                 <button type="button" role="menuitem" onClick={openPdfExport}>

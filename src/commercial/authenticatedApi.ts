@@ -22,6 +22,18 @@ import type {
   AiReconcileResponse,
 } from "./contractsV5";
 import { parseAiExecutionResponse, parseAiReconcileResponse } from "./contractsV5";
+import type {
+  CloudScenarioListResponse,
+  CloudSyncRequest,
+  CloudSyncResponse,
+  CloudVersionListResponse,
+  TemporaryObjectGrant,
+} from "./contractsV6";
+import {
+  parseCloudScenarioListResponse,
+  parseCloudSyncResponse,
+  parseCloudVersionListResponse,
+} from "./contractsV6";
 
 export class CommercialHttpError extends Error {
   constructor(
@@ -29,6 +41,7 @@ export class CommercialHttpError extends Error {
     readonly code = "commercial_api_error",
     message = `API Scénario indisponible (${status}).`,
     readonly requestId: string | null = null,
+    readonly details: Record<string, unknown> | null = null,
   ) {
     super(message);
     this.name = "CommercialHttpError";
@@ -61,6 +74,16 @@ export interface AuthenticatedCommercialApi {
   runAiAction(input: AiActionRequest): Promise<AiExecutionResponse<AiActionResult>>;
   runAiPdfImport(input: AiPdfImportRequest): Promise<AiExecutionResponse<AiPdfImportResult>>;
   reconcileAi(idempotencyKey: string): Promise<AiReconcileResponse>;
+  listCloudScenarios(): Promise<CloudScenarioListResponse>;
+  listCloudVersions(scenarioId: string): Promise<CloudVersionListResponse>;
+  syncCloudScenario(input: CloudSyncRequest, idempotencyKey: string): Promise<CloudSyncResponse>;
+  restoreCloudVersion(
+    scenarioId: string,
+    versionId: string,
+    idempotencyKey: string,
+  ): Promise<CloudSyncResponse>;
+  deleteCloudScenario(scenarioId: string, idempotencyKey: string): Promise<void>;
+  getCloudDownload(scenarioId: string, versionId: string): Promise<TemporaryObjectGrant>;
 }
 
 const pendingAiKeys = new Map<string, string>();
@@ -94,7 +117,8 @@ export function createAuthenticatedCommercialApi(options: {
     });
     if (response.status === 401) await options.onUnauthorized?.();
     if (!response.ok) {
-      let error: { code?: unknown; message?: unknown; request_id?: unknown } = {};
+      let error: { code?: unknown; message?: unknown; request_id?: unknown; conflict?: unknown } =
+        {};
       try {
         error = (await response.json()) as typeof error;
       } catch {
@@ -109,6 +133,7 @@ export function createAuthenticatedCommercialApi(options: {
         typeof error.request_id === "string"
           ? error.request_id
           : response.headers.get("x-request-id"),
+        error.conflict && typeof error.conflict === "object" ? { conflict: error.conflict } : null,
       );
     }
     return (response.status === 204 ? undefined : response.json()) as Promise<T>;
@@ -126,6 +151,24 @@ export function createAuthenticatedCommercialApi(options: {
         : options.clientContext.platform;
     return {
       "Idempotency-Key": idempotencyKey,
+      "X-Scenario-Client-Version": options.clientContext.clientVersion,
+      "X-Scenario-Device-Fingerprint": fingerprint,
+      "X-Scenario-Platform": platform,
+    };
+  }
+
+  function cloudHeaders(idempotencyKey?: string): HeadersInit {
+    if (!options.clientContext) throw new Error("Configuration cloud cliente indisponible.");
+    const fingerprint =
+      typeof options.clientContext.deviceFingerprint === "function"
+        ? options.clientContext.deviceFingerprint()
+        : options.clientContext.deviceFingerprint;
+    const platform =
+      typeof options.clientContext.platform === "function"
+        ? options.clientContext.platform()
+        : options.clientContext.platform;
+    return {
+      ...(idempotencyKey ? { "Idempotency-Key": idempotencyKey } : {}),
       "X-Scenario-Client-Version": options.clientContext.clientVersion,
       "X-Scenario-Device-Fingerprint": fingerprint,
       "X-Scenario-Platform": platform,
@@ -223,5 +266,43 @@ export function createAuthenticatedCommercialApi(options: {
           body: JSON.stringify({ idempotencyKey }),
         }),
       ),
+    listCloudScenarios: async () =>
+      parseCloudScenarioListResponse(
+        await request<unknown>("/v5/scenarios", { headers: cloudHeaders() }),
+      ),
+    listCloudVersions: async (scenarioId) =>
+      parseCloudVersionListResponse(
+        await request<unknown>(`/v5/scenarios/${scenarioId}/versions`, { headers: cloudHeaders() }),
+      ),
+    syncCloudScenario: async (input, idempotencyKey) =>
+      parseCloudSyncResponse(
+        await request<unknown>("/v5/scenarios/sync", {
+          method: "POST",
+          headers: cloudHeaders(idempotencyKey),
+          body: JSON.stringify(input),
+        }),
+      ),
+    restoreCloudVersion: async (scenarioId, versionId, idempotencyKey) =>
+      parseCloudSyncResponse(
+        await request<unknown>(`/v5/scenarios/${scenarioId}/restore`, {
+          method: "POST",
+          headers: cloudHeaders(idempotencyKey),
+          body: JSON.stringify({ versionId }),
+        }),
+      ),
+    deleteCloudScenario: async (scenarioId, idempotencyKey) => {
+      await request<unknown>(`/v5/scenarios/${scenarioId}/delete`, {
+        method: "POST",
+        headers: cloudHeaders(idempotencyKey),
+        body: "{}",
+      });
+    },
+    getCloudDownload: async (scenarioId, versionId) => {
+      const response = await request<{ download: TemporaryObjectGrant }>(
+        `/v5/scenarios/${scenarioId}/versions/${versionId}/download`,
+        { headers: cloudHeaders() },
+      );
+      return response.download;
+    },
   };
 }
