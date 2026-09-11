@@ -1,3 +1,4 @@
+mod session_vault;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{
@@ -795,6 +796,12 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
+            session_vault::read_refresh_token,
+            session_vault::write_refresh_token,
+            session_vault::clear_refresh_token,
+            session_vault::read_offline_trust,
+            session_vault::write_offline_trust,
+            session_vault::clear_offline_trust,
             launched_scenario_path,
             read_scenario,
             read_pdf,

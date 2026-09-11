@@ -7,9 +7,26 @@ export interface AuthAdapter {
   requestPasswordReset(email: string): Promise<void>;
 }
 
-type SupabaseSessionResponse = { access_token?: string; refresh_token?: string; expires_at?: number };
+type SupabaseSessionResponse = {
+  access_token?: string;
+  refresh_token?: string;
+  expires_at?: number;
+};
 
-export function createSupabaseAuthAdapter(options: { supabaseUrl: string; anonKey: string; fetcher?: typeof fetch }): AuthAdapter {
+export class AuthSessionError extends Error {
+  constructor(
+    message: string,
+    readonly terminal: boolean,
+  ) {
+    super(message);
+  }
+}
+
+export function createSupabaseAuthAdapter(options: {
+  supabaseUrl: string;
+  anonKey: string;
+  fetcher?: typeof fetch;
+}): AuthAdapter {
   const fetcher = options.fetcher ?? fetch;
   const baseUrl = options.supabaseUrl.replace(/\/$/, "");
   async function post(path: string, body: unknown): Promise<Response> {
@@ -18,21 +35,38 @@ export function createSupabaseAuthAdapter(options: { supabaseUrl: string; anonKe
       headers: { apikey: options.anonKey, "Content-Type": "application/json" },
       body: JSON.stringify(body),
     });
-    if (!response.ok) throw new Error("Le service de compte a refusé la demande.");
+    if (!response.ok)
+      throw new AuthSessionError(
+        "Le service de compte a refusé la demande.",
+        [400, 401, 403].includes(response.status),
+      );
     return response;
   }
   async function readSession(response: Response): Promise<SessionTokens> {
-    const result = await response.json() as SupabaseSessionResponse;
-    if (!result.access_token || !result.refresh_token || !result.expires_at) throw new Error("Session incomplète.");
-    return { accessToken: result.access_token, refreshToken: result.refresh_token, expiresAt: new Date(result.expires_at * 1_000).toISOString() };
+    const result = (await response.json()) as SupabaseSessionResponse;
+    if (!result.access_token || !result.refresh_token || !result.expires_at)
+      throw new Error("Session incomplète.");
+    return {
+      accessToken: result.access_token,
+      refreshToken: result.refresh_token,
+      expiresAt: new Date(result.expires_at * 1_000).toISOString(),
+    };
   }
   return {
-    async signUp(email, password, displayName) { await post("/signup", { email, password, data: { display_name: displayName } }); },
+    async signUp(email, password, displayName) {
+      await post("/signup", { email, password, data: { display_name: displayName } });
+    },
     async signIn(email, password) {
       return readSession(await post("/token?grant_type=password", { email, password }));
     },
-    async refreshSession(refreshToken) { return readSession(await post("/token?grant_type=refresh_token", { refresh_token: refreshToken })); },
-    async requestPasswordReset(email) { await post("/recover", { email }); },
+    async refreshSession(refreshToken) {
+      return readSession(
+        await post("/token?grant_type=refresh_token", { refresh_token: refreshToken }),
+      );
+    },
+    async requestPasswordReset(email) {
+      await post("/recover", { email });
+    },
   };
 }
 
@@ -43,10 +77,28 @@ export interface LocalTestAuthAdapter extends AuthAdapter {
 
 export function createLocalTestAuthAdapter(): LocalTestAuthAdapter {
   return {
-    signUp: async () => { throw new Error("Inscription locale désactivée."); },
-    signIn: async () => { throw new Error("Choisissez un profil local."); },
-    refreshSession: async () => { throw new Error("Session locale non renouvelable."); },
-    requestPasswordReset: async () => { throw new Error("Récupération locale désactivée."); },
-    signInAs: async (profile) => ({ accessToken: `local-test:${profile}`, refreshToken: "", expiresAt: new Date(Date.now() + 3_600_000).toISOString() }),
+    signUp: async () => {
+      throw new Error("Inscription locale désactivée.");
+    },
+    signIn: async () => {
+      throw new Error("Choisissez un profil local.");
+    },
+    refreshSession: async (token) => {
+      if (!/^local-test:(discovery|author|studio)$/.test(token))
+        throw new AuthSessionError("Session locale invalide.", true);
+      return {
+        accessToken: token,
+        refreshToken: token,
+        expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+      };
+    },
+    requestPasswordReset: async () => {
+      throw new Error("Récupération locale désactivée.");
+    },
+    signInAs: async (profile) => ({
+      accessToken: `local-test:${profile}`,
+      refreshToken: `local-test:${profile}`,
+      expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+    }),
   };
 }
