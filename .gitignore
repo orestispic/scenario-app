@@ -27,3 +27,4 @@ src-tauri/target
 # Local commercial configuration (examples are versioned)
 .env
 .env.local
+.env.phase9.local
