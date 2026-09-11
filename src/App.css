@@ -1125,6 +1125,10 @@ textarea {
   display: grid;
   gap: 16px;
   width: min(560px, 100%);
+  max-height: calc(100vh - 68px);
+  max-height: calc(100dvh - 68px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 20px;
   color: #20272c;
   background: #fff;
