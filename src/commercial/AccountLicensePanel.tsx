@@ -1,61 +1,26 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { CommercialHttpError, createAuthenticatedCommercialApi } from "./authenticatedApi";
+import { CommercialHttpError } from "./authenticatedApi";
 import {
-  createLocalTestAuthAdapter,
-  createSupabaseAuthAdapter,
-  type AuthAdapter,
   type LocalTestAuthAdapter,
 } from "./auth";
 import type { DeviceView, EntitlementsResponse, MeResponse, SessionTokens } from "./contractsV2";
 import type { ActivationRedemptionView, BillingState } from "./contractsV3";
 import { BOUND_CACHE_KEY, readBoundCache, writeBoundCache } from "./boundEntitlementCache";
-import { SessionManager } from "./session";
-import { createRuntimeTokenVault } from "./tokenVault";
-import { createOfflineTrustStore } from "./offlineTrust";
+import {
+  auth,
+  browserStorage,
+  createRuntimeCommercialApi,
+  getClientPlatform,
+  getDeviceFingerprint,
+  localTestMode,
+  offlineTrust,
+  sessions,
+} from "./runtime";
 
 interface AccountLicensePanelProps {
   onClose(): void;
 }
 type AuthScreen = "signin" | "signup" | "recover";
-
-const localTestMode =
-  import.meta.env.DEV && import.meta.env.VITE_SCENARIO_AUTH_MODE === "local-test";
-const apiBaseUrl = import.meta.env.VITE_SCENARIO_API_BASE_URL ?? "http://127.0.0.1:8787";
-
-function browserStorage() {
-  return {
-    getItem: (key: string) => window.localStorage.getItem(key),
-    setItem: (key: string, value: string) => window.localStorage.setItem(key, value),
-  };
-}
-
-function getDeviceFingerprint(): string {
-  const key = "scenario-local-device-fingerprint";
-  const existing = window.localStorage.getItem(key);
-  if (existing) return existing;
-  const fingerprint = crypto.randomUUID() + crypto.randomUUID();
-  window.localStorage.setItem(key, fingerprint);
-  return fingerprint;
-}
-
-function createRuntimeAuthAdapter(): AuthAdapter {
-  if (localTestMode) return createLocalTestAuthAdapter();
-  return createSupabaseAuthAdapter({
-    supabaseUrl: import.meta.env.VITE_SUPABASE_URL ?? "https://project-ref.supabase.co",
-    anonKey: import.meta.env.VITE_SUPABASE_ANON_KEY ?? "not-configured",
-  });
-}
-
-const auth = createRuntimeAuthAdapter();
-const offlineTrust = createOfflineTrustStore(
-  `${apiBaseUrl}|${import.meta.env.VITE_SUPABASE_URL ?? "local"}`,
-);
-const sessions = new SessionManager(
-  auth,
-  createRuntimeTokenVault(`${apiBaseUrl}|${import.meta.env.VITE_SUPABASE_URL ?? "local"}`),
-  async (accessToken) =>
-    createAuthenticatedCommercialApi({ baseUrl: apiBaseUrl, accessToken }).logout(),
-);
 
 export function AccountLicensePanel({ onClose }: AccountLicensePanelProps) {
   const [screen, setScreen] = useState<AuthScreen>("signin");
@@ -70,14 +35,10 @@ export function AccountLicensePanel({ onClose }: AccountLicensePanelProps) {
   const [message, setMessage] = useState("");
 
   function accountApi() {
-    return createAuthenticatedCommercialApi({
-      baseUrl: apiBaseUrl,
-      accessToken: () => sessions.getAccessToken(),
-      onUnauthorized: async () => {
+    return createRuntimeCommercialApi(async () => {
         setSession(false);
         await sessions.invalidate();
         await offlineTrust.clear();
-      },
     });
   }
 
@@ -206,7 +167,7 @@ export function AccountLicensePanel({ onClose }: AccountLicensePanelProps) {
     await api.activateDevice({
       fingerprint: getDeviceFingerprint(),
       label: "Cet appareil",
-      platform: /mac/i.test(navigator.userAgent) ? "macos" : "windows",
+      platform: getClientPlatform(),
     });
     setDevices(await api.getDevices());
   }
@@ -238,7 +199,7 @@ export function AccountLicensePanel({ onClose }: AccountLicensePanelProps) {
       key: String(data.get("activationKey") ?? ""),
       fingerprint: getDeviceFingerprint(),
       label: "Cet appareil",
-      platform: /mac/i.test(navigator.userAgent) ? "macos" : "windows",
+      platform: getClientPlatform(),
     });
     const [configuration, nextEntitlements, nextBilling, nextActivations, nextDevices] =
       await Promise.all([

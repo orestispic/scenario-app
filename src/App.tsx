@@ -92,11 +92,12 @@ import {
   type CoverPageData,
   type ScenarioFile,
 } from "./document/scenarioFile";
-import { extractPdfText, parseAiScenarioResponse, PDF_MANUAL_PROMPT, PDF_TO_SCENARIO_PROMPT } from "./document/pdfImport";
+import { extractPdfText, parseAiScenarioResponse } from "./document/pdfImport";
 import {
   createDefaultAiConfig,
   buildAiPromptInstruction,
   readAiConfig,
+  importPdfScenario,
   RESPONSE_ONLY_INSTRUCTION,
   runAiPrompt,
   translateScenario,
@@ -378,13 +379,9 @@ function App() {
     createDefaultAiConfig(),
   );
   const [aiSettingsOpen, setAiSettingsOpen] = useState(false);
-  const [aiHelpOpen, setAiHelpOpen] = useState(false);
-  const [aiMissingKeyNoticeOpen, setAiMissingKeyNoticeOpen] = useState(false);
   const [selectedAiPromptId, setSelectedAiPromptId] = useState<string | null>(null);
   const [helpOpen, setHelpOpen] = useState(false);
   const [aiDraft, setAiDraft] = useState(() => ({
-    apiKey: "",
-    model: createDefaultAiConfig().model,
     prompts: createDefaultAiConfig().prompts,
   }));
   const [aiTarget, setAiTarget] = useState<AiParagraphTarget | null>(null);
@@ -1367,11 +1364,7 @@ function App() {
     setViewMenuOpen(false);
     setCoverMenuOpen(false);
     setAiSettingsOpen(true);
-    setAiHelpOpen(false);
-    setAiMissingKeyNoticeOpen(!aiConfig.hasApiKey);
     setAiDraft({
-      apiKey: "",
-      model: aiConfig.model,
       prompts: aiConfig.prompts,
     });
     setSelectedAiPromptId(aiConfig.prompts[0]?.id ?? null);
@@ -1517,12 +1510,9 @@ function App() {
   const saveAiSettings = useCallback(async () => {
     try {
       const savedConfig = await writeAiConfig({
-        model: aiDraft.model,
         prompts: aiDraft.prompts,
-        apiKey: aiDraft.apiKey.trim() || undefined,
       });
       setAiConfig(savedConfig);
-      setAiMissingKeyNoticeOpen(false);
       setAiSettingsOpen(false);
       setDocumentState((previous) => ({
         ...previous,
@@ -1710,7 +1700,7 @@ function App() {
 
     try {
       await writeAutosave(serializeRecoveryFile(blankDocument, null));
-    } catch (error) {
+    } catch {
       setDocumentState((previous) => ({ ...previous, status: "Autosave indisponible" }));
     }
   }, [askToDiscardChanges, createDocument, editor, refreshEditorState]);
@@ -1761,7 +1751,7 @@ function App() {
     setPdfImportError("");
     try {
       const rawText = await extractPdfText(pdfImportPath);
-      const response = await runAiPrompt(PDF_TO_SCENARIO_PROMPT, rawText);
+      const response = await importPdfScenario(rawText);
       const cleanedResponse = response.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "");
       const firstBrace = cleanedResponse.indexOf("{");
       const lastBrace = cleanedResponse.lastIndexOf("}");
@@ -1842,8 +1832,6 @@ function App() {
       .then((config) => {
         setAiConfig(config);
         setAiDraft({
-          apiKey: "",
-          model: config.model,
           prompts: config.prompts,
         });
       })
@@ -1851,8 +1839,6 @@ function App() {
         const defaultConfig = createDefaultAiConfig();
         setAiConfig(defaultConfig);
         setAiDraft({
-          apiKey: "",
-          model: defaultConfig.model,
           prompts: defaultConfig.prompts,
         });
       });
@@ -2784,12 +2770,8 @@ function App() {
 
             <section>
               <h3>Activer l’IA</h3>
-              <ol>
-                <li>Ouvre la <a href="https://platform.openai.com/settings/organization/billing/overview" target="_blank" rel="noreferrer">facturation API OpenAI</a> et ajoute des crédits.</li>
-                <li>Avant de confirmer, désactive <strong>Auto recharge</strong> : aucun achat ne sera renouvelé automatiquement.</li>
-                <li>Ouvre <a href="https://platform.openai.com/api-keys" target="_blank" rel="noreferrer">API keys</a>, choisis <strong>Create new secret key</strong>, copie la clé puis colle-la dans <strong>IA</strong>.</li>
-              </ol>
-              <p>Les crédits API sont séparés de l’abonnement ChatGPT. Garde ta clé privée : ne l’envoie à personne.</p>
+              <p>Connecte-toi dans <strong>Compte et licence</strong>, puis active cet appareil. Les modèles, droits et quotas sont vérifiés par le serveur avant chaque demande.</p>
+              <p>Aucune clé de fournisseur IA n’est demandée ni conservée par l’application.</p>
             </section>
           </section>
         </div>
@@ -2986,20 +2968,14 @@ function App() {
               <span>ou</span>
               <button type="button" onClick={() => void selectPdfForImport()}>Rechercher dans les fichiers</button>
             </div>
-            {!aiConfig.hasApiKey && (
-              <div className="pdf-import-manual-help">
-                <strong>Aucune clé API configurée</strong>
-                <p>Configure ta clé pour automatiser l’import, ou copie le prompt et utilise-le avec ton PDF dans ChatGPT.</p>
-                <div>
-                  <button type="button" onClick={() => { setPdfImportOpen(false); openAiSettings(); }}>Configurer la clé API</button>
-                  <button type="button" onClick={() => void navigator.clipboard?.writeText(PDF_MANUAL_PROMPT)}>Copier le prompt</button>
-                </div>
-              </div>
-            )}
+            <div className="pdf-import-manual-help">
+              <strong>Compte et appareil requis</strong>
+              <p>L’import passe par l’API Scénario. Le serveur vérifie la session, la version, l’appareil et le quota PDF.</p>
+            </div>
             {pdfImportError && <p className="form-error" role="alert">{pdfImportError}</p>}
             <footer>
               <button type="button" disabled={pdfImportBusy} onClick={() => setPdfImportOpen(false)}>Annuler</button>
-              <button className="primary-button" type="button" disabled={pdfImportBusy || !pdfImportPath || !aiConfig.hasApiKey} onClick={() => void importSelectedPdf()}>
+              <button className="primary-button" type="button" disabled={pdfImportBusy || !pdfImportPath} onClick={() => void importSelectedPdf()}>
                 {pdfImportBusy ? "Conversion IA en cours…" : "Importer"}
               </button>
             </footer>
@@ -3023,11 +2999,7 @@ function App() {
             <header>
               <div>
                 <h2>IA</h2>
-                <p>
-                  {aiConfig.hasApiKey
-                    ? "La clé API est déjà configurée."
-                    : "Ajoute ta clé API OpenAI pour activer les prompts."}
-                </p>
+                <p>Les modèles et l’accès sont gérés par le serveur Scénario.</p>
               </div>
               <button
                 className="panel-close-button"
@@ -3038,57 +3010,6 @@ function App() {
                 ×
               </button>
             </header>
-
-            <label>
-              <span className="ai-key-heading">
-                Clé API OpenAI
-                <button type="button" onClick={() => setAiHelpOpen((isOpen) => !isOpen)}>
-                  Comment l’obtenir ?
-                </button>
-              </span>
-              <input
-                type="password"
-                value={aiDraft.apiKey}
-                placeholder={
-                  aiConfig.hasApiKey
-                    ? "Laisse vide pour garder la clé actuelle"
-                    : "sk-..."
-                }
-                onChange={(event) =>
-                  setAiDraft((previous) => ({
-                    ...previous,
-                    apiKey: event.target.value,
-                  }))
-                }
-              />
-            </label>
-
-            {aiHelpOpen && (
-              <aside className="ai-key-help">
-                <strong>Obtenir une clé API avec un crédit non renouvelable</strong>
-                <ol>
-                  <li>Ouvre <a href="https://platform.openai.com/settings/organization/billing/overview" target="_blank" rel="noreferrer">la facturation API OpenAI</a>.</li>
-                  <li>Ajoute ta carte puis choisis l’achat initial de crédits : le minimum est de 5 $ (OpenAI affiche le montant final).</li>
-                  <li><b>Désactive « Auto recharge »</b> avant de confirmer : aucun crédit ne sera acheté automatiquement.</li>
-                  <li>Ouvre <a href="https://platform.openai.com/api-keys" target="_blank" rel="noreferrer">API keys</a>, clique « Create new secret key », copie-la puis colle-la ici.</li>
-                </ol>
-                <p>Les crédits API sont séparés de ChatGPT, expirent après un an et ne sont pas remboursables.</p>
-              </aside>
-            )}
-
-            <label>
-              Modèle
-              <input
-                type="text"
-                value={aiDraft.model}
-                onChange={(event) =>
-                  setAiDraft((previous) => ({
-                    ...previous,
-                    model: event.target.value,
-                  }))
-                }
-              />
-            </label>
 
             <div className="prompt-editor-heading">
               <div>
@@ -3180,36 +3101,6 @@ function App() {
               <button className="primary-button" type="button" onClick={() => void saveAiSettings()}>
                 Enregistrer
               </button>
-            </footer>
-          </section>
-        </div>
-      )}
-
-      {aiSettingsOpen && aiMissingKeyNoticeOpen && (
-        <div className="modal-backdrop ai-missing-key-backdrop" role="presentation">
-          <section className="ai-missing-key-panel" role="alertdialog" aria-modal="true" aria-label="Clé API manquante">
-            <header>
-              <div>
-                <h2>Clé API manquante</h2>
-                <p>Ajoute une clé API OpenAI pour utiliser les fonctions IA.</p>
-              </div>
-              <button className="panel-close-button" type="button" aria-label="Fermer" onClick={() => setAiMissingKeyNoticeOpen(false)}>×</button>
-            </header>
-            <ol>
-              <li>Ouvre <a href="https://platform.openai.com/settings/organization/billing/overview" target="_blank" rel="noreferrer">la facturation API OpenAI</a> et connecte-toi.</li>
-              <li>Clique sur « Buy credits », puis choisis l’achat initial de crédits : le minimum est de 5 $ (de quoi corriger 7 fois la Bible).</li>
-              <li>Désactive « Auto recharge » avant de confirmer : aucun crédit ne sera acheté automatiquement.</li>
-              <li>Ouvre <a href="https://platform.openai.com/api-keys" target="_blank" rel="noreferrer">API keys</a>, puis clique sur « Create new secret key ».</li>
-              <li>Donne le nom que tu veux à la clé, choisis « Default project » et laisse les permissions sur « All ».</li>
-              <li>Copie la clé et colle-la dans le champ ci-dessous.</li>
-            </ol>
-            <label className="ai-missing-key-field">
-              Clé API OpenAI
-              <input type="password" autoFocus value={aiDraft.apiKey} placeholder="sk-..." onChange={(event) => setAiDraft((previous) => ({ ...previous, apiKey: event.target.value }))} />
-            </label>
-            <footer>
-              <button type="button" onClick={() => setAiMissingKeyNoticeOpen(false)}>Fermer</button>
-              <button className="primary-button" type="button" onClick={() => void saveAiSettings()}>Enregistrer la clé</button>
             </footer>
           </section>
         </div>

@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { createRuntimeCommercialApi } from "../commercial/runtime";
 
 export interface AiPrompt {
   id: string;
@@ -12,21 +13,15 @@ export const RESPONSE_ONLY_INSTRUCTION =
 
 export function buildAiPromptInstruction(prompt: AiPrompt): string {
   const instruction = prompt.instruction.trim();
-  return prompt.responseOnly
-    ? `${instruction}\n\n${RESPONSE_ONLY_INSTRUCTION}`
-    : instruction;
+  return prompt.responseOnly ? `${instruction}\n\n${RESPONSE_ONLY_INSTRUCTION}` : instruction;
 }
 
 export interface AiConfigView {
-  model: string;
   prompts: AiPrompt[];
-  hasApiKey: boolean;
 }
 
 export interface AiConfigDraft {
-  model: string;
   prompts: AiPrompt[];
-  apiKey?: string;
 }
 
 export interface ScenarioTranslationSegment {
@@ -34,8 +29,6 @@ export interface ScenarioTranslationSegment {
   type: string;
   text: string;
 }
-
-export const DEFAULT_AI_MODEL = "gpt-5-nano";
 
 export const DEFAULT_AI_PROMPTS: AiPrompt[] = [
   {
@@ -48,8 +41,7 @@ export const DEFAULT_AI_PROMPTS: AiPrompt[] = [
   {
     id: "translate-en",
     name: "Traduire en anglais",
-    instruction:
-      "Traduis ce texte en anglais en gardant le ton, le sous-texte et l'intention.",
+    instruction: "Traduis ce texte en anglais en gardant le ton, le sous-texte et l'intention.",
     responseOnly: true,
   },
   {
@@ -63,9 +55,7 @@ export const DEFAULT_AI_PROMPTS: AiPrompt[] = [
 
 export function createDefaultAiConfig(): AiConfigView {
   return {
-    model: DEFAULT_AI_MODEL,
     prompts: DEFAULT_AI_PROMPTS,
-    hasApiKey: false,
   };
 }
 
@@ -81,12 +71,33 @@ export async function runAiPrompt(
   promptInstruction: string,
   paragraphText: string,
 ): Promise<string> {
-  return invoke<string>("run_ai_prompt", { promptInstruction, paragraphText });
+  const response = await createRuntimeCommercialApi().runAiAction({
+    kind: "rewrite",
+    instruction: promptInstruction,
+    text: paragraphText,
+  });
+  if (response.result?.kind !== "text") throw new Error("Réponse IA invalide.");
+  return response.result.text;
 }
 
 export async function translateScenario(
   targetLanguage: string,
   segments: ScenarioTranslationSegment[],
 ): Promise<string[]> {
-  return invoke<string[]>("translate_scenario", { targetLanguage, segments });
+  const response = await createRuntimeCommercialApi().runAiAction({
+    kind: "translate",
+    targetLanguage,
+    segments,
+  });
+  if (response.result?.kind !== "translations") throw new Error("Traduction IA invalide.");
+  const values = new Map(response.result.translations.map((item) => [item.index, item.text]));
+  const translated = segments.map((segment) => values.get(segment.index));
+  if (translated.some((value) => !value)) throw new Error("Traduction IA incomplète.");
+  return translated as string[];
+}
+
+export async function importPdfScenario(extractedText: string): Promise<string> {
+  const response = await createRuntimeCommercialApi().runAiPdfImport({ extractedText });
+  if (response.result?.kind !== "scenario_json") throw new Error("Import PDF IA invalide.");
+  return response.result.scenarioJson;
 }
