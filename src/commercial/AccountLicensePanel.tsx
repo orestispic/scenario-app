@@ -1,8 +1,6 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { CommercialHttpError } from "./authenticatedApi";
-import {
-  type LocalTestAuthAdapter,
-} from "./auth";
+import { type LocalTestAuthAdapter } from "./auth";
 import type { DeviceView, EntitlementsResponse, MeResponse, SessionTokens } from "./contractsV2";
 import type { ActivationRedemptionView, BillingState } from "./contractsV3";
 import { BOUND_CACHE_KEY, readBoundCache, writeBoundCache } from "./boundEntitlementCache";
@@ -16,7 +14,9 @@ import {
   offlineTrust,
   sessions,
   cloudSyncQueue,
+  authenticatedOperations,
 } from "./runtime";
+import { StudioSection } from "./StudioSection";
 
 interface AccountLicensePanelProps {
   onClose(): void;
@@ -37,9 +37,9 @@ export function AccountLicensePanel({ onClose }: AccountLicensePanelProps) {
 
   function accountApi() {
     return createRuntimeCommercialApi(async () => {
-        setSession(false);
-        await sessions.invalidate();
-        await offlineTrust.clear();
+      setSession(false);
+      await sessions.invalidate();
+      await offlineTrust.clear();
     });
   }
 
@@ -89,6 +89,7 @@ export function AccountLicensePanel({ onClose }: AccountLicensePanelProps) {
 
   async function loadAuthenticatedAccount(nextSession?: SessionTokens) {
     if (nextSession) {
+      authenticatedOperations.reset();
       await offlineTrust.clear();
       await sessions.accept(nextSession);
     }
@@ -176,6 +177,7 @@ export function AccountLicensePanel({ onClose }: AccountLicensePanelProps) {
   }
 
   async function signOut() {
+    authenticatedOperations.stop();
     try {
       await sessions.logout();
     } finally {
@@ -341,6 +343,7 @@ export function AccountLicensePanel({ onClose }: AccountLicensePanelProps) {
                 Activer cet appareil
               </button>
             </section>
+            {!offline && <StudioSection apiFactory={accountApi} currentProfileId={me.account.id} />}
             <footer>
               <button
                 type="button"

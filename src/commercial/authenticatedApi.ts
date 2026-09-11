@@ -29,6 +29,19 @@ import type {
   CloudVersionListResponse,
   TemporaryObjectGrant,
 } from "./contractsV6";
+import type {
+  StudioDetailResponse,
+  StudioEventsResponse,
+  StudioListResponse,
+  StudioMutationResponse,
+  StudioRole,
+} from "./contractsV7";
+import {
+  parseStudioDetailResponse,
+  parseStudioEventsResponse,
+  parseStudioListResponse,
+  parseStudioMutationResponse,
+} from "./contractsV7";
 import {
   parseCloudScenarioListResponse,
   parseCloudSyncResponse,
@@ -84,6 +97,38 @@ export interface AuthenticatedCommercialApi {
   ): Promise<CloudSyncResponse>;
   deleteCloudScenario(scenarioId: string, idempotencyKey: string): Promise<void>;
   getCloudDownload(scenarioId: string, versionId: string): Promise<TemporaryObjectGrant>;
+  listStudios(): Promise<StudioListResponse>;
+  getStudio(studioId: string): Promise<StudioDetailResponse>;
+  createStudio(
+    scenarioId: string,
+    name: string,
+    idempotencyKey: string,
+  ): Promise<StudioMutationResponse>;
+  inviteStudioMember(
+    studioId: string,
+    email: string,
+    role: Exclude<StudioRole, "owner">,
+    idempotencyKey: string,
+  ): Promise<StudioMutationResponse>;
+  acceptStudioInvitation(token: string, idempotencyKey: string): Promise<StudioMutationResponse>;
+  declineStudioInvitation(token: string, idempotencyKey: string): Promise<StudioMutationResponse>;
+  revokeStudioInvitation(
+    studioId: string,
+    invitationId: string,
+    idempotencyKey: string,
+  ): Promise<StudioMutationResponse>;
+  changeStudioRole(
+    studioId: string,
+    profileId: string,
+    role: StudioRole,
+    idempotencyKey: string,
+  ): Promise<StudioMutationResponse>;
+  removeStudioMember(
+    studioId: string,
+    profileId: string,
+    idempotencyKey: string,
+  ): Promise<StudioMutationResponse>;
+  listStudioEvents(studioId: string, after: number): Promise<StudioEventsResponse>;
 }
 
 const pendingAiKeys = new Map<string, string>();
@@ -93,6 +138,7 @@ export function createAuthenticatedCommercialApi(options: {
   accessToken: string | (() => Promise<string | null>);
   onUnauthorized?: () => Promise<void>;
   fetcher?: typeof fetch;
+  signal?: () => AbortSignal;
   clientContext?: {
     clientVersion: string;
     deviceFingerprint: string | (() => string);
@@ -108,6 +154,7 @@ export function createAuthenticatedCommercialApi(options: {
     if (!accessToken) throw new Error("Reconnectez-vous pour continuer.");
     const response = await fetcher(`${baseUrl}${path}`, {
       ...init,
+      signal: init.signal ?? options.signal?.(),
       headers: {
         Accept: "application/json",
         Authorization: `Bearer ${accessToken}`,
@@ -304,5 +351,73 @@ export function createAuthenticatedCommercialApi(options: {
       );
       return response.download;
     },
+    listStudios: async () =>
+      parseStudioListResponse(await request<unknown>("/v6/studios", { headers: cloudHeaders() })),
+    getStudio: async (studioId) =>
+      parseStudioDetailResponse(
+        await request<unknown>(`/v6/studios/${studioId}`, { headers: cloudHeaders() }),
+      ),
+    createStudio: async (scenarioId, name, idempotencyKey) =>
+      parseStudioMutationResponse(
+        await request<unknown>("/v6/studios", {
+          method: "POST",
+          headers: cloudHeaders(idempotencyKey),
+          body: JSON.stringify({ scenarioId, name }),
+        }),
+      ),
+    inviteStudioMember: async (studioId, email, role, idempotencyKey) =>
+      parseStudioMutationResponse(
+        await request<unknown>(`/v6/studios/${studioId}/invitations`, {
+          method: "POST",
+          headers: cloudHeaders(idempotencyKey),
+          body: JSON.stringify({ email, role }),
+        }),
+      ),
+    acceptStudioInvitation: async (token, idempotencyKey) =>
+      parseStudioMutationResponse(
+        await request<unknown>("/v6/studio-invitations/accept", {
+          method: "POST",
+          headers: cloudHeaders(idempotencyKey),
+          body: JSON.stringify({ token }),
+        }),
+      ),
+    declineStudioInvitation: async (token, idempotencyKey) =>
+      parseStudioMutationResponse(
+        await request<unknown>("/v6/studio-invitations/decline", {
+          method: "POST",
+          headers: cloudHeaders(idempotencyKey),
+          body: JSON.stringify({ token }),
+        }),
+      ),
+    revokeStudioInvitation: async (studioId, invitationId, idempotencyKey) =>
+      parseStudioMutationResponse(
+        await request<unknown>(`/v6/studios/${studioId}/invitations/${invitationId}/revoke`, {
+          method: "POST",
+          headers: cloudHeaders(idempotencyKey),
+          body: "{}",
+        }),
+      ),
+    changeStudioRole: async (studioId, profileId, role, idempotencyKey) =>
+      parseStudioMutationResponse(
+        await request<unknown>(`/v6/studios/${studioId}/members/${profileId}/role`, {
+          method: "POST",
+          headers: cloudHeaders(idempotencyKey),
+          body: JSON.stringify({ role }),
+        }),
+      ),
+    removeStudioMember: async (studioId, profileId, idempotencyKey) =>
+      parseStudioMutationResponse(
+        await request<unknown>(`/v6/studios/${studioId}/members/${profileId}/remove`, {
+          method: "POST",
+          headers: cloudHeaders(idempotencyKey),
+          body: "{}",
+        }),
+      ),
+    listStudioEvents: async (studioId, after) =>
+      parseStudioEventsResponse(
+        await request<unknown>(`/v6/studios/${studioId}/events?after=${after}`, {
+          headers: cloudHeaders(),
+        }),
+      ),
   };
 }

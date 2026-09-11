@@ -10,6 +10,19 @@ export const localTestMode =
   import.meta.env.DEV && import.meta.env.VITE_SCENARIO_AUTH_MODE === "local-test";
 export const apiBaseUrl = import.meta.env.VITE_SCENARIO_API_BASE_URL ?? "http://127.0.0.1:8787";
 
+class AuthenticatedOperationScope {
+  private controller = new AbortController();
+  signal = () => this.controller.signal;
+  reset(): void {
+    if (!this.controller.signal.aborted) return;
+    this.controller = new AbortController();
+  }
+  stop(): void {
+    this.controller.abort();
+  }
+}
+export const authenticatedOperations = new AuthenticatedOperationScope();
+
 function createRuntimeAuthAdapter(): AuthAdapter {
   if (localTestMode) return createLocalTestAuthAdapter();
   return createSupabaseAuthAdapter({
@@ -54,6 +67,7 @@ export function createRuntimeCommercialApi(onUnauthorized?: () => Promise<void>)
     baseUrl: apiBaseUrl,
     accessToken: () => sessions.getAccessToken(),
     onUnauthorized,
+    signal: authenticatedOperations.signal,
     clientContext: {
       clientVersion: import.meta.env.VITE_SCENARIO_CLIENT_VERSION ?? "",
       deviceFingerprint: getDeviceFingerprint,
