@@ -33,6 +33,7 @@ export function AccountLicensePanel({ onClose, collaborationEditor }: AccountLic
   const [devices, setDevices] = useState<DeviceView[]>([]);
   const [billing, setBilling] = useState<BillingState | null>(null);
   const [activations, setActivations] = useState<ActivationRedemptionView[]>([]);
+  const [studioRefreshKey, setStudioRefreshKey] = useState(0);
   const [busy, setBusy] = useState(false);
   const [offline, setOffline] = useState(false);
   const [message, setMessage] = useState("");
@@ -176,6 +177,7 @@ export function AccountLicensePanel({ onClose, collaborationEditor }: AccountLic
       platform: getClientPlatform(),
     });
     setDevices(await api.getDevices());
+    setStudioRefreshKey((value) => value + 1);
   }
 
   async function signOut() {
@@ -347,6 +349,7 @@ export function AccountLicensePanel({ onClose, collaborationEditor }: AccountLic
             </section>
             {!offline && (
               <StudioSection
+                key={studioRefreshKey}
                 apiFactory={accountApi}
                 currentProfileId={me.account.id}
                 editorBridge={collaborationEditor}
