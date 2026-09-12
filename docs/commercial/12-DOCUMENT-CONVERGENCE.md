@@ -85,6 +85,12 @@ déjà hébergé grâce à cette compatibilité ; aucune migration supplémentai
   réelle, successivement avec les trois comptes existants de préproduction ;
   documents JSON identiques et zéro erreur. Le contenu n'est pas journalisé et
   aucune opération d'édition n'est envoyée.
+- Après déploiement du correctif serveur `035da9e`,
+  `node scripts/realtime-owner-editor-e2e.mjs` connecte réellement Owner et Editor,
+  ajoute simultanément deux paragraphes synthétiques vides portant des IDs réservés,
+  attend les deux opérations et compare les JSON complets. Il retire ensuite tous
+  ses blocs visibles par tombstones et exige une seconde convergence. Aucun texte
+  n'est injecté ou journalisé ; l'audit append-only reste conservé.
 - `git diff --check` dans les deux worktrees.
 
 Les premiers passages hébergés de 60 secondes ont échoué sur le 404, puis un
