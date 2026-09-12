@@ -7,7 +7,7 @@ import type { CollaborationRecoveryCopy } from "./contractsV8";
 function editorBridge(): ScenarioEditorBridge {
   return {
     read: () => ({ type: "doc", content: [] }),
-    applyRemote: vi.fn(),
+    replaceDocument: vi.fn(),
     subscribe: () => () => undefined,
     setReadOnly: vi.fn(),
   };

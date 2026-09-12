@@ -9,7 +9,7 @@ import {
 function editorBridge(): ScenarioEditorBridge {
   return {
     read: () => ({ type: "doc", content: [] }),
-    applyRemote: vi.fn(),
+    replaceDocument: vi.fn(),
     subscribe: () => () => undefined,
     setReadOnly: vi.fn(),
   };
@@ -113,7 +113,7 @@ describe("StudioCollaborationClient recovery", () => {
     await vi.advanceTimersByTimeAsync(120_000);
     expect(statuses[statuses.length - 1]).toBe('online');
     expect(statuses).not.toContain('reconnecting');
-    expect(bridge.setReadOnly).not.toHaveBeenCalledWith(true);
+    expect(bridge.setReadOnly).toHaveBeenLastCalledWith(false);
     expect(service.mocks.connectCollaboration).toHaveBeenCalledOnce();
     expect(service.mocks.pollCollaboration.mock.calls.length).toBeLessThanOrEqual(31);
     await client.disconnect();
@@ -194,6 +194,37 @@ describe("StudioCollaborationClient recovery", () => {
     await client.disconnect();
   });
 
+  it('keeps the local document untouched until all initial pages have arrived', async () => {
+    const service = api();
+    service.mocks.pollCollaboration.mockResolvedValueOnce({
+      contractVersion: '2026-09-v8', request_id: 'page-1', nextCursor: 1,
+      events: [{ type: 'connection.closed', cursor: 1, profileId: 'other', reason: 'client' }], hasMore: true, syncLag: 1,
+    });
+    const bridge = editorBridge();
+    const client = makeClient(service.value, bridge);
+    await client.connect();
+    expect(bridge.replaceDocument).not.toHaveBeenCalled();
+    expect(bridge.setReadOnly).toHaveBeenLastCalledWith(true);
+    await vi.advanceTimersByTimeAsync(4_000);
+    expect(bridge.replaceDocument).toHaveBeenCalledOnce();
+    expect(bridge.setReadOnly).toHaveBeenLastCalledWith(false);
+    await client.disconnect();
+  });
+
+  it('stops with recovery instead of retrying an incompatible remote document', async () => {
+    const service = api();
+    const bridge = editorBridge();
+    bridge.replaceDocument = () => { throw new Error('Unknown schema node'); };
+    const client = makeClient(service.value, bridge);
+    let code: string | null | undefined;
+    client.subscribe((state) => { code = state.lastErrorCode; });
+    await client.connect();
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(code).toBe('collaboration_document_invalid');
+    expect(service.mocks.pollCollaboration).toHaveBeenCalledOnce();
+    await client.disconnect();
+  });
+
   it('applies another instance of the same account once, in cursor order', async () => {
     const service = api();
     const bridge = editorBridge();
@@ -211,8 +242,7 @@ describe("StudioCollaborationClient recovery", () => {
     const client = makeClient(service.value, bridge);
     await client.connect();
     await vi.advanceTimersByTimeAsync(30_000);
-    expect(bridge.applyRemote).toHaveBeenCalledOnce();
-    expect(bridge.applyRemote).toHaveBeenCalledWith(operation.mutation);
+    expect(bridge.replaceDocument).toHaveBeenCalledWith({ type: 'doc', content: [] }, true);
     await client.disconnect();
   });
 

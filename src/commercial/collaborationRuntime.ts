@@ -5,6 +5,7 @@ import {
   type ScenarioEditorBridge,
 } from "./collaborationClient";
 import type { CollaborationRecoveryCopy } from "./contractsV8";
+import type { JSONContent } from '@tiptap/core';
 
 export interface RuntimeCollaborationState extends CollaborationViewState {
   studioId: string | null;
@@ -25,6 +26,7 @@ interface CollaborationConnectionOptions {
   baseVersionId: string;
   actorId: string;
   editor: ScenarioEditorBridge;
+  loadBase?: (signal: AbortSignal) => Promise<JSONContent>;
 }
 
 type CollaborationClientFactory = (
@@ -68,6 +70,7 @@ export class CollaborationRuntime {
         options.baseVersionId,
         options.actorId,
         options.editor,
+        options.loadBase,
       ),
   ) {}
 

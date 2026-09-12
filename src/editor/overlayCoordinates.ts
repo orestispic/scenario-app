@@ -9,8 +9,8 @@ export interface ClientRectangle extends OverlayRootRect {
 }
 
 /**
- * WebKit reports coordinates in the unzoomed CSS space when an ancestor uses
- * `zoom`. Convert them once, then express every HUD in the app-shell space.
+ * DOMRects, pointer events and coordsAtPos already use viewport CSS pixels,
+ * including the document's CSS zoom. Only subtract the overlay root's origin.
  */
 export function documentScaleForZoom(zoom: number): number {
   return zoom / 100;
@@ -19,13 +19,12 @@ export function documentScaleForZoom(zoom: number): number {
 export function clientPointToOverlay(
   clientLeft: number,
   clientTop: number,
-  zoom: number,
+  _zoom: number,
   appShellRect: OverlayRootRect | null | undefined,
 ): OverlayRootRect {
-  const scale = documentScaleForZoom(zoom);
   return {
-    left: clientLeft * scale - (appShellRect?.left ?? 0),
-    top: clientTop * scale - (appShellRect?.top ?? 0),
+    left: clientLeft - (appShellRect?.left ?? 0),
+    top: clientTop - (appShellRect?.top ?? 0),
   };
 }
 
@@ -35,10 +34,9 @@ export function clientRectToOverlay(
   appShellRect: OverlayRootRect | null | undefined,
 ): ClientRectangle {
   const point = clientPointToOverlay(rect.left, rect.top, zoom, appShellRect);
-  const scale = documentScaleForZoom(zoom);
   return {
     ...point,
-    width: rect.width * scale,
-    height: rect.height * scale,
+    width: rect.width,
+    height: rect.height,
   };
 }

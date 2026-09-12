@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from "react";
 import type { AuthenticatedCommercialApi } from "./authenticatedApi";
 import type { ScenarioEditorBridge } from "./collaborationClient";
+import { loadStudioBase, selectStudioRoot } from './studioBase';
 import {
   collaborationRuntime,
   type RuntimeCollaborationState,
@@ -52,6 +53,8 @@ export function StudioSection({
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
+  const [joinConfirmation, setJoinConfirmation] = useState(false);
+  const [localCopyConfirmed, setLocalCopyConfirmed] = useState(false);
   const [collaboration, setCollaboration] = useState<RuntimeCollaborationState | null>(null);
   const activeCollaboration =
     collaboration?.studioId === detail?.studio.id ? collaboration : null;
@@ -85,23 +88,22 @@ export function StudioSection({
 
   async function connectEditor() {
     if (!detail || !editorBridge) return;
+    const joiningDocument = JSON.stringify(editorBridge.read());
     setBusy(true);
     setMessage("");
     try {
       const versions = await api.listCloudVersions(detail.studio.scenarioId);
-      const baseVersionId = versions.versions.reduce(
-        (latest, candidate) =>
-          !latest || candidate.versionNumber > latest.versionNumber ? candidate : latest,
-        versions.versions[0],
-      )?.id;
-      if (!baseVersionId) throw new Error("Aucune version cloud de base n’est disponible.");
+      const root = selectStudioRoot(versions.versions, detail.studio.scenarioId);
+      if (JSON.stringify(editorBridge.read()) !== joiningDocument)
+        throw new Error('Le document local a changé pendant la connexion. Conservez sa nouvelle copie puis réessayez.');
       await collaborationRuntime.connect({
         api,
         studioId: detail.studio.id,
         scenarioId: detail.studio.scenarioId,
-        baseVersionId,
+        baseVersionId: root.id,
         actorId: currentProfileId,
         editor: editorBridge,
+        loadBase: (signal) => loadStudioBase(api, root, signal),
       });
       setMessage("Demande de connexion envoyée.");
     } catch (error) {
@@ -300,10 +302,19 @@ export function StudioSection({
                   busy ||
                   Boolean(activeCollaboration && activeCollaboration.status !== "disconnected")
                 }
-                onClick={() => void connectEditor()}
+                onClick={() => { setLocalCopyConfirmed(false); setJoinConfirmation(true); }}
               >
                 {activeCollaboration?.status === "reconnecting" ? "Reconnexion…" : activeCollaboration?.status === "online" ? "Connectée" : "Démarrer"}
               </button>
+              {joinConfirmation && (!activeCollaboration || activeCollaboration.status === 'disconnected') && (
+                <div className="studio-conflict" role="group" aria-label="Rejoindre le scénario partagé">
+                  <p>Rejoindre charge le même scénario partagé pour tous. Le contenu actuellement ouvert ne sera pas fusionné automatiquement.</p>
+                  <button type="button" onClick={() => editorBridge?.saveLocalCopy?.()}>Télécharger une copie locale (.scenario)</button>
+                  <label><input type="checkbox" checked={localCopyConfirmed} onChange={(event) => setLocalCopyConfirmed(event.target.checked)} /> J’ai conservé une copie de mon scénario local.</label>
+                  <button type="button" disabled={!localCopyConfirmed || busy} onClick={() => { setJoinConfirmation(false); void connectEditor(); }}>Rejoindre le scénario partagé</button>
+                  <button type="button" onClick={() => setJoinConfirmation(false)}>Annuler</button>
+                </div>
+              )}
               {activeCollaboration && activeCollaboration.status !== "disconnected" && (
                 <button type="button" onClick={() => void collaborationRuntime.disconnect()}>
                   Arrêter la collaboration

@@ -113,7 +113,7 @@ export interface AuthenticatedCommercialApi {
     idempotencyKey: string,
   ): Promise<CloudSyncResponse>;
   deleteCloudScenario(scenarioId: string, idempotencyKey: string): Promise<void>;
-  getCloudDownload(scenarioId: string, versionId: string): Promise<TemporaryObjectGrant>;
+  getCloudDownload(scenarioId: string, versionId: string, signal?: AbortSignal): Promise<TemporaryObjectGrant>;
   listStudios(): Promise<StudioListResponse>;
   getStudio(studioId: string): Promise<StudioDetailResponse>;
   createStudio(
@@ -409,10 +409,10 @@ export function createAuthenticatedCommercialApi(options: {
         body: "{}",
       });
     },
-    getCloudDownload: async (scenarioId, versionId) => {
+    getCloudDownload: async (scenarioId, versionId, signal) => {
       const response = await request<{ download: TemporaryObjectGrant }>(
         `/v5/scenarios/${scenarioId}/versions/${versionId}/download`,
-        { headers: cloudHeaders() },
+        { headers: cloudHeaders(), signal },
       );
       return response.download;
     },

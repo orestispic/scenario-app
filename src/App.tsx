@@ -108,6 +108,7 @@ import {
 } from "./document/aiConfig";
 import { AccountLicensePanel } from "./commercial/AccountLicensePanel";
 import type { ScenarioEditorBridge } from "./commercial/collaborationClient";
+import { collaborationTransaction } from './editor/collaborationTransaction';
 import { collaborationRuntime } from "./commercial/collaborationRuntime";
 import { cloudSyncQueue } from "./commercial/runtime";
 import "./App.css";
@@ -656,11 +657,14 @@ function App() {
           for (const listener of collaborationListeners.current) listener(snapshot);
         }
       }
-      requestAnimationFrame(() => {
-        if (!activeEditor.isDestroyed) {
-          convertActionStartToSceneHeading(activeEditor);
-        }
-      });
+      if (!transaction.getMeta('scenario-collaboration-remote')) {
+        const typedDocument = activeEditor.state.doc;
+        requestAnimationFrame(() => {
+          if (!activeEditor.isDestroyed && activeEditor.state.doc === typedDocument) {
+            convertActionStartToSceneHeading(activeEditor);
+          }
+        });
+      }
     },
   });
 
@@ -2829,48 +2833,27 @@ function App() {
           onClose={() => setAccountPanelOpen(false)}
           collaborationEditor={{
             read: () => editor?.getJSON() ?? initialContent,
-            applyRemote: (mutation) => {
+            saveLocalCopy: () => {
+              if (!editor || editor.isDestroyed) throw new Error('Éditeur indisponible.');
+              const copy = createDocument(editor, currentDocumentState.current.title);
+              const url = URL.createObjectURL(new Blob([JSON.stringify(copy, null, 2)], { type: 'application/vnd.scenario+json' }));
+              const link = document.createElement('a');
+              link.href = url;
+              link.download = `copie-locale-avant-studio-${Date.now()}.scenario`;
+              link.click();
+              setTimeout(() => URL.revokeObjectURL(url), 1_000);
+            },
+            replaceDocument: (document, initial) => {
               if (!editor || editor.isDestroyed) return;
               isReplacingDocument.current = true;
               try {
-                let transaction = editor.state.tr;
-                let currentPosition = -1;
-                let currentSize = 0;
-                transaction.doc.forEach((node, offset) => {
-                  if (node.attrs.blockId === mutation.blockId) {
-                    currentPosition = offset;
-                    currentSize = node.nodeSize;
-                  }
-                });
-                if (mutation.type === "block.delete") {
-                  if (currentPosition >= 0) {
-                    transaction = transaction.delete(currentPosition, currentPosition + currentSize);
-                  }
-                } else {
-                  const remoteNode = editor.schema.nodeFromJSON(mutation.block);
-                  if (currentPosition >= 0) {
-                    transaction = transaction.replaceWith(
-                      currentPosition,
-                      currentPosition + currentSize,
-                      remoteNode,
-                    );
-                  } else {
-                    let insertionPosition = 0;
-                    if (mutation.afterBlockId) {
-                      transaction.doc.forEach((node, offset) => {
-                        if (node.attrs.blockId === mutation.afterBlockId) {
-                          insertionPosition = offset + node.nodeSize;
-                        }
-                      });
-                    }
-                    transaction = transaction.insert(insertionPosition, remoteNode);
-                  }
-                }
-                transaction.setMeta("scenario-collaboration-remote", true);
-                editor.view.dispatch(transaction);
+                const transaction = collaborationTransaction(editor.state, document);
+                if (transaction) editor.view.dispatch(transaction);
+                if (!transaction && !initial) return;
                 ensureScenarioBlockIds(editor);
                 setDocumentState((previous) => ({
                   ...previous,
+                  ...(initial ? { filePath: null } : {}),
                   isDirty: true,
                   status: "Modification distante reçue — enregistrement local conseillé",
                 }));
@@ -3425,7 +3408,7 @@ function findAiParagraphAtPoint(
   editor: Editor,
   clientX: number,
   clientY: number,
-  zoom = 100,
+  _zoom = 100,
 ): HTMLElement | null {
   const paragraphs = editor.view.dom.querySelectorAll<HTMLElement>(
     'p[data-scenario-type="ACTION"]:not([data-scenario-ending]), p[data-scenario-type="DIALOGUE"]',
@@ -3435,13 +3418,12 @@ function findAiParagraphAtPoint(
     const canvas = paragraph.closest(".document-canvas");
     const canvasRect = canvas?.getBoundingClientRect();
     const paragraphRect = paragraph.getBoundingClientRect();
-    const documentScale = zoom / 100;
     if (
       canvasRect &&
-      clientX >= canvasRect.left * documentScale &&
-      clientX <= canvasRect.right * documentScale &&
-      clientY >= paragraphRect.top * documentScale &&
-      clientY <= paragraphRect.bottom * documentScale
+      clientX >= canvasRect.left &&
+      clientX <= canvasRect.right &&
+      clientY >= paragraphRect.top &&
+      clientY <= paragraphRect.bottom
     ) {
       return paragraph;
     }

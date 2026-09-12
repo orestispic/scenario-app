@@ -7,6 +7,8 @@ import type {
   CollaborativeMutation,
   CollaborativeOperationRequest,
 } from './contractsV8';
+import { applyScenarioMutation, blockId, CollaborationDocument } from './collaborationDocument';
+export { applyScenarioMutation } from './collaborationDocument';
 
 export type CollaborationStatus =
   | 'disconnected'
@@ -27,7 +29,8 @@ export interface CollaborationViewState {
 }
 export interface ScenarioEditorBridge {
   read(): JSONContent;
-  applyRemote(mutation: CollaborativeMutation): void;
+  replaceDocument(document: JSONContent, initial?: boolean): void;
+  saveLocalCopy?(): void;
   subscribe(listener: (document: JSONContent) => void): () => void;
   setReadOnly(value: boolean): void;
 }
@@ -53,10 +56,6 @@ async function checksum(value: unknown): Promise<string> {
     .map((byte) => byte.toString(16).padStart(2, '0'))
     .join('');
 }
-function blockId(block: JSONContent): string | null {
-  const value = block.attrs?.blockId;
-  return typeof value === 'string' && value ? value : null;
-}
 export function diffScenarioBlocks(
   before: JSONContent,
   after: JSONContent,
@@ -68,15 +67,17 @@ export function diffScenarioBlocks(
     }),
   );
   const next = after.content ?? [];
+  const previousOrder = (before.content ?? []).map(blockId);
   const mutations: CollaborativeMutation[] = [];
   for (let index = 0; index < next.length; index += 1) {
     const block = next[index];
     const id = blockId(block);
     if (!id) continue;
     const previous = oldBlocks.get(id);
-    if (!previous || canonical(previous) !== canonical(block)) {
-      const prior =
-        next.slice(0, index).reverse().map(blockId).find(Boolean) ?? null;
+    const prior = next.slice(0, index).reverse().map(blockId).find(Boolean) ?? null;
+    const previousIndex = previousOrder.indexOf(id);
+    const oldPrior = previousIndex > 0 ? previousOrder[previousIndex - 1] : null;
+    if (!previous || canonical(previous) !== canonical(block) || prior !== oldPrior) {
       mutations.push({
         type: 'block.upsert',
         blockId: id,
@@ -90,28 +91,6 @@ export function diffScenarioBlocks(
     mutations.push({ type: 'block.delete', blockId: id });
   return mutations;
 }
-export function applyScenarioMutation(
-  document: JSONContent,
-  mutation: CollaborativeMutation,
-): JSONContent {
-  const content = structuredClone(document.content ?? []);
-  const current = content.findIndex(
-    (block) => blockId(block) === mutation.blockId,
-  );
-  if (mutation.type === 'block.delete') {
-    if (current >= 0) content.splice(current, 1);
-    return { ...structuredClone(document), content };
-  }
-  const block = structuredClone(mutation.block) as JSONContent;
-  if (current >= 0) content.splice(current, 1);
-  const after =
-    mutation.afterBlockId === null
-      ? -1
-      : content.findIndex((item) => blockId(item) === mutation.afterBlockId);
-  content.splice(Math.max(0, after + 1), 0, block);
-  return { ...structuredClone(document), content };
-}
-
 export class StudioCollaborationClient {
   private connectionId: string | null = null;
   private cursor = 0;
@@ -125,7 +104,12 @@ export class StudioCollaborationClient {
   };
   private pending = new Map<string, CollaborativeOperationRequest>();
   private attempted = new Set<string>();
-  private locallyApplied = new Set<string>();
+  private locallyApplied = new Map<string, CollaborativeOperationRequest>();
+  private localOperationIds = new Set<string>();
+  private replica: CollaborationDocument;
+  private initialized = false;
+  private caughtUp = false;
+  private initialization = new AbortController();
   private unsubscribeEditor: (() => void) | null = null;
   private previousDocument: JSONContent;
   private listeners = new Set<(state: CollaborationViewState) => void>();
@@ -150,8 +134,10 @@ export class StudioCollaborationClient {
     private baseVersionId: string,
     _actorId: string,
     private readonly editor: ScenarioEditorBridge,
+    private readonly loadBase?: (signal: AbortSignal) => Promise<JSONContent>,
   ) {
     this.previousDocument = structuredClone(editor.read());
+    this.replica = new CollaborationDocument(this.previousDocument);
   }
 
   subscribe(listener: (state: CollaborationViewState) => void) {
@@ -173,6 +159,7 @@ export class StudioCollaborationClient {
     if (this.disposed) return;
     this.disposed = true;
     this.generation += 1;
+    this.initialization.abort();
     if (this.timer) clearTimeout(this.timer);
     this.timer = null;
     this.api.cancelCollaborationRequests?.();
@@ -183,6 +170,8 @@ export class StudioCollaborationClient {
     this.pending.clear();
     this.attempted.clear();
     this.locallyApplied.clear();
+    this.localOperationIds.clear();
+    this.replica.clear();
     this.previousDocument = { type: 'doc', content: [] };
     this.editor.setReadOnly(false);
     this.update({ status: 'disconnected', presence: [], syncLag: 0, conflict: null });
@@ -238,6 +227,16 @@ export class StudioCollaborationClient {
 
   private async tick(generation: number) {
     if (!this.alive(generation)) return;
+    if (!this.initialized) {
+      // Do not overwrite the local document until authenticated catch-up completes.
+      this.editor.setReadOnly(true);
+      if (this.loadBase) {
+        const base = await this.loadBase(this.initialization.signal);
+        if (!this.alive(generation)) return;
+        this.replica = new CollaborationDocument(base);
+      }
+      this.initialized = true;
+    }
     if (Date.now() < this.retryAt) {
       if (this.connectionId && Date.now() >= this.nextHeartbeat) {
         const heartbeat = await this.api.heartbeatCollaboration(this.studioId, this.connectionId);
@@ -264,7 +263,7 @@ export class StudioCollaborationClient {
       this.maximumOperationBytes = limits.maximumOperationBytes ?? 65_536;
       this.maximumPending = Math.min(256, limits.maximumPendingEvents ?? 256);
       this.backoffMaximum = Math.min(60_000, (limits.reconnectBackoffMaximumSeconds ?? 30) * 1_000);
-      this.editor.setReadOnly(this.readOnly);
+      this.editor.setReadOnly(!this.caughtUp || this.readOnly);
       this.update({ presence: connection.presence });
       this.nextHeartbeat = Date.now() + this.heartbeatDelayMs;
       this.nextPoll = 0;
@@ -282,6 +281,12 @@ export class StudioCollaborationClient {
     if (Date.now() >= this.nextPoll) {
       const response = await this.api.pollCollaboration(this.studioId, this.connectionId!, this.cursor);
       if (!this.alive(generation)) return;
+      const localConflict = response.events.find((event) => event.type === 'operation.conflict' && this.localOperationIds.has(event.conflict.operationId));
+      if (localConflict?.type === 'operation.conflict') {
+        this.update({ conflict: localConflict.conflict });
+        this.halt('conflict', 'collaboration_conflict');
+        return;
+      }
       for (const event of [...response.events].sort((a, b) => a.cursor - b.cursor)) {
         if (event.cursor <= this.cursor) continue;
         if (event.type === 'operation.applied') {
@@ -294,16 +299,20 @@ export class StudioCollaborationClient {
               this.halt('recovery_required', 'local_remote_overlap');
               return;
             }
-            this.applyingRemote = true;
-            try {
-              this.editor.applyRemote(operation.mutation);
-              this.previousDocument = structuredClone(this.editor.read());
-            } finally {
-              this.applyingRemote = false;
-            }
           }
+          if (operation.studioId !== this.studioId || operation.scenarioId !== this.scenarioId)
+            throw Object.assign(new Error('Invalid operation scope'), { code: 'invalid_channel_response' });
+          this.replica.accept(operation);
           this.locallyApplied.delete(operation.operationId);
+          this.pending.delete(operation.operationId);
+          this.attempted.delete(operation.operationId);
         } else if (event.type === 'operation.conflict') {
+          // Historical conflicts are preserved server-side, not a reason to stop
+          // a new reader. Only a current local operation requires local recovery.
+          if (!this.locallyApplied.has(event.conflict.operationId) && !this.pending.has(event.conflict.operationId)) {
+            this.cursor = event.cursor;
+            continue;
+          }
           this.update({ conflict: event.conflict });
           this.cursor = event.cursor;
           this.halt('conflict', 'collaboration_conflict');
@@ -317,14 +326,29 @@ export class StudioCollaborationClient {
       this.nextPoll = Date.now() + IDLE_POLL_DELAY_MS;
       this.reconnectAttempts = 0;
       this.retryAt = 0;
+      if (!response.hasMore) {
+        this.applyingRemote = true;
+        try {
+          let document = this.replica.read();
+          for (const operation of this.locallyApplied.values())
+            document = applyScenarioMutation(document, operation.mutation);
+          this.editor.replaceDocument(document, !this.caughtUp);
+          this.previousDocument = structuredClone(this.editor.read());
+        } catch {
+          this.halt('recovery_required', 'collaboration_document_invalid');
+          return;
+        } finally { this.applyingRemote = false; }
+        this.caughtUp = true;
+        this.editor.setReadOnly(this.readOnly);
+      }
       this.update({
-        status: this.readOnly ? 'read_only' : 'online',
+        status: !this.caughtUp ? 'connecting' : this.readOnly ? 'read_only' : 'online',
         syncLag: Math.max(response.syncLag, this.pending.size),
         lastErrorCode: null, requestId: null,
       });
     }
 
-    if (!this.readOnly && this.pending.size && Date.now() >= this.nextWrite) {
+    if (this.caughtUp && !this.readOnly && this.pending.size && Date.now() >= this.nextWrite) {
       const operation = this.pending.values().next().value!;
       this.attempted.add(operation.operationId);
       if (!operation.checksum) {
@@ -348,7 +372,7 @@ export class StudioCollaborationClient {
   }
 
   private onLocalDocument(document: JSONContent) {
-    if (this.disposed || this.stopped || this.applyingRemote || this.readOnly) return;
+    if (this.disposed || this.stopped || !this.caughtUp || this.applyingRemote || this.readOnly) return;
     for (const mutation of diffScenarioBlocks(this.previousDocument, document)) {
       // Coalesce only requests that have NEVER been sent. An uncertain request
       // retains exactly the same id, sequence, body and checksum on every retry.
@@ -365,7 +389,9 @@ export class StudioCollaborationClient {
         mutation, checksum: '',
       };
       this.pending.set(operation.operationId, operation);
-      this.locallyApplied.add(operation.operationId);
+      this.locallyApplied.set(operation.operationId, operation);
+      this.localOperationIds.add(operation.operationId);
+      if (this.localOperationIds.size > 512) this.localOperationIds.delete(this.localOperationIds.values().next().value!);
       if (this.locallyApplied.size > 512) {
         this.halt('recovery_required', 'local_backpressure');
         return;
