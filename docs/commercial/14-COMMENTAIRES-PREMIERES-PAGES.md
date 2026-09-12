@@ -47,3 +47,18 @@ git diff --check
 
 Recharger l'application après livraison pour obtenir le nouveau client.
 Aucune manipulation ni partage d'identifiants nécessaire pendant cette intervention.
+
+## Livraison vérifiée
+
+Application `50a077b`, Worker corrigé `9a0d2fc` déployé uniquement en préproduction
+(version Cloudflare `cf8f3ef8-f4ff-4631-ae05-bfaf85d99462`). Validation API réelle
+réussie sur Supabase/Cloudflare avec trois comptes : garde et commentaires,
+concurrence, réponses/replay, viewer/révocation, texte collaboratif et snapshot
+privé complet avec parent et checksum. Un défaut historique du replay de snapshot
+a été détecté puis corrigé avant cette réussite. Aucun objet historique réécrit.
+
+Deux projets synthétiques de validation sont en corbeille, récupérables ; aucun
+scénario utilisateur modifié. Test navigateur historique relancé avec succès :
+`node --experimental-transform-types scripts/phase10-cloud-ui-e2e.mjs`.
+Pas de publication production ni de push Git. Restent hors de cette validation :
+charge prolongée, installateur signé et test interactif du coffre système.
