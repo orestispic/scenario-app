@@ -1,7 +1,19 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createAuthenticatedCommercialApi } from "./authenticatedApi";
 
 describe("adaptateur IA commercial", () => {
+  it('keeps the long AI operation timeout separate from project listing', async () => {
+    const timeout = vi.spyOn(AbortSignal, 'timeout');
+    try {
+      const api = createAuthenticatedCommercialApi({baseUrl:'https://api.example.invalid',accessToken:'synthetic',
+        clientContext:{clientVersion:'0.1.7',deviceFingerprint:'synthetic-device-fingerprint',platform:'windows'},
+        fetcher:async()=>Response.json({code:'isolated_failure'},{status:503})});
+      await expect(api.runAiAction({kind:'rewrite',instruction:'test',text:'synthetic'})).rejects.toThrow();
+      expect(timeout).toHaveBeenLastCalledWith(120_000);
+      await expect(api.listCloudProjects()).rejects.toThrow();
+      expect(timeout).toHaveBeenLastCalledWith(15_000);
+    } finally { timeout.mockRestore(); }
+  });
   it("envoie session, version, appareil et idempotence sans choix fournisseur", async () => {
     const requests: Request[] = [];
     const api = createAuthenticatedCommercialApi({

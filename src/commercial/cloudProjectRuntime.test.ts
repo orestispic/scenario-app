@@ -57,6 +57,12 @@ describe('cloud project lifecycle', () => {
     await f.runtime.open(f.api, 'account-a', projectId, f.editor);
     expect(f.createLive).toHaveBeenCalledWith(expect.objectContaining({baseVersionId: 'v2'}));
   });
+  it('never falls back to whole-file autosaves when a shared project has no authorized channel', async () => {
+    const f = fixture(); f.setProject({sharing:'shared',memberCount:2,realtimeStudioId:null});
+    await f.runtime.open(f.api, 'account-a', projectId, f.editor);
+    expect(f.editor.setReadOnly).toHaveBeenLastCalledWith(true);
+    f.edit('Unsynchronized copy'); await f.runtime.flush(); expect(f.sync).not.toHaveBeenCalled();
+  });
   it('keeps an uncertain request identical on retry and sends newer edits separately', async () => {
     const f = fixture(); await f.runtime.open(f.api, 'account-a', projectId, f.editor);
     f.sync.mockRejectedValueOnce(new TypeError('network'));

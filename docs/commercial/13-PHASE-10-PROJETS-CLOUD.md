@@ -66,7 +66,7 @@ pas automatisée.
 
 ## Vérifications exécutées avant déploiement
 
-105 tests Vitest, typecheck, build mode phase9 réussis. Test Edge isolé : création
+107 tests Vitest, typecheck, build mode phase9 réussis. Test Edge isolé : création
 privée, sauvegarde, partage après édition, conservation du texte, connexion
 automatique, absence de contenu/jetons dans localStorage, fenêtre à 640 px. Test
 des menus existants à 60/100/160 % réussi. Aucun onglet utilisateur manipulé.
@@ -81,6 +81,7 @@ npm.cmd test -- --reporter=dot
 .\node_modules\.bin\tsc.cmd --noEmit
 npm.cmd run build -- --mode phase9
 ..\scenario-site-commercial\node_modules\.bin\oxlint.cmd src/commercial/CloudProjectsPanel.tsx src/commercial/cloudProjectRuntime.ts src/commercial/cloudProjectRuntime.test.ts src/commercial/cloudProjectStore.ts src/commercial/contractsV9.ts src/commercial/authenticatedApi.ts src/commercial/AccountLicensePanel.tsx src/commercial/studioBase.ts scripts/phase10-cloud-ui-e2e.mjs
+..\scenario-site-commercial\node_modules\.bin\oxlint.cmd src/commercial/aiApi.test.ts scripts/realtime-owner-editor-e2e.mjs
 $env:SCENARIO_PLAYWRIGHT_PATH='C:\Users\orepi\.cache\codex-runtimes\codex-primary-runtime\dependencies\node\node_modules\playwright\index.mjs'
 node --experimental-transform-types scripts/phase10-cloud-ui-e2e.mjs
 node scripts/verify-browser-overlays.mjs
@@ -91,3 +92,36 @@ git diff --check
 Les résultats réellement hébergés sont consignés dans le document phase 10 du
 worktree plateforme. Les tests Edge ci-dessus interceptent l'API vers un faux
 serveur local : ils ne sont pas une preuve Cloudflare/Supabase réelle.
+
+## Résultats hébergés et finalisation
+
+La migration et le Worker `fe2b5a3` ont été appliqués à la préproduction existante,
+sans toucher à la production. La vraie API a validé deux projets synthétiques,
+les trois comptes et les opérations concurrentes Owner/Editor avec poll vérifié
+dans le journal SQL. Les deux projets de ce test sont récupérables dans la
+corbeille ; leur historique n'a pas été supprimé.
+
+Le vrai client a également passé :
+
+```powershell
+node scripts/realtime-soak.mjs 60
+node scripts/realtime-owner-editor-e2e.mjs
+```
+
+Soak simultané de 60 s : 3 documents identiques, aucune erreur HTTP/reconnexion,
+15 polls par compte, 6/6/5 heartbeats Owner/Editor/Viewer. Il s'agit d'un contrôle
+court, pas d'une validation de charge ni de panne injectée. Owner/Editor : deux
+blocs vides synthétiques convergents puis retrait par tombstones, documents finaux
+identiques. Aucun texte utilisateur n'a été remplacé ou journalisé.
+
+Le premier essai E2E exigeait le statut online dès le premier cycle ; le test a
+été corrigé pour attendre le rattrapage paginé (borne 35 s), puis a réussi.
+Le script de validation API a aussi été adapté à la configuration historique
+sans champ platform. Ces essais échoués ne sont pas comptés comme des réussites.
+
+Deux gardes de non-régression complètent le runtime : pas de sauvegarde intégrale
+en remplacement d'un canal partagé non autorisé ; délai réseau IA de 120 s,
+distinct des 15 s des opérations usuelles, pour ne pas tronquer les imports.
+
+Le code initial de l'application est committé dans `952a783` ; le commit de
+finalisation contient ces gardes, leurs tests et le compte rendu. Aucun push Git.

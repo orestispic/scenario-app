@@ -58,18 +58,24 @@ try {
     let document = { type: 'doc', content: [{ type: 'paragraph', attrs: { blockId: `unshared-${role}` } }] };
     let listener = () => {};
     let status = 'disconnected';
+    let lastErrorCode;
     const client = new StudioCollaborationClient(api, fixture.PHASE9_STUDIO_ID, fixture.PHASE9_SCENARIO_ID, root.id, me.account.id, {
       read: () => structuredClone(document),
       replaceDocument: (value) => { document = structuredClone(value); },
       subscribe: (next) => { listener = next; return () => { listener = () => {}; }; },
       setReadOnly: () => {},
     }, (signal) => loadStudioBase(api, root, signal));
-    client.subscribe((state) => { status = state.status; });
+    client.subscribe((state) => { status = state.status; lastErrorCode = state.lastErrorCode; });
     clients.push(client);
-    participants.push({ role, index, api, client, read: () => structuredClone(document), edit: (value) => { document = structuredClone(value); listener(document); }, status: () => status });
+    participants.push({ role, index, api, client, read: () => structuredClone(document), edit: (value) => { document = structuredClone(value); listener(document); }, status: () => status, error: () => lastErrorCode });
   }
   await Promise.all(participants.map(({ client }) => client.connect()));
-  if (participants.some(({ status }) => status() !== 'online')) throw new Error('Initial Owner/Editor catch-up failed');
+  // connect() performs one scheduled cycle; a journal larger than a page may
+  // need subsequent bounded polls. Do not mistake pagination for a failure.
+  const catchUpDeadline = Date.now() + 35_000;
+  while (participants.some(({status}) => status() !== 'online') && Date.now() < catchUpDeadline)
+    await new Promise((done) => setTimeout(done, 500));
+  if (participants.some(({ status }) => status() !== 'online')) throw new Error(`Initial Owner/Editor catch-up failed: ${JSON.stringify(participants.map((p)=>({role:p.role,status:p.status(),code:p.error()})))}`);
   const initial = participants.map(({ read }) => JSON.stringify(read()));
   if (initial[0] !== initial[1]) throw new Error('Owner/Editor initial documents differ');
   for (const participant of participants) {

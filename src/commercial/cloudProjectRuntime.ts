@@ -112,8 +112,9 @@ export class CloudProjectRuntime {
         if (generation !== this.generation) return;
         this.update('realtime');
       } else {
-        editor.setReadOnly(project.role === 'viewer');
-        this.update(project.role === 'viewer' ? 'read_only' : 'synced');
+        const readOnly = project.role === 'viewer' || project.sharing === 'shared';
+        editor.setReadOnly(readOnly);
+        this.update(readOnly ? 'read_only' : 'synced', project.sharing === 'shared' ? 'Canal collaboratif non autorisé. Le fichier cloud reste consultable, sans sauvegarde concurrente.' : '');
       }
       await this.saveCopy();
       this.schedule();
@@ -151,6 +152,7 @@ export class CloudProjectRuntime {
     try {
       await this.saveCopy();
       if (project.realtimeStudioId) return;
+      if (project.sharing === 'shared') { editor.setReadOnly(true); this.update('read_only', 'Canal collaboratif non autorisé.'); return; }
       // A retry uses the exact original bytes + key, even if the editor changed meanwhile.
       if (this.pendingRequest) {
         const pending = this.pendingRequest;

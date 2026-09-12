@@ -180,7 +180,10 @@ export function createAuthenticatedCommercialApi(options: {
 
   async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     if (!path.includes('/realtime/')) {
-      const signals = [AbortSignal.timeout(15_000), init.signal, options.signal?.()].filter((s): s is AbortSignal => Boolean(s));
+      // AI imports use the server's longer operation window; the cloud dialog's
+      // shorter network timeout must not truncate a previously valid AI request.
+      const timeoutMs = path.startsWith('/v4/ai/') ? 120_000 : 15_000;
+      const signals = [AbortSignal.timeout(timeoutMs), init.signal, options.signal?.()].filter((s): s is AbortSignal => Boolean(s));
       return requestInner<T>(path, { ...init, signal: AbortSignal.any(signals) });
     }
     const controller = new AbortController();
