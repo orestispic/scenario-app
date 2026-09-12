@@ -1183,6 +1183,164 @@ textarea {
 .account-auth-form .primary-button { color: #fff; background: #2d628c; border-color: #2d628c; }
 .account-license-message { padding: 8px 10px; color: #31536b; background: #e5f0f6; border-radius: 4px; font-size: 12px; }
 
+.studio-section { gap: 14px; padding: 16px; }
+.studio-section-heading,
+.studio-summary,
+.studio-members-heading,
+.studio-live-card,
+.studio-member,
+.studio-invitation-row,
+.studio-invitation-history > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.studio-section-heading > div,
+.studio-summary > div,
+.studio-live-card > div,
+.studio-member-identity,
+.studio-invitation-row > div {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+.studio-section-heading p,
+.studio-summary p,
+.studio-live-card span,
+.studio-member-identity span,
+.studio-invitation-row span,
+.studio-muted {
+  color: #64717a;
+  font-size: 12px;
+}
+.studio-role-badge,
+.studio-active-indicator {
+  flex: 0 0 auto;
+  padding: 4px 8px;
+  color: #205f42;
+  background: #e3f3ea;
+  border: 1px solid #b9ddc8;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+}
+.studio-empty-state {
+  display: grid;
+  gap: 4px;
+  padding: 18px;
+  color: #536069;
+  background: #f7f9fa;
+  border: 1px dashed #c7d0d6;
+  border-radius: 7px;
+  text-align: center;
+}
+.studio-switcher { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 8px; }
+.studio-switcher button { display: grid; justify-items: start; gap: 3px; text-align: left; }
+.studio-switcher button span { color: #64717a; font-size: 11px; }
+.studio-switcher button.is-active { color: #fff; background: #2d628c; border-color: #2d628c; }
+.studio-switcher button.is-active span { color: #dcecf6; }
+.studio-detail { display: grid; gap: 14px; }
+.studio-summary {
+  padding: 14px;
+  background: #f7f9fa;
+  border: 1px solid #d5dde2;
+  border-radius: 7px;
+}
+.studio-summary h4,
+.studio-members-heading h4,
+.studio-invitations-received h4 { margin: 0; color: #26333a; font-size: 14px; }
+.studio-live-card {
+  flex-wrap: wrap;
+  padding: 12px 14px;
+  background: #edf5fa;
+  border: 1px solid #c5dce9;
+  border-radius: 7px;
+}
+.studio-live-card > p,
+.studio-live-card .studio-conflict { flex-basis: 100%; }
+.studio-live-card > button { color: #fff; background: #2d628c; border-color: #2d628c; }
+.studio-conflict { display: grid; gap: 8px; padding: 10px; background: #fff5e8; border-radius: 5px; }
+.studio-members-heading { padding-top: 2px; }
+.studio-members-heading > span {
+  min-width: 24px;
+  padding: 2px 7px;
+  color: #536069;
+  background: #eef2f4;
+  border-radius: 999px;
+  font-size: 11px;
+  text-align: center;
+}
+.studio-members-list { display: grid; gap: 7px; }
+.studio-member {
+  position: relative;
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) auto;
+  padding: 10px;
+  background: #fff;
+  border: 1px solid #dce3e7;
+  border-radius: 7px;
+}
+.studio-member-avatar {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  color: #31536b;
+  background: #e5f0f6;
+  border-radius: 50%;
+  font-size: 11px;
+  font-weight: 800;
+}
+.studio-member-identity strong { overflow: hidden; color: #26333a; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+.studio-member-identity strong span { color: #64717a; font-weight: 500; }
+.studio-member-menu summary,
+.studio-management-panel > summary {
+  padding: 7px 9px;
+  color: #31536b;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+  list-style-position: inside;
+}
+.studio-member-menu > div {
+  position: absolute;
+  z-index: 2;
+  top: 48px;
+  right: 10px;
+  display: grid;
+  min-width: 210px;
+  gap: 10px;
+  padding: 12px;
+  background: #fff;
+  border: 1px solid #c7d0d6;
+  border-radius: 6px;
+  box-shadow: 0 10px 28px rgba(31, 37, 40, 0.18);
+}
+.studio-member-menu label { display: grid; gap: 5px; color: #48545c; font-size: 11px; font-weight: 700; }
+.studio-member-menu select,
+.studio-management-panel select {
+  width: 100%;
+  padding: 8px;
+  color: #26333a;
+  background: #f8fafb;
+  border: 1px solid #c7d0d6;
+  border-radius: 4px;
+}
+.account-license-section .studio-danger-button { color: #9d2116; background: #fff4f2; border-color: #e8bbb5; }
+.studio-management-panel { border-top: 1px solid #dce3e7; }
+.studio-management-panel > summary { padding: 12px 0 4px; }
+.studio-management-panel .account-auth-form { padding-top: 10px; }
+.studio-inline-actions { display: flex; gap: 6px; }
+.account-license-section .studio-text-button { padding-inline: 4px; color: #536069; background: transparent; border-color: transparent; }
+.studio-invitations-received,
+.studio-invitation-history { display: grid; gap: 8px; }
+.studio-invitation-row,
+.studio-invitation-history > div { padding: 9px 10px; background: #f7f9fa; border-radius: 5px; }
+.studio-invitation-history span { color: #536069; font-size: 12px; overflow-wrap: anywhere; }
+.studio-message { padding: 9px 10px; color: #31536b !important; background: #e5f0f6; border-radius: 5px; }
+
 .find-replace-panel header,
 .find-replace-panel footer,
 .find-replace-panel footer > div {
@@ -1830,6 +1988,37 @@ textarea {
 .theme-dark .account-auth-form input { color: #f1f4f5; background: #1a2024; border-color: #4d5960; }
 .theme-dark .account-auth-form .account-password-recovery { color: #8ec8eb; background: transparent; border-color: transparent; }
 .theme-dark .account-license-message { color: #b8d8e9; background: #223c4d; }
+.theme-dark .studio-section-heading p,
+.theme-dark .studio-summary p,
+.theme-dark .studio-live-card span,
+.theme-dark .studio-member-identity span,
+.theme-dark .studio-invitation-row span,
+.theme-dark .studio-muted { color: #9eabb2; }
+.theme-dark .studio-role-badge,
+.theme-dark .studio-active-indicator { color: #a8e6c3; background: #193c2b; border-color: #33634a; }
+.theme-dark .studio-empty-state,
+.theme-dark .studio-summary,
+.theme-dark .studio-invitation-row,
+.theme-dark .studio-invitation-history > div { color: #c0ccd2; background: #20272b; border-color: #435058; }
+.theme-dark .studio-summary h4,
+.theme-dark .studio-members-heading h4,
+.theme-dark .studio-invitations-received h4,
+.theme-dark .studio-member-identity strong { color: #e0e7eb; }
+.theme-dark .studio-live-card { background: #22343f; border-color: #3d5968; }
+.theme-dark .studio-conflict { background: #473821; }
+.theme-dark .studio-members-heading > span,
+.theme-dark .studio-member-avatar { color: #b8d8e9; background: #223c4d; }
+.theme-dark .studio-member { background: #20272b; border-color: #435058; }
+.theme-dark .studio-member-menu summary,
+.theme-dark .studio-management-panel > summary { color: #9fd4f1; }
+.theme-dark .studio-member-menu > div { background: #2a3237; border-color: #4d5960; }
+.theme-dark .studio-member-menu label { color: #c5d0d6; }
+.theme-dark .studio-member-menu select,
+.theme-dark .studio-management-panel select { color: #f1f4f5; background: #1a2024; border-color: #4d5960; }
+.theme-dark .account-license-section .studio-danger-button { color: #ffc5bd; background: #482925; border-color: #7a4039; }
+.theme-dark .studio-management-panel { border-color: #435058; }
+.theme-dark .account-license-section .studio-text-button { color: #b6c3ca; background: transparent; border-color: transparent; }
+.theme-dark .studio-message { color: #b8d8e9 !important; background: #223c4d; }
 
 .theme-dark .file-menu button,
 .theme-dark .smart-type button,

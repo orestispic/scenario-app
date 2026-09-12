@@ -12,6 +12,30 @@ import type {
   StudioSpace,
 } from "./contractsV7";
 
+const ROLE_LABEL: Record<StudioRole, string> = {
+  owner: "Propriétaire",
+  editor: "Éditeur",
+  viewer: "Lecture seule",
+};
+
+const STATUS_LABEL: Record<string, string> = {
+  active: "Actif",
+  revoked: "Accès retiré",
+  pending: "En attente",
+  accepted: "Acceptée",
+  declined: "Refusée",
+  expired: "Expirée",
+};
+
+function initials(name: string): string {
+  return name
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase())
+    .join("");
+}
+
 export function StudioSection({
   apiFactory,
   currentProfileId,
@@ -35,10 +59,15 @@ export function StudioSection({
     let active = true;
     api
       .listStudios()
-      .then((value) => {
+      .then(async (value) => {
         if (!active) return;
         setStudios(value.studios);
         setReceived(value.receivedInvitations);
+        if (value.studios[0]) {
+          const selected = await api.getStudio(value.studios[0].id);
+          if (!active) return;
+          setDetail(selected);
+        }
         setLoading(false);
       })
       .catch((error) => {
@@ -145,215 +174,285 @@ export function StudioSection({
   }
 
   return (
-    <section className="account-license-section" aria-label="Studios">
-      <h3>Studios</h3>
+    <section className="account-license-section studio-section" aria-label="Studios">
+      <div className="studio-section-heading">
+        <div>
+          <h3>Votre Studio</h3>
+          <p>Travaillez à plusieurs sur les mêmes scénarios.</p>
+        </div>
+        {detail && <span className="studio-role-badge">{ROLE_LABEL[detail.studio.role]}</span>}
+      </div>
+
       {loading ? (
-        <p>Chargement des Studios…</p>
+        <p>Chargement du Studio…</p>
       ) : studios.length === 0 ? (
-        <p>Aucun Studio accessible.</p>
-      ) : (
-        <ul>
+        <div className="studio-empty-state">
+          <strong>Aucun Studio accessible</strong>
+          <span>Une invitation acceptée apparaîtra ici.</span>
+        </div>
+      ) : studios.length > 1 ? (
+        <div className="studio-switcher" role="list" aria-label="Choisir un Studio">
           {studios.map((studio) => (
-            <li key={studio.id}>
+            <button
+              key={studio.id}
+              type="button"
+              role="listitem"
+              className={detail?.studio.id === studio.id ? "is-active" : ""}
+              disabled={busy}
+              onClick={() =>
+                void run(
+                  async () => setDetail(await api.getStudio(studio.id)),
+                  `${studio.name} ouvert.`,
+                )
+              }
+            >
+              <strong>{studio.name}</strong>
+              <span>{ROLE_LABEL[studio.role]}</span>
+            </button>
+          ))}
+        </div>
+      ) : null}
+
+      {received.length > 0 && (
+        <div className="studio-invitations-received">
+          <h4>Invitations reçues</h4>
+          {received.map((invitation) => (
+            <div className="studio-invitation-row" key={invitation.id}>
+              <div>
+                <strong>{invitation.recipient}</strong>
+                <span>{ROLE_LABEL[invitation.role]}</span>
+              </div>
+              {invitation.developmentToken ? (
+                <div className="studio-inline-actions">
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() =>
+                      void run(
+                        () =>
+                          api.acceptStudioInvitation(
+                            invitation.developmentToken!,
+                            crypto.randomUUID(),
+                          ),
+                        "Invitation acceptée.",
+                      )
+                    }
+                  >
+                    Accepter
+                  </button>
+                  <button
+                    className="studio-text-button"
+                    type="button"
+                    disabled={busy}
+                    onClick={() =>
+                      void run(
+                        () =>
+                          api.declineStudioInvitation(
+                            invitation.developmentToken!,
+                            crypto.randomUUID(),
+                          ),
+                        "Invitation refusée.",
+                      )
+                    }
+                  >
+                    Refuser
+                  </button>
+                </div>
+              ) : (
+                <span className="studio-muted">Ouvrez le lien sécurisé reçu par e-mail.</span>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {detail && (
+        <div className="studio-detail">
+          <div className="studio-summary">
+            <div>
+              <h4>{detail.studio.name}</h4>
+              <p>
+                {detail.members.filter((member) => member.status === "active").length} membres ·
+                vos changements sont protégés par le serveur
+              </p>
+            </div>
+            <span className="studio-active-indicator">Actif</span>
+          </div>
+
+          {editorBridge && (
+            <div className="studio-live-card" aria-live="polite">
+              <div>
+                <strong>Collaboration en direct</strong>
+                <span>
+                  {collaboration?.status === "online"
+                    ? `${collaboration.presence.length} membre(s) présent(s)`
+                    : collaboration?.status === "reconnecting"
+                      ? "Reconnexion en cours…"
+                      : "Non connectée"}
+                </span>
+              </div>
               <button
                 type="button"
-                disabled={busy}
-                onClick={() =>
-                  void run(
-                    async () => setDetail(await api.getStudio(studio.id)),
-                    "Studio actualisé.",
-                  )
-                }
+                disabled={busy || collaboration?.status === "online"}
+                onClick={() => void connectEditor()}
               >
-                {studio.name}
+                {collaboration?.status === "reconnecting" ? "Reconnexion…" : "Démarrer"}
               </button>
-              {" — "}
-              {studio.role} · révision {studio.revision}
-            </li>
-          ))}
-        </ul>
-      )}
-      {received.length > 0 && (
-        <div>
-          <h4>Invitations reçues</h4>
-          <ul>
-            {received.map((invitation) => (
-              <li key={invitation.id}>
-                {invitation.recipient} —{" "}
-                {Date.parse(invitation.expiresAt) <= Date.now() ? "expirée" : invitation.status}
-                {invitation.developmentToken ? (
-                  <>
-                    <button
-                      type="button"
-                      disabled={busy}
-                      onClick={() =>
-                        void run(
-                          () =>
-                            api.acceptStudioInvitation(
-                              invitation.developmentToken!,
-                              crypto.randomUUID(),
-                            ),
-                          "Invitation acceptée.",
-                        )
-                      }
-                    >
-                      Accepter
-                    </button>
-                    <button
-                      type="button"
-                      disabled={busy}
-                      onClick={() =>
-                        void run(
-                          () =>
-                            api.declineStudioInvitation(
-                              invitation.developmentToken!,
-                              crypto.randomUUID(),
-                            ),
-                          "Invitation refusée.",
-                        )
-                      }
-                    >
-                      Refuser
-                    </button>
-                  </>
-                ) : (
-                  <span> — action disponible depuis la notification sécurisée</span>
-                )}
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-      {detail && (
-        <div>
-          <h4>{detail.studio.name}</h4>
-          <p>
-            Rôle courant : {detail.studio.role}. Les changements sont toujours autorisés par le
-            serveur.
-          </p>
-          {editorBridge && (
-            <div className="studio-collaboration-status" aria-live="polite">
-              <button type="button" disabled={busy || collaboration?.status === "online"} onClick={() => void connectEditor()}>
-                {collaboration?.status === "reconnecting" ? "Reconnexion…" : "Relier l’éditeur en temps réel"}
-              </button>
-              {collaboration && (
-                <p>
-                  Connexion : {collaboration.status} · membres présents : {collaboration.presence.length} · retard : {collaboration.syncLag} événement(s)
-                </p>
+              {collaboration?.status === "online" && collaboration.syncLag > 0 && (
+                <p>{collaboration.syncLag} modification(s) en attente de synchronisation.</p>
               )}
-              {collaboration?.status === "read_only" && <p>Accès révoqué : l’éditeur distant est en lecture seule. Le fichier local reste intact.</p>}
+              {collaboration?.status === "read_only" && (
+                <p>Votre accès distant est désormais en lecture seule. Le fichier local est intact.</p>
+              )}
               {collaboration?.conflict && (
-                <div role="alert">
-                  <p>Conflit explicite : {collaboration.conflict.reason}. Aucune version n’a été écrasée silencieusement.</p>
-                  <button type="button" onClick={downloadRecoveryCopy}>Télécharger une copie locale de récupération</button>
+                <div className="studio-conflict" role="alert">
+                  <p>Un conflit doit être résolu avant de poursuivre.</p>
+                  <button type="button" onClick={downloadRecoveryCopy}>
+                    Télécharger une copie de récupération
+                  </button>
                 </div>
               )}
-              {collaboration?.presence.length ? (
-                <ul aria-label="Membres présents">
-                  {collaboration.presence.map((member) => <li key={member.profileId}>{member.displayName} — {member.role}</li>)}
-                </ul>
-              ) : null}
             </div>
           )}
-          <ul>
+
+          <div className="studio-members-heading">
+            <h4>Membres</h4>
+            <span>{detail.members.length}</span>
+          </div>
+          <div className="studio-members-list">
             {detail.members.map((member) => (
-              <li key={member.profileId}>
-                {member.displayName} — {member.role} — {member.status}
+              <div className="studio-member" key={member.profileId}>
+                <span className="studio-member-avatar" aria-hidden="true">
+                  {initials(member.displayName)}
+                </span>
+                <div className="studio-member-identity">
+                  <strong>
+                    {member.displayName}
+                    {member.profileId === currentProfileId && <span> (vous)</span>}
+                  </strong>
+                  <span>
+                    {ROLE_LABEL[member.role]} · {STATUS_LABEL[member.status] ?? member.status}
+                  </span>
+                </div>
                 {detail.studio.role === "owner" && member.profileId !== currentProfileId && (
-                  <>
-                    <select
-                      aria-label={`Rôle de ${member.displayName}`}
-                      value={member.role}
-                      disabled={busy}
-                      onChange={(event) =>
-                        void run(
-                          () =>
-                            api.changeStudioRole(
-                              detail.studio.id,
-                              member.profileId,
-                              event.target.value as StudioRole,
-                              crypto.randomUUID(),
-                            ),
-                          "Rôle validé par le serveur.",
-                        )
-                      }
-                    >
-                      <option value="viewer">viewer</option>
-                      <option value="editor">editor</option>
-                      <option value="owner">owner</option>
-                    </select>
-                    <button
-                      type="button"
-                      disabled={busy}
-                      onClick={() =>
-                        void run(
-                          () =>
-                            api.removeStudioMember(
-                              detail.studio.id,
-                              member.profileId,
-                              crypto.randomUUID(),
-                            ),
-                          "Membre retiré.",
-                        )
-                      }
-                    >
-                      Retirer
-                    </button>
-                  </>
+                  <details className="studio-member-menu">
+                    <summary>Gérer</summary>
+                    <div>
+                      <label>
+                        Accès
+                        <select
+                          aria-label={`Rôle de ${member.displayName}`}
+                          value={member.role}
+                          disabled={busy}
+                          onChange={(event) =>
+                            void run(
+                              () =>
+                                api.changeStudioRole(
+                                  detail.studio.id,
+                                  member.profileId,
+                                  event.target.value as StudioRole,
+                                  crypto.randomUUID(),
+                                ),
+                              "Accès du membre mis à jour.",
+                            )
+                          }
+                        >
+                          <option value="viewer">Lecture seule</option>
+                          <option value="editor">Éditeur</option>
+                          <option value="owner">Propriétaire</option>
+                        </select>
+                      </label>
+                      <button
+                        className="studio-danger-button"
+                        type="button"
+                        disabled={busy}
+                        onClick={() =>
+                          void run(
+                            () =>
+                              api.removeStudioMember(
+                                detail.studio.id,
+                                member.profileId,
+                                crypto.randomUUID(),
+                              ),
+                            "Membre retiré.",
+                          )
+                        }
+                      >
+                        Retirer du Studio
+                      </button>
+                    </div>
+                  </details>
                 )}
-              </li>
+              </div>
             ))}
-          </ul>
+          </div>
+
           {detail.studio.role === "owner" && (
-            <form className="account-auth-form" onSubmit={(event) => void invite(event)}>
-              <label>
-                Adresse à inviter
-                <input name="email" type="email" autoComplete="off" required />
-              </label>
-              <label>
-                Rôle demandé
-                <select name="role" defaultValue="viewer">
-                  <option value="viewer">viewer</option>
-                  <option value="editor">editor</option>
-                </select>
-              </label>
-              <button type="submit" disabled={busy}>
-                Créer l’invitation
-              </button>
-            </form>
+            <details className="studio-management-panel">
+              <summary>Inviter une personne</summary>
+              <form className="account-auth-form" onSubmit={(event) => void invite(event)}>
+                <label>
+                  Adresse e-mail
+                  <input name="email" type="email" autoComplete="off" required />
+                </label>
+                <label>
+                  Niveau d’accès
+                  <select name="role" defaultValue="viewer">
+                    <option value="viewer">Lecture seule</option>
+                    <option value="editor">Peut modifier</option>
+                  </select>
+                </label>
+                <button type="submit" disabled={busy}>
+                  Envoyer l’invitation
+                </button>
+              </form>
+            </details>
           )}
+
           {detail.invitations.length > 0 && (
-            <ul>
-              {detail.invitations.map((invitation) => (
-                <li key={invitation.id}>
-                  {invitation.recipient} — {invitation.role} —{" "}
-                  {Date.parse(invitation.expiresAt) <= Date.now() ? "expirée" : invitation.status}
-                  {invitation.status === "pending" && detail.studio.role === "owner" && (
-                    <button
-                      type="button"
-                      disabled={busy}
-                      onClick={() =>
-                        void run(
-                          () =>
-                            api.revokeStudioInvitation(
-                              detail.studio.id,
-                              invitation.id,
-                              crypto.randomUUID(),
-                            ),
-                          "Invitation révoquée.",
-                        )
-                      }
-                    >
-                      Révoquer
-                    </button>
-                  )}
-                </li>
-              ))}
-            </ul>
+            <details className="studio-management-panel">
+              <summary>Historique des invitations ({detail.invitations.length})</summary>
+              <div className="studio-invitation-history">
+                {detail.invitations.map((invitation) => (
+                  <div key={invitation.id}>
+                    <span>
+                      {invitation.recipient} · {ROLE_LABEL[invitation.role]} ·{" "}
+                      {Date.parse(invitation.expiresAt) <= Date.now()
+                        ? "Expirée"
+                        : (STATUS_LABEL[invitation.status] ?? invitation.status)}
+                    </span>
+                    {invitation.status === "pending" && detail.studio.role === "owner" && (
+                      <button
+                        className="studio-text-button"
+                        type="button"
+                        disabled={busy}
+                        onClick={() =>
+                          void run(
+                            () =>
+                              api.revokeStudioInvitation(
+                                detail.studio.id,
+                                invitation.id,
+                                crypto.randomUUID(),
+                              ),
+                            "Invitation révoquée.",
+                          )
+                        }
+                      >
+                        Annuler
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </details>
           )}
         </div>
       )}
-      {message && <p role="status">{message}</p>}
+      {message && (
+        <p className="studio-message" role="status">
+          {message}
+        </p>
+      )}
     </section>
   );
 }
