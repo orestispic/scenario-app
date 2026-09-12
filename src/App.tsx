@@ -1025,7 +1025,7 @@ function App() {
 
   const showError = useCallback(async (error: unknown) => {
     await message(error instanceof Error ? error.message : String(error), {
-      title: "Scénario",
+      title: "senario",
       kind: "error",
     });
   }, []);
@@ -1047,7 +1047,7 @@ function App() {
     return confirm(
       "Des modifications ne sont pas enregistrées. Continuer sans les enregistrer ?",
       {
-        title: "Scénario",
+        title: "senario",
         kind: "warning",
         okLabel: "Continuer",
         cancelLabel: "Annuler",
@@ -1962,7 +1962,7 @@ function App() {
             saveBeforeClosing = await confirm(
               "Voulez-vous enregistrer le projet avant de quitter ?",
               {
-                title: "Scénario",
+                title: "senario",
                 kind: "warning",
                 okLabel: "Oui, enregistrer",
                 cancelLabel: "Non, quitter",
@@ -3055,7 +3055,7 @@ function App() {
             </div>
             <div className="pdf-import-manual-help">
               <strong>Compte et appareil requis</strong>
-              <p>L’import passe par l’API Scénario. Le serveur vérifie la session, la version, l’appareil et le quota PDF.</p>
+              <p>L’import passe par l’API senario. Le serveur vérifie la session, la version, l’appareil et le quota PDF.</p>
             </div>
             {pdfImportError && <p className="form-error" role="alert">{pdfImportError}</p>}
             <footer>
@@ -3084,7 +3084,7 @@ function App() {
             <header>
               <div>
                 <h2>IA</h2>
-                <p>Les modèles et l’accès sont gérés par le serveur Scénario.</p>
+                <p>Les modèles et l’accès sont gérés par le serveur senario.</p>
               </div>
               <button
                 className="panel-close-button"

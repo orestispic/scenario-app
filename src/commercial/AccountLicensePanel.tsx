@@ -299,7 +299,7 @@ export function AccountLicensePanel({ onClose, onOpenCloud }: AccountLicensePane
                 }
               >
                 <label>
-                  Clé Scénario
+                  Clé senario
                   <input name="activationKey" autoComplete="off" spellCheck={false} required />
                 </label>
                 <button type="submit" disabled={busy}>
