@@ -1,10 +1,10 @@
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import type { AuthenticatedCommercialApi } from "./authenticatedApi";
+import type { ScenarioEditorBridge } from "./collaborationClient";
 import {
-  StudioCollaborationClient,
-  type CollaborationViewState,
-  type ScenarioEditorBridge,
-} from "./collaborationClient";
+  collaborationRuntime,
+  type RuntimeCollaborationState,
+} from "./collaborationRuntime";
 import type {
   StudioDetailResponse,
   StudioInvitationView,
@@ -52,8 +52,11 @@ export function StudioSection({
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
-  const [collaboration, setCollaboration] = useState<CollaborationViewState | null>(null);
-  const collaborationClient = useRef<StudioCollaborationClient | null>(null);
+  const [collaboration, setCollaboration] = useState<RuntimeCollaborationState | null>(null);
+  const activeCollaboration =
+    collaboration?.studioId === detail?.studio.id ? collaboration : null;
+
+  useEffect(() => collaborationRuntime.subscribe(setCollaboration), []);
 
   useEffect(() => {
     let active = true;
@@ -77,8 +80,6 @@ export function StudioSection({
       });
     return () => {
       active = false;
-      void collaborationClient.current?.disconnect();
-      collaborationClient.current = null;
     };
   }, [api]);
 
@@ -87,7 +88,6 @@ export function StudioSection({
     setBusy(true);
     setMessage("");
     try {
-      await collaborationClient.current?.disconnect();
       const versions = await api.listCloudVersions(detail.studio.scenarioId);
       const baseVersionId = versions.versions.reduce(
         (latest, candidate) =>
@@ -95,17 +95,14 @@ export function StudioSection({
         versions.versions[0],
       )?.id;
       if (!baseVersionId) throw new Error("Aucune version cloud de base n’est disponible.");
-      const client = new StudioCollaborationClient(
+      await collaborationRuntime.connect({
         api,
-        detail.studio.id,
-        detail.studio.scenarioId,
+        studioId: detail.studio.id,
+        scenarioId: detail.studio.scenarioId,
         baseVersionId,
-        currentProfileId,
-        editorBridge,
-      );
-      collaborationClient.current = client;
-      client.subscribe(setCollaboration);
-      await client.connect();
+        actorId: currentProfileId,
+        editor: editorBridge,
+      });
       setMessage("Éditeur relié au canal Studio.");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Canal Studio indisponible.");
@@ -115,7 +112,7 @@ export function StudioSection({
   }
 
   function downloadRecoveryCopy() {
-    const copy = collaborationClient.current?.recoveryCopy();
+    const copy = collaborationRuntime.recoveryCopy();
     if (!copy) return;
     const url = URL.createObjectURL(new Blob([JSON.stringify(copy, null, 2)], { type: "application/json" }));
     const link = document.createElement("a");
@@ -284,27 +281,30 @@ export function StudioSection({
               <div>
                 <strong>Collaboration en direct</strong>
                 <span>
-                  {collaboration?.status === "online"
-                    ? `${collaboration.presence.length} membre(s) présent(s)`
-                    : collaboration?.status === "reconnecting"
+                  {activeCollaboration?.status === "online"
+                    ? `${activeCollaboration.presence.length} membre(s) présent(s)`
+                    : activeCollaboration?.status === "reconnecting"
                       ? "Reconnexion en cours…"
                       : "Non connectée"}
                 </span>
               </div>
               <button
                 type="button"
-                disabled={busy || collaboration?.status === "online"}
+                disabled={
+                  busy ||
+                  activeCollaboration?.status === "online"
+                }
                 onClick={() => void connectEditor()}
               >
-                {collaboration?.status === "reconnecting" ? "Reconnexion…" : "Démarrer"}
+                {activeCollaboration?.status === "reconnecting" ? "Reconnexion…" : "Démarrer"}
               </button>
-              {collaboration?.status === "online" && collaboration.syncLag > 0 && (
-                <p>{collaboration.syncLag} modification(s) en attente de synchronisation.</p>
+              {activeCollaboration?.status === "online" && activeCollaboration.syncLag > 0 && (
+                <p>{activeCollaboration.syncLag} modification(s) en attente de synchronisation.</p>
               )}
-              {collaboration?.status === "read_only" && (
+              {activeCollaboration?.status === "read_only" && (
                 <p>Votre accès distant est désormais en lecture seule. Le fichier local est intact.</p>
               )}
-              {collaboration?.conflict && (
+              {activeCollaboration?.conflict && (
                 <div className="studio-conflict" role="alert">
                   <p>Un conflit doit être résolu avant de poursuivre.</p>
                   <button type="button" onClick={downloadRecoveryCopy}>

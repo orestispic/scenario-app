@@ -18,6 +18,7 @@ import {
 } from "./runtime";
 import { StudioSection } from "./StudioSection";
 import type { ScenarioEditorBridge } from "./collaborationClient";
+import { collaborationRuntime } from "./collaborationRuntime";
 
 interface AccountLicensePanelProps {
   onClose(): void;
@@ -41,6 +42,7 @@ export function AccountLicensePanel({ onClose, collaborationEditor }: AccountLic
   function accountApi() {
     return createRuntimeCommercialApi(async () => {
       setSession(false);
+      await collaborationRuntime.disconnect();
       await sessions.invalidate();
       await offlineTrust.clear();
     });
@@ -92,6 +94,7 @@ export function AccountLicensePanel({ onClose, collaborationEditor }: AccountLic
 
   async function loadAuthenticatedAccount(nextSession?: SessionTokens) {
     if (nextSession) {
+      await collaborationRuntime.disconnect();
       authenticatedOperations.reset();
       await offlineTrust.clear();
       await sessions.accept(nextSession);
@@ -181,6 +184,7 @@ export function AccountLicensePanel({ onClose, collaborationEditor }: AccountLic
   }
 
   async function signOut() {
+    await collaborationRuntime.disconnect();
     authenticatedOperations.stop();
     try {
       await sessions.logout();
