@@ -28,3 +28,4 @@ src-tauri/target
 .env
 .env.local
 .env.phase9.local
+/outputs/

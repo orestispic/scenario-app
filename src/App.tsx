@@ -107,10 +107,10 @@ import {
   type ScenarioTranslationSegment,
 } from "./document/aiConfig";
 import { AccountLicensePanel } from "./commercial/AccountLicensePanel";
-import type { ScenarioEditorBridge } from "./commercial/collaborationClient";
+import { CloudProjectsPanel, CloudProjectStatus } from './commercial/CloudProjectsPanel';
+import { cloudProjectRuntime, type CloudProjectEditor } from './commercial/cloudProjectRuntime';
 import { collaborationTransaction } from './editor/collaborationTransaction';
-import { collaborationRuntime } from "./commercial/collaborationRuntime";
-import { cloudSyncQueue } from "./commercial/runtime";
+import { cloudSyncQueue, createRuntimeCommercialApi, sessions, authenticatedOperations } from "./commercial/runtime";
 import "./App.css";
 
 const UNTITLED_DOCUMENT = "Sans titre";
@@ -395,6 +395,7 @@ function App() {
   const [customTransitionText, setCustomTransitionText] = useState("");
   const [aiBusy, setAiBusy] = useState(false);
   const [accountPanelOpen, setAccountPanelOpen] = useState(false);
+  const [cloudProjectsOpen, setCloudProjectsOpen] = useState(false);
   const [scenarioContextMenu, setScenarioContextMenu] =
     useState<ScenarioContextMenuState | null>(null);
   const [theme, setTheme] = useState<Theme>(() =>
@@ -973,14 +974,17 @@ function App() {
   );
 
   const replaceDocument = useCallback(
-    (document: ScenarioFile, filePath: string | null) => {
+    (document: ScenarioFile, filePath: string | null, fromCloud = false) => {
       if (!editor) {
         return;
       }
 
       // A channel is bound to one scenario. Never send a newly opened local
       // file to the previous Studio through the existing editor subscription.
-      void collaborationRuntime.disconnect();
+      if (!fromCloud) {
+        void cloudProjectRuntime.close();
+        editor.setEditable(true);
+      }
 
       isReplacingDocument.current = true;
       smartTypeInteractionStarted.current = false;
@@ -1094,29 +1098,6 @@ function App() {
       showError,
     ],
   );
-
-  const syncDocument = useCallback(async () => {
-    try {
-      const path = await saveDocument();
-      if (!path) return;
-      setDocumentState((previous) => ({ ...previous, status: "Synchronisation cloud…" }));
-      const queued = await cloudSyncQueue.enqueue(path, getFileTitle(path));
-      await cloudSyncQueue.process();
-      const result = (await cloudSyncQueue.list()).find((entry) => entry.id === queued.id);
-      setDocumentState((previous) => ({
-        ...previous,
-        status: result?.state === "synced"
-          ? "Synchronisé dans le cloud"
-          : result?.state === "conflict"
-            ? "Conflit cloud à résoudre"
-            : result?.state === "pending"
-              ? "Synchronisation en attente réseau"
-              : "Synchronisation cloud refusée",
-      }));
-    } catch (error) {
-      await showError(error);
-    }
-  }, [saveDocument, showError]);
 
   const rememberCustomPdfLanguage = useCallback((value: string): string => {
     const language = normalizePdfLanguage(value);
@@ -1720,6 +1701,9 @@ function App() {
       return;
     }
 
+    await cloudProjectRuntime.close();
+    editor.setEditable(true);
+
     isReplacingDocument.current = true;
     smartTypeInteractionStarted.current = false;
     setSmartType(null);
@@ -2211,6 +2195,31 @@ function App() {
     editor?.chain().focus().toggleUnderline().run();
   }, [editor]);
 
+  const cloudEditor: CloudProjectEditor = {
+    read: () => editor?.getJSON() ?? initialContent,
+    readFile: () => {
+      if (!editor || editor.isDestroyed) throw new Error('Éditeur indisponible.');
+      return createDocument(editor, currentDocumentState.current.title);
+    },
+    openFile: (file) => replaceDocument(file, null, true),
+    replaceDocument: (document, initial) => {
+      if (!editor || editor.isDestroyed) return;
+      isReplacingDocument.current = true;
+      try {
+        const transaction = collaborationTransaction(editor.state, document);
+        if (transaction) editor.view.dispatch(transaction);
+        if (!transaction && !initial) return;
+        ensureScenarioBlockIds(editor);
+        setDocumentState((previous) => ({ ...previous, ...(initial ? { filePath: null } : {}), isDirty: true, status: 'Projet cloud actualisé' }));
+      } finally { isReplacingDocument.current = false; }
+    },
+    subscribe: (listener) => {
+      collaborationListeners.current.add(listener);
+      return () => { collaborationListeners.current.delete(listener); };
+    },
+    setReadOnly: (value) => editor?.setEditable(!value),
+  };
+
   const coverPagePresent = hasCoverPageContent(coverPage);
   const coverPageVisible = coverPagePresent && !coverPageHidden;
   const documentSheetCount = pageCount + (coverPageVisible ? 1 : 0);
@@ -2230,6 +2239,8 @@ function App() {
     <div ref={appShellRef} className={`app-shell ${theme === "dark" ? "theme-dark" : ""}`}>
       <header className="menu-bar">
         <nav aria-label="Menu principal">
+          <button className="menu-button" type="button" onClick={() => setCloudProjectsOpen(true)}>Projets cloud</button>
+          <CloudProjectStatus onOpen={() => setCloudProjectsOpen(true)} />
           <div className="file-menu-container">
             <button
               className="menu-button"
@@ -2254,8 +2265,8 @@ function App() {
                 <button type="button" role="menuitem" onClick={() => runFileAction(async () => { await saveDocument(true); })}>
                   Enregistrer sous… <kbd>Ctrl+Maj+S</kbd>
                 </button>
-                <button type="button" role="menuitem" onClick={() => runFileAction(syncDocument)}>
-                  Synchroniser dans le cloud…
+                <button type="button" role="menuitem" onClick={() => { setFileMenuOpen(false); setCloudProjectsOpen(true); }}>
+                  Projets cloud…
                 </button>
                 <hr />
                 <button type="button" role="menuitem" onClick={openPdfExport}>
@@ -2831,44 +2842,20 @@ function App() {
       {accountPanelOpen && (
         <AccountLicensePanel
           onClose={() => setAccountPanelOpen(false)}
-          collaborationEditor={{
-            read: () => editor?.getJSON() ?? initialContent,
-            saveLocalCopy: () => {
-              if (!editor || editor.isDestroyed) throw new Error('Éditeur indisponible.');
-              const copy = createDocument(editor, currentDocumentState.current.title);
-              const url = URL.createObjectURL(new Blob([JSON.stringify(copy, null, 2)], { type: 'application/vnd.scenario+json' }));
-              const link = document.createElement('a');
-              link.href = url;
-              link.download = `copie-locale-avant-studio-${Date.now()}.scenario`;
-              link.click();
-              setTimeout(() => URL.revokeObjectURL(url), 1_000);
-            },
-            replaceDocument: (document, initial) => {
-              if (!editor || editor.isDestroyed) return;
-              isReplacingDocument.current = true;
-              try {
-                const transaction = collaborationTransaction(editor.state, document);
-                if (transaction) editor.view.dispatch(transaction);
-                if (!transaction && !initial) return;
-                ensureScenarioBlockIds(editor);
-                setDocumentState((previous) => ({
-                  ...previous,
-                  ...(initial ? { filePath: null } : {}),
-                  isDirty: true,
-                  status: "Modification distante reçue — enregistrement local conseillé",
-                }));
-              } finally {
-                isReplacingDocument.current = false;
-              }
-            },
-            subscribe: (listener) => {
-              collaborationListeners.current.add(listener);
-              return () => collaborationListeners.current.delete(listener);
-            },
-            setReadOnly: (value) => editor?.setEditable(!value),
-          } satisfies ScenarioEditorBridge}
+          onOpenCloud={() => { setAccountPanelOpen(false); setCloudProjectsOpen(true); }}
         />
       )}
+
+      {cloudProjectsOpen && <CloudProjectsPanel
+        apiFactory={() => createRuntimeCommercialApi(async () => {
+          await cloudProjectRuntime.close();
+          authenticatedOperations.stop();
+          await sessions.invalidate();
+        })}
+        editor={cloudEditor}
+        onClose={() => setCloudProjectsOpen(false)}
+        onSignIn={() => { setCloudProjectsOpen(false); setAccountPanelOpen(true); }}
+      />}
 
       {commentComposerOpen && (
         <div className="modal-backdrop" role="presentation" onMouseDown={() => setCommentComposerOpen(false)}>

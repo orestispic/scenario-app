@@ -1,6 +1,7 @@
 import type { JSONContent } from '@tiptap/core';
 import type { AuthenticatedCommercialApi } from './authenticatedApi';
 import type { CloudScenarioVersion } from './contractsV6';
+import { parseScenarioFile, type ScenarioFile } from '../document/scenarioFile';
 
 const MAX_BASE_BYTES = 4 * 1024 * 1024; // Transport safety, not a commercial quota.
 const invalid = (message: string) => Object.assign(new Error(message), { code: 'collaboration_base_invalid', status: 409 });
@@ -25,6 +26,13 @@ export async function loadStudioBase(
   api: AuthenticatedCommercialApi, version: CloudScenarioVersion,
   signal: AbortSignal, fetcher: typeof fetch = fetch,
 ): Promise<JSONContent> {
+  return (await loadCloudProjectFile(api, version, signal, fetcher)).content;
+}
+
+export async function loadCloudProjectFile(
+  api: AuthenticatedCommercialApi, version: CloudScenarioVersion,
+  signal: AbortSignal, fetcher: typeof fetch = fetch,
+): Promise<ScenarioFile> {
   signal = AbortSignal.any([signal, AbortSignal.timeout(8_000)]);
   if (version.sizeBytes < 2 || version.sizeBytes > MAX_BASE_BYTES) throw invalid('Base Studio trop volumineuse.');
   const grant = await api.getCloudDownload(version.scenarioId, version.id, signal);
@@ -72,5 +80,5 @@ export async function loadStudioBase(
     block.attrs = { ...block.attrs, blockId: id };
   });
   signal.throwIfAborted();
-  return document;
+  return parseScenarioFile(JSON.stringify({ ...file, content: document }));
 }

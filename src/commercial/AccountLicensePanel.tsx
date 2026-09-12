@@ -16,17 +16,15 @@ import {
   cloudSyncQueue,
   authenticatedOperations,
 } from "./runtime";
-import { StudioSection } from "./StudioSection";
-import type { ScenarioEditorBridge } from "./collaborationClient";
-import { collaborationRuntime } from "./collaborationRuntime";
+import { cloudProjectRuntime } from './cloudProjectRuntime';
 
 interface AccountLicensePanelProps {
   onClose(): void;
-  collaborationEditor?: ScenarioEditorBridge;
+  onOpenCloud?(): void;
 }
 type AuthScreen = "signin" | "signup" | "recover";
 
-export function AccountLicensePanel({ onClose, collaborationEditor }: AccountLicensePanelProps) {
+export function AccountLicensePanel({ onClose, onOpenCloud }: AccountLicensePanelProps) {
   const [screen, setScreen] = useState<AuthScreen>("signin");
   const [session, setSession] = useState(false);
   const [me, setMe] = useState<MeResponse | null>(null);
@@ -34,7 +32,6 @@ export function AccountLicensePanel({ onClose, collaborationEditor }: AccountLic
   const [devices, setDevices] = useState<DeviceView[]>([]);
   const [billing, setBilling] = useState<BillingState | null>(null);
   const [activations, setActivations] = useState<ActivationRedemptionView[]>([]);
-  const [studioRefreshKey, setStudioRefreshKey] = useState(0);
   const [busy, setBusy] = useState(false);
   const [offline, setOffline] = useState(false);
   const [message, setMessage] = useState("");
@@ -42,7 +39,7 @@ export function AccountLicensePanel({ onClose, collaborationEditor }: AccountLic
   function accountApi() {
     return createRuntimeCommercialApi(async () => {
       setSession(false);
-      await collaborationRuntime.disconnect();
+      await cloudProjectRuntime.close();
       await sessions.invalidate();
       await offlineTrust.clear();
     });
@@ -94,7 +91,7 @@ export function AccountLicensePanel({ onClose, collaborationEditor }: AccountLic
 
   async function loadAuthenticatedAccount(nextSession?: SessionTokens) {
     if (nextSession) {
-      await collaborationRuntime.disconnect();
+      await cloudProjectRuntime.close();
       authenticatedOperations.reset();
       await offlineTrust.clear();
       await sessions.accept(nextSession);
@@ -180,11 +177,10 @@ export function AccountLicensePanel({ onClose, collaborationEditor }: AccountLic
       platform: getClientPlatform(),
     });
     setDevices(await api.getDevices());
-    setStudioRefreshKey((value) => value + 1);
   }
 
   async function signOut() {
-    await collaborationRuntime.disconnect();
+    await cloudProjectRuntime.close();
     authenticatedOperations.stop();
     try {
       await sessions.logout();
@@ -352,12 +348,7 @@ export function AccountLicensePanel({ onClose, collaborationEditor }: AccountLic
               </button>
             </section>
             {!offline && (
-              <StudioSection
-                key={studioRefreshKey}
-                apiFactory={accountApi}
-                currentProfileId={me.account.id}
-                editorBridge={collaborationEditor}
-              />
+              <section className="account-license-section"><h3>Vos projets</h3><p>Retrouvez vos scénarios privés, vos projets partagés et leurs membres dans la fenêtre dédiée.</p><button type="button" onClick={onOpenCloud}>Ouvrir les Projets cloud</button></section>
             )}
             <footer>
               <button

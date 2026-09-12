@@ -77,7 +77,12 @@ export class CommercialHttpError extends Error {
   }
 }
 
+import { parseCloudProjects, parseProjectSharing, parseProjectInvitationResponse, type CloudProjectListResponse, type CloudProjectSharingResponse } from './contractsV9';
+
 export interface AuthenticatedCommercialApi {
+  listCloudProjects(): Promise<CloudProjectListResponse>;
+  ensureProjectSharing(scenarioId: string, idempotencyKey: string): Promise<CloudProjectSharingResponse>;
+  respondProjectInvitation(invitationId: string, decision: 'accept' | 'decline', idempotencyKey: string): Promise<void>;
   cancelCollaborationRequests?(): void;
   getConfiguration(): Promise<PublicConfiguration>;
   getMe(): Promise<MeResponse>;
@@ -174,7 +179,10 @@ export function createAuthenticatedCommercialApi(options: {
   const collaborationRequests = new Set<AbortController>();
 
   async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
-    if (!path.includes('/realtime/')) return requestInner<T>(path, init);
+    if (!path.includes('/realtime/')) {
+      const signals = [AbortSignal.timeout(15_000), init.signal, options.signal?.()].filter((s): s is AbortSignal => Boolean(s));
+      return requestInner<T>(path, { ...init, signal: AbortSignal.any(signals) });
+    }
     const controller = new AbortController();
     const parent = options.signal?.();
     const abort = () => controller.abort();
@@ -416,6 +424,9 @@ export function createAuthenticatedCommercialApi(options: {
       );
       return response.download;
     },
+    listCloudProjects: async () => parseCloudProjects(await request('/v9/projects', { headers: cloudHeaders() })),
+    ensureProjectSharing: async (scenarioId, key) => parseProjectSharing(await request(`/v9/projects/${scenarioId}/sharing`, { method: 'POST', headers: cloudHeaders(key), body: '{}' })),
+    respondProjectInvitation: async (id, decision, key) => parseProjectInvitationResponse(await request(`/v9/project-invitations/${id}/respond`, { method: 'POST', headers: cloudHeaders(key), body: JSON.stringify({ decision }) })),
     listStudios: async () =>
       parseStudioListResponse(await request<unknown>("/v6/studios", { headers: cloudHeaders() })),
     getStudio: async (studioId) =>
