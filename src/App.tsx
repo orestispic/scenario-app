@@ -108,6 +108,7 @@ import {
 } from "./document/aiConfig";
 import { AccountLicensePanel } from "./commercial/AccountLicensePanel";
 import type { ScenarioEditorBridge } from "./commercial/collaborationClient";
+import { collaborationRuntime } from "./commercial/collaborationRuntime";
 import { cloudSyncQueue } from "./commercial/runtime";
 import "./App.css";
 
@@ -972,6 +973,10 @@ function App() {
       if (!editor) {
         return;
       }
+
+      // A channel is bound to one scenario. Never send a newly opened local
+      // file to the previous Studio through the existing editor subscription.
+      void collaborationRuntime.disconnect();
 
       isReplacingDocument.current = true;
       smartTypeInteractionStarted.current = false;

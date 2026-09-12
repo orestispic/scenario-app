@@ -103,7 +103,7 @@ export function StudioSection({
         actorId: currentProfileId,
         editor: editorBridge,
       });
-      setMessage("Éditeur relié au canal Studio.");
+      setMessage("Demande de connexion envoyée.");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Canal Studio indisponible.");
     } finally {
@@ -111,8 +111,8 @@ export function StudioSection({
     }
   }
 
-  function downloadRecoveryCopy() {
-    const copy = collaborationRuntime.recoveryCopy();
+  async function downloadRecoveryCopy() {
+    const copy = await collaborationRuntime.recoveryCopy();
     if (!copy) return;
     const url = URL.createObjectURL(new Blob([JSON.stringify(copy, null, 2)], { type: "application/json" }));
     const link = document.createElement("a");
@@ -285,6 +285,12 @@ export function StudioSection({
                     ? `${activeCollaboration.presence.length} membre(s) présent(s)`
                     : activeCollaboration?.status === "reconnecting"
                       ? "Reconnexion en cours…"
+                      : activeCollaboration?.status === "connecting"
+                        ? "Connexion en cours…"
+                      : activeCollaboration?.status === "read_only"
+                        ? "Lecture seule"
+                      : activeCollaboration?.status === "recovery_required" || activeCollaboration?.status === "conflict"
+                        ? "Récupération nécessaire — texte local conservé"
                       : "Non connectée"}
                 </span>
               </div>
@@ -292,19 +298,29 @@ export function StudioSection({
                 type="button"
                 disabled={
                   busy ||
-                  activeCollaboration?.status === "online"
+                  Boolean(activeCollaboration && activeCollaboration.status !== "disconnected")
                 }
                 onClick={() => void connectEditor()}
               >
-                {activeCollaboration?.status === "reconnecting" ? "Reconnexion…" : "Démarrer"}
+                {activeCollaboration?.status === "reconnecting" ? "Reconnexion…" : activeCollaboration?.status === "online" ? "Connectée" : "Démarrer"}
               </button>
+              {activeCollaboration && activeCollaboration.status !== "disconnected" && (
+                <button type="button" onClick={() => void collaborationRuntime.disconnect()}>
+                  Arrêter la collaboration
+                </button>
+              )}
+              {activeCollaboration?.lastErrorCode && (
+                <p>Diagnostic : {activeCollaboration.lastErrorCode}
+                  {activeCollaboration.requestId ? ` · Référence : ${activeCollaboration.requestId}` : ""}
+                </p>
+              )}
               {activeCollaboration?.status === "online" && activeCollaboration.syncLag > 0 && (
                 <p>{activeCollaboration.syncLag} modification(s) en attente de synchronisation.</p>
               )}
               {activeCollaboration?.status === "read_only" && (
                 <p>Votre accès distant est désormais en lecture seule. Le fichier local est intact.</p>
               )}
-              {activeCollaboration?.conflict && (
+              {(activeCollaboration?.conflict || activeCollaboration?.status === "recovery_required") && (
                 <div className="studio-conflict" role="alert">
                   <p>Un conflit doit être résolu avant de poursuivre.</p>
                   <button type="button" onClick={downloadRecoveryCopy}>

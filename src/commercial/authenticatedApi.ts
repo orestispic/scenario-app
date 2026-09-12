@@ -70,6 +70,7 @@ export class CommercialHttpError extends Error {
     message = `API Scénario indisponible (${status}).`,
     readonly requestId: string | null = null,
     readonly details: Record<string, unknown> | null = null,
+    readonly retryAfterMs: number | null = null,
   ) {
     super(message);
     this.name = "CommercialHttpError";
@@ -77,6 +78,7 @@ export class CommercialHttpError extends Error {
 }
 
 export interface AuthenticatedCommercialApi {
+  cancelCollaborationRequests?(): void;
   getConfiguration(): Promise<PublicConfiguration>;
   getMe(): Promise<MeResponse>;
   getEntitlements(): Promise<EntitlementsResponse>;
@@ -169,11 +171,42 @@ export function createAuthenticatedCommercialApi(options: {
 }): AuthenticatedCommercialApi {
   const baseUrl = options.baseUrl.replace(/\/$/, "");
   const fetcher = options.fetcher ?? fetch;
+  const collaborationRequests = new Set<AbortController>();
 
   async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+    if (!path.includes('/realtime/')) return requestInner<T>(path, init);
+    const controller = new AbortController();
+    const parent = options.signal?.();
+    const abort = () => controller.abort();
+    parent?.addEventListener('abort', abort, { once: true });
+    if (parent?.aborted) abort();
+    collaborationRequests.add(controller);
+    let timedOut = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => {
+        timedOut = true;
+        controller.abort();
+        reject(new CommercialHttpError(504, 'request_timeout'));
+      }, 8_000);
+    });
+    try {
+      return await Promise.race([requestInner<T>(path, { ...init, signal: controller.signal }), timeout]);
+    } catch (error) {
+      if (timedOut) throw new CommercialHttpError(504, 'request_timeout');
+      throw error;
+    } finally {
+      clearTimeout(timer);
+      parent?.removeEventListener('abort', abort);
+      collaborationRequests.delete(controller);
+    }
+  }
+
+  async function requestInner<T>(path: string, init: RequestInit = {}): Promise<T> {
     const accessToken =
       typeof options.accessToken === "function" ? await options.accessToken() : options.accessToken;
-    if (!accessToken) throw new Error("Reconnectez-vous pour continuer.");
+    if (!accessToken) throw new CommercialHttpError(401, 'session_expired', "Reconnectez-vous pour continuer.");
+    if (init.signal?.aborted) throw new DOMException('Aborted', 'AbortError');
     const response = await fetcher(`${baseUrl}${path}`, {
       ...init,
       signal: init.signal ?? options.signal?.(),
@@ -184,7 +217,6 @@ export function createAuthenticatedCommercialApi(options: {
         ...Object.fromEntries(new Headers(init.headers).entries()),
       },
     });
-    if (response.status === 401) await options.onUnauthorized?.();
     if (!response.ok) {
       let error: { code?: unknown; message?: unknown; request_id?: unknown; conflict?: unknown } =
         {};
@@ -193,6 +225,16 @@ export function createAuthenticatedCommercialApi(options: {
       } catch {
         /* no error body */
       }
+      // A short-lived ticket/channel is not the account session. Its expiry
+      // must never erase the refresh token or log out the user.
+      if (response.status === 401 && !(
+        path.includes('/realtime/') &&
+        ['collaboration_connection_closed', 'collaboration_ticket_invalid'].includes(String(error.code))
+      ) && !init.signal?.aborted) await options.onUnauthorized?.();
+      const retryHeader = response.headers.get('retry-after');
+      const retryAfterMs = retryHeader === null ? null : /^\d+$/.test(retryHeader)
+        ? Number(retryHeader) * 1_000
+        : Math.max(0, Date.parse(retryHeader) - Date.now());
       throw new CommercialHttpError(
         response.status,
         typeof error.code === "string" ? error.code : "commercial_api_error",
@@ -203,6 +245,7 @@ export function createAuthenticatedCommercialApi(options: {
           ? error.request_id
           : response.headers.get("x-request-id"),
         error.conflict && typeof error.conflict === "object" ? { conflict: error.conflict } : null,
+        Number.isFinite(retryAfterMs) ? retryAfterMs : null,
       );
     }
     return (response.status === 204 ? undefined : response.json()) as Promise<T>;
@@ -475,6 +518,10 @@ export function createAuthenticatedCommercialApi(options: {
           method: "POST", headers: cloudHeaders(crypto.randomUUID()), body: JSON.stringify({ connectionId, parentVersionId }),
         }),
       ),
+    cancelCollaborationRequests: () => {
+      for (const controller of collaborationRequests) controller.abort();
+      collaborationRequests.clear();
+    },
     disconnectCollaboration: async (studioId, connectionId) => {
       await request<unknown>(`/v7/studios/${studioId}/realtime/disconnect`, {
         method: "POST", headers: cloudHeaders(crypto.randomUUID()), body: JSON.stringify({ connectionId }),

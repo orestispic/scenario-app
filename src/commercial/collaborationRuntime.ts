@@ -14,7 +14,7 @@ export interface RuntimeCollaborationState extends CollaborationViewState {
 interface CollaborationClientHandle {
   connect(): Promise<void>;
   disconnect(): Promise<void>;
-  recoveryCopy(): CollaborationRecoveryCopy;
+  recoveryCopy(): CollaborationRecoveryCopy | Promise<CollaborationRecoveryCopy>;
   subscribe(listener: (state: CollaborationViewState) => void): () => void;
 }
 
@@ -57,6 +57,7 @@ export class CollaborationRuntime {
   private unsubscribeClient: (() => void) | null = null;
   private state = cloneState(DISCONNECTED_STATE);
   private listeners = new Set<(state: RuntimeCollaborationState) => void>();
+  private generation = 0;
 
   constructor(
     private readonly createClient: CollaborationClientFactory = (options) =>
@@ -77,7 +78,12 @@ export class CollaborationRuntime {
   }
 
   async connect(options: CollaborationConnectionOptions): Promise<void> {
-    await this.disconnect();
+    if (this.client && this.state.studioId === options.studioId &&
+        this.state.actorId === options.actorId) return;
+    const closing = this.disconnect();
+    const generation = this.generation;
+    await closing;
+    if (generation !== this.generation) return;
     const client = this.createClient(options);
     this.client = client;
     this.unsubscribeClient = client.subscribe((state) => {
@@ -86,14 +92,13 @@ export class CollaborationRuntime {
     });
     try {
       await client.connect();
-    } finally {
-      // A logout can occur while the ticket or connection request is in flight.
-      // Close any late connection instead of letting it outlive the account session.
-      if (this.client !== client) await client.disconnect();
+    } catch (error) {
+      if (this.client === client) throw error;
     }
   }
 
   async disconnect(): Promise<void> {
+    this.generation += 1;
     const client = this.client;
     this.client = null;
     this.unsubscribeClient?.();
@@ -102,7 +107,7 @@ export class CollaborationRuntime {
     if (client) await client.disconnect();
   }
 
-  recoveryCopy(): CollaborationRecoveryCopy | null {
+  async recoveryCopy(): Promise<CollaborationRecoveryCopy | null> {
     return this.client?.recoveryCopy() ?? null;
   }
 
@@ -113,3 +118,7 @@ export class CollaborationRuntime {
 }
 
 export const collaborationRuntime = new CollaborationRuntime();
+
+// Vite replaces module instances during development; the previous instance
+// must relinquish its channel before a new runtime is created.
+if (import.meta.hot) import.meta.hot.dispose(() => { void collaborationRuntime.disconnect(); });

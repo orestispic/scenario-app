@@ -14,6 +14,26 @@ function editorBridge(): ScenarioEditorBridge {
 }
 
 describe("CollaborationRuntime", () => {
+  it('cancels a queued replacement when logout happens during disconnect', async () => {
+    let release!: () => void;
+    let created = 0;
+    const runtime = new CollaborationRuntime(() => {
+      created += 1;
+      return {
+        connect: async () => {},
+        disconnect: () => new Promise<void>((resolve) => { release = resolve; }),
+        recoveryCopy: () => ({}) as CollaborationRecoveryCopy,
+        subscribe: () => () => {},
+      };
+    });
+    const options = { api: {} as AuthenticatedCommercialApi, studioId: 'one', scenarioId: 'one', baseVersionId: 'one', actorId: 'one', editor: editorBridge() };
+    await runtime.connect(options);
+    const replacing = runtime.connect({ ...options, studioId: 'two' });
+    await runtime.disconnect();
+    release();
+    await replacing;
+    expect(created).toBe(1);
+  });
   it("keeps the channel alive when the account panel unsubscribes", async () => {
     let listener: ((state: CollaborationViewState) => void) | null = null;
     const disconnect = vi.fn(async () => undefined);
