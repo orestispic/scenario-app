@@ -1174,11 +1174,12 @@ textarea {
 .account-local-test { display: grid; gap: 7px; padding: 11px; color: #5d4610; background: #fff8e8; border: 1px solid #ead7a2; border-radius: 5px; font-size: 13px; }
 .account-local-test p { margin: 0; }
 .account-local-test > div { display: flex; gap: 6px; }
-.account-auth-tabs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; }
+.account-auth-tabs { display: grid; grid-template-columns: repeat(2, 1fr); gap: 4px; }
 .account-auth-tabs button.is-active { color: #fff; background: #2d628c; border-color: #2d628c; }
 .account-auth-form { display: grid; gap: 11px; }
 .account-auth-form label { display: grid; gap: 5px; color: #48545c; font-size: 12px; font-weight: 700; }
 .account-auth-form input { width: 100%; padding: 8px 9px; color: #20272c; background: #f8fafb; border: 1px solid #c7d0d6; border-radius: 4px; font-size: 13px; }
+.account-auth-form .account-password-recovery { justify-self: end; margin-top: -5px; padding: 0; color: #2d628c; background: transparent; border: 0; font-size: 12px; text-decoration: underline; }
 .account-auth-form .primary-button { color: #fff; background: #2d628c; border-color: #2d628c; }
 .account-license-message { padding: 8px 10px; color: #31536b; background: #e5f0f6; border-radius: 4px; font-size: 12px; }
 
@@ -1827,6 +1828,7 @@ textarea {
 .theme-dark .account-auth-tabs button { color: #e0e7eb; background: #303940; border-color: #4d5960; }
 .theme-dark .account-auth-form label { color: #c5d0d6; }
 .theme-dark .account-auth-form input { color: #f1f4f5; background: #1a2024; border-color: #4d5960; }
+.theme-dark .account-auth-form .account-password-recovery { color: #8ec8eb; background: transparent; border-color: transparent; }
 .theme-dark .account-license-message { color: #b8d8e9; background: #223c4d; }
 
 .theme-dark .file-menu button,

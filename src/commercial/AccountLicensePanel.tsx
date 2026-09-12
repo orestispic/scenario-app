@@ -398,18 +398,14 @@ export function AccountLicensePanel({ onClose, collaborationEditor }: AccountLic
               </section>
             )}
             <nav className="account-auth-tabs" aria-label="Accès au compte">
-              {(["signin", "signup", "recover"] as const).map((tab) => (
+              {(["signin", "signup"] as const).map((tab) => (
                 <button
                   key={tab}
                   type="button"
                   className={screen === tab ? "is-active" : ""}
                   onClick={() => setScreen(tab)}
                 >
-                  {tab === "signin"
-                    ? "Connexion"
-                    : tab === "signup"
-                      ? "Inscription"
-                      : "Mot de passe"}
+                  {tab === "signin" ? "Connexion" : "Inscription"}
                 </button>
               ))}
             </nav>
@@ -435,6 +431,16 @@ export function AccountLicensePanel({ onClose, collaborationEditor }: AccountLic
                     required
                   />
                 </label>
+              )}
+              {screen === "signin" && (
+                <button
+                  className="account-password-recovery"
+                  type="button"
+                  disabled={busy}
+                  onClick={() => setScreen("recover")}
+                >
+                  Mot de passe oublié ?
+                </button>
               )}
               <button className="primary-button" type="submit" disabled={busy}>
                 {screen === "signin"
