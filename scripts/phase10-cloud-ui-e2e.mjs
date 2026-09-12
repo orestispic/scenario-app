@@ -18,7 +18,7 @@ try {
       const bytes = await runtime.scenarioStorage.resolveTemporaryDownload(url.toString(), profileId, payload.s);
       return route.fulfill({status: 200, contentType:'application/vnd.scenario+json', body: Buffer.from(bytes)});
     }
-    if (/^\/v[1-9]\//.test(url.pathname)) {
+    if (/^\/v\d+\//.test(url.pathname)) {
       const response = await runtime.worker.fetch(new Request(`http://localhost${url.pathname}${url.search}`, {method:request.method(), headers:request.headers(), ...(request.postData() ? {body:request.postData()} : {})}));
       if (response.status >= 400) console.log(`Isolated API rejected ${url.pathname}: ${response.status}`);
       return route.fulfill({status:response.status, headers:Object.fromEntries(response.headers), body:Buffer.from(await response.arrayBuffer())});

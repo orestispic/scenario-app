@@ -1,3 +1,4 @@
+import { parseMetadataResponse, type MetadataResponse, type MetadataWrite } from './contractsV10';
 import type {
   DeviceView,
   EntitlementsResponse,
@@ -81,6 +82,8 @@ import { parseCloudProjects, parseProjectSharing, parseProjectInvitationResponse
 
 export interface AuthenticatedCommercialApi {
   listCloudProjects(): Promise<CloudProjectListResponse>;
+  getProjectMetadata(scenarioId:string, signal?:AbortSignal):Promise<MetadataResponse>;
+  writeProjectMetadata(scenarioId:string, write:MetadataWrite, signal?:AbortSignal):Promise<MetadataResponse>;
   ensureProjectSharing(scenarioId: string, idempotencyKey: string): Promise<CloudProjectSharingResponse>;
   respondProjectInvitation(invitationId: string, decision: 'accept' | 'decline', idempotencyKey: string): Promise<void>;
   cancelCollaborationRequests?(): void;
@@ -428,6 +431,8 @@ export function createAuthenticatedCommercialApi(options: {
       return response.download;
     },
     listCloudProjects: async () => parseCloudProjects(await request('/v9/projects', { headers: cloudHeaders() })),
+    getProjectMetadata: async (id,signal) => parseMetadataResponse(await request(`/v10/projects/${id}/metadata`,{headers:cloudHeaders(),signal})),
+    writeProjectMetadata: async (id,write,signal) => parseMetadataResponse(await request(`/v10/projects/${id}/metadata`,{method:'POST',headers:cloudHeaders(write.operationId),body:JSON.stringify(write),signal})),
     ensureProjectSharing: async (scenarioId, key) => parseProjectSharing(await request(`/v9/projects/${scenarioId}/sharing`, { method: 'POST', headers: cloudHeaders(key), body: '{}' })),
     respondProjectInvitation: async (id, decision, key) => parseProjectInvitationResponse(await request(`/v9/project-invitations/${id}/respond`, { method: 'POST', headers: cloudHeaders(key), body: JSON.stringify({ decision }) })),
     listStudios: async () =>

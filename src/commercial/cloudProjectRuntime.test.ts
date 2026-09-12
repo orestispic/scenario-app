@@ -6,6 +6,7 @@ import type { AuthenticatedCommercialApi } from './authenticatedApi';
 import { createEmptyCoverPage, type ScenarioFile } from '../document/scenarioFile';
 import type { CloudProject } from './contractsV9';
 import { parseCloudProjects } from './contractsV9';
+import { seedMetadata, type MetadataResponse } from './contractsV10';
 
 const projectId = '80000000-0000-4000-8000-000000000001';
 const project: CloudProject = { id: projectId, title: 'Privé', role: 'owner', sharing: 'private', memberCount: 1, canShare: true, realtimeStudioId: null, realtimeBaseVersionId: null, currentVersionId: 'v1', deletedAt: null, createdAt: '', updatedAt: '' };
@@ -18,6 +19,7 @@ function fixture() {
   const editor: CloudProjectEditor = {
     read: () => document.content, readFile: () => structuredClone(document),
     openFile: (value) => { document = structuredClone(value); }, replaceDocument: (content) => { document.content = structuredClone(content); },
+    replaceMetadata: (metadata) => { document = {...document,...metadata}; },
     setReadOnly: vi.fn(), subscribe: (listener) => { const callback = () => listener(document.content); listeners.add(callback); return () => {listeners.delete(callback);}; },
   };
   const copies = new Map<string, CloudWorkingCopy>();
@@ -30,6 +32,7 @@ function fixture() {
   });
   const api = { listCloudProjects: vi.fn(async () => ({ projects: [serverProject] })), listCloudVersions: vi.fn(async () => ({versions: [{id: serverProject.currentVersionId, parentVersionId: null, scenarioId: projectId}]})), syncCloudScenario: sync } as unknown as AuthenticatedCommercialApi;
   const createLive = vi.fn(() => ({ connect: async () => undefined, disconnect: async () => undefined, subscribe: () => () => undefined, recoveryCopy: vi.fn() }));
+  api.getProjectMetadata=vi.fn(async():Promise<MetadataResponse>=>({state:{scenarioId:projectId,baseVersionId:'v1',revision:0,registers:seedMetadata(remote)},status:'current',conflictKeys:[],replayed:false,contractVersion:'2026-09-v10',request_id:'test'}));
   const live = new CollaborationRuntime(createLive);
   const runtime = new CloudProjectRuntime(store, live, async () => structuredClone(remote)); active.push(runtime);
   const edit = (text: string) => { document = file(text); for(const cb of listeners) cb(); };

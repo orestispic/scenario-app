@@ -34,11 +34,8 @@ interface ScenarioBlock {
   text: string;
 }
 
-let idSequence = 0;
-
 export function createStableId(prefix: string): string {
-  idSequence += 1;
-  return `${prefix}_${Date.now().toString(36)}_${idSequence.toString(36)}`;
+  return `${prefix}_${crypto.randomUUID()}`;
 }
 
 export function getSelectionCommentAnchor(editor: Editor): CommentAnchor | null {
@@ -164,6 +161,7 @@ export function addCommentMark(editor: Editor, threadId: string, anchor: Comment
   editor.view.dispatch(
     editor.state.tr
       .addMark(position.from, position.to, markType.create({ threadId }))
+      .setMeta('scenario-comment-projection', true)
       .setMeta("addToHistory", false),
   );
 }
@@ -177,8 +175,21 @@ export function removeCommentMark(editor: Editor, threadId: string, anchor: Comm
   editor.view.dispatch(
     editor.state.tr
       .removeMark(position.from, position.to, markType.create({ threadId }))
+      .setMeta('scenario-comment-projection', true)
       .setMeta("addToHistory", false),
   );
+}
+
+/** Rebuild visual anchors without creating user undo steps or collaborative text edits. */
+export function syncProjectCommentMarks(editor:Editor,threads:CommentThread[]):void {
+  const markType=editor.schema.marks.commentAnchor;
+  if(!markType)return;
+  let tr=editor.state.tr.removeMark(0,editor.state.doc.content.size,markType);
+  for(const thread of threads) {
+    const position=thread.status==='open'?findCommentAnchorPosition(editor,thread.anchor):null;
+    if(position)tr=tr.addMark(position.from,position.to,markType.create({threadId:thread.id}));
+  }
+  if(!tr.doc.eq(editor.state.doc))editor.view.dispatch(tr.setMeta('scenario-comment-projection',true).setMeta('addToHistory',false));
 }
 
 function collectBlocks(doc: ProseMirrorNode): Map<string, ScenarioBlock> {

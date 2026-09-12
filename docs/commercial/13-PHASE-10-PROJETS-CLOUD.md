@@ -1,5 +1,8 @@
 # Phase 10 — Projets cloud privés et partagés
 
+La limite initiale couverture/commentaires décrite plus bas est levée par le
+complément `14-COMMENTAIRES-PREMIERES-PAGES.md` (contrat distinct v10).
+
 ## Parcours livré
 
 Le bouton **Projets cloud** ouvre une fenêtre indépendante de Compte et licence.

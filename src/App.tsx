@@ -12,7 +12,7 @@ import { EditorContent, useEditor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import Placeholder from "@tiptap/extension-placeholder";
 import { EditorState, TextSelection } from "@tiptap/pm/state";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke, isTauri } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { confirm, message } from "@tauri-apps/plugin-dialog";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
@@ -42,6 +42,7 @@ import {
   getSelectionCommentAnchor,
   reconcileCommentAnchors,
   removeCommentMark,
+  syncProjectCommentMarks,
   type CommentAnchor,
   type CommentThread,
 } from "./editor/comments";
@@ -108,6 +109,8 @@ import {
 } from "./document/aiConfig";
 import { AccountLicensePanel } from "./commercial/AccountLicensePanel";
 import { CloudProjectsPanel, CloudProjectStatus } from './commercial/CloudProjectsPanel';
+import { resolveProjectCommentAnchors } from './commercial/projectMetadataClient';
+import { ProjectCommentsPanel } from './editor/ProjectCommentsPanel';
 import { cloudProjectRuntime, type CloudProjectEditor } from './commercial/cloudProjectRuntime';
 import { collaborationTransaction } from './editor/collaborationTransaction';
 import { cloudSyncQueue, createRuntimeCommercialApi, sessions, authenticatedOperations } from "./commercial/runtime";
@@ -324,10 +327,10 @@ function App() {
   const [commentDraft, setCommentDraft] = useState("");
   const [activeCommentId, setActiveCommentId] = useState<string | null>(null);
   const [expandedCommentId, setExpandedCommentId] = useState<string | null>(null);
-  const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
-  const [editingCommentText, setEditingCommentText] = useState("");
   const [commentCardPositions, setCommentCardPositions] = useState<Record<string, { top: number; left: number }>>({});
   const [comments, setComments] = useState<CommentThread[]>([]);
+  const [commentsPanelOpen, setCommentsPanelOpen] = useState(false);
+  const [cloudReadOnly, setCloudReadOnly] = useState(false);
   const [recentScenarios, setRecentScenarios] = useState<RecentScenario[]>([]);
   const [findReplaceOpen, setFindReplaceOpen] = useState(false);
   const [pdfExportOpen, setPdfExportOpen] = useState(false);
@@ -651,6 +654,7 @@ function App() {
       }
     },
     onUpdate: ({ editor: activeEditor, transaction }) => {
+      if (transaction.getMeta('scenario-comment-projection')) return;
       if (transaction.getMeta("scenario-block-ids") !== true) {
         markDocumentChanged();
         if (!isReplacingDocument.current) {
@@ -703,11 +707,14 @@ function App() {
   useEffect(() => {
     commentsRef.current = comments;
     if (editor) {
+      syncProjectCommentMarks(editor, comments);
       editor.view.dom.querySelectorAll<HTMLElement>("[data-comment-thread-id]").forEach((anchor) => {
         anchor.classList.toggle("is-active", anchor.dataset.commentThreadId === activeCommentId);
       });
     }
   }, [activeCommentId, comments, editor]);
+
+  useEffect(() => { cloudProjectRuntime.metadataChanged(); }, [comments, coverPage, coverPageHidden, documentState.title]);
 
   useEffect(() => {
     if (!editor) {
@@ -1292,7 +1299,7 @@ function App() {
   }, [editor, findMatchCase, findQuery, refreshEditorState, replaceQuery]);
 
   const openCommentComposer = useCallback(async () => {
-    if (!editor) {
+    if (!editor?.isEditable) {
       return;
     }
     // Les anciens projets n'avaient pas encore d'identifiant de bloc.
@@ -1313,7 +1320,7 @@ function App() {
   }, [editor]);
 
   const saveNewComment = useCallback(() => {
-    if (!commentAnchor || !commentDraft.trim()) {
+    if (!editor?.isEditable || !commentAnchor || !commentDraft.trim()) {
       return;
     }
     const createdAt = new Date().toISOString();
@@ -1336,9 +1343,10 @@ function App() {
   }, [commentAnchor, commentDraft, editor]);
 
   const updateCommentThread = useCallback((threadId: string, update: (thread: CommentThread) => CommentThread) => {
+    if (!editor?.isEditable) return;
     setComments((previous) => previous.map((thread) => thread.id === threadId ? update(thread) : thread));
     setDocumentState((previous) => ({ ...previous, isDirty: true, status: "Commentaires modifiés" }));
-  }, []);
+  }, [editor]);
 
   const navigateToComment = useCallback((thread: CommentThread) => {
     if (!editor) {
@@ -1354,13 +1362,14 @@ function App() {
   }, [editor]);
 
   const deleteCommentThread = useCallback(async (threadId: string) => {
-    const shouldDelete = await confirm("Supprimer ce commentaire et toutes ses réponses ?", {
+    if (!editor?.isEditable) return;
+    const shouldDelete = isTauri() ? await confirm("Supprimer ce commentaire et toutes ses réponses ?", {
       title: "Commentaires",
       kind: "warning",
       okLabel: "Supprimer",
       cancelLabel: "Annuler",
-    });
-    if (!shouldDelete) {
+    }) : window.confirm('Supprimer ce commentaire et toutes ses réponses ?');
+    if (!shouldDelete || !editor?.isEditable) {
       return;
     }
     const thread = commentsRef.current.find((item) => item.id === threadId);
@@ -1371,22 +1380,6 @@ function App() {
     setActiveCommentId((previous) => previous === threadId ? null : previous);
     setDocumentState((previous) => ({ ...previous, isDirty: true, status: "Commentaire supprimé" }));
   }, [editor]);
-
-  const saveEditedComment = useCallback(() => {
-    if (!editingCommentId || !editingCommentText.trim()) {
-      return;
-    }
-    updateCommentThread(editingCommentId, (thread) => ({
-      ...thread,
-      messages: thread.messages.length === 0 ? [] : [{
-        ...thread.messages[0],
-        text: editingCommentText.trim(),
-        editedAt: new Date().toISOString(),
-      }],
-    }));
-    setEditingCommentId(null);
-    setEditingCommentText("");
-  }, [editingCommentId, editingCommentText, updateCommentThread]);
 
   const openAiSettings = useCallback(() => {
     setFileMenuOpen(false);
@@ -1496,6 +1489,7 @@ function App() {
 
   const updateCoverDraft = useCallback(
     (field: keyof CoverPageData, value: string) => {
+      if (!editor?.isEditable) return;
       setCoverDraft((previous) => {
         const next = { ...previous, [field]: value };
         // La page de garde est enregistrée avec le projet à chaque modification.
@@ -1510,10 +1504,11 @@ function App() {
         status: "Page de garde mise à jour",
       }));
     },
-    [],
+    [editor],
   );
 
   const saveCoverPage = useCallback(() => {
+    if (!editor?.isEditable) return;
     const normalizedCoverPage = normalizeCoverPage(coverDraft);
     coverPageRef.current = normalizedCoverPage;
     setCoverPage(normalizedCoverPage);
@@ -1524,9 +1519,10 @@ function App() {
       isDirty: true,
       status: "Page de garde mise à jour",
     }));
-  }, [coverDraft]);
+  }, [coverDraft, editor]);
 
   const toggleCoverPageHidden = useCallback((hidden: boolean) => {
+    if (!editor?.isEditable) return;
     coverPageHiddenRef.current = hidden;
     setCoverPageHidden(hidden);
     setDocumentState((previous) => ({
@@ -1534,7 +1530,7 @@ function App() {
       isDirty: true,
       status: hidden ? "Page de garde masquée" : "Page de garde affichée",
     }));
-  }, []);
+  }, [editor]);
 
   const saveAiSettings = useCallback(async () => {
     try {
@@ -2202,6 +2198,18 @@ function App() {
       return createDocument(editor, currentDocumentState.current.title);
     },
     openFile: (file) => replaceDocument(file, null, true),
+    replaceMetadata: (metadata) => {
+      if (!editor || editor.isDestroyed) return;
+      const anchored = resolveProjectCommentAnchors(metadata.comments, editor.getJSON());
+      coverPageRef.current = metadata.coverPage;
+      coverPageHiddenRef.current = metadata.coverPageHidden;
+      commentsRef.current = anchored;
+      currentDocumentState.current = { ...currentDocumentState.current, title: metadata.title };
+      setCoverPage(metadata.coverPage); setCoverDraft(metadata.coverPage);
+      setCoverPageHidden(metadata.coverPageHidden); setComments(anchored);
+      setDocumentState((previous) => ({ ...previous, title: metadata.title }));
+      syncProjectCommentMarks(editor, anchored);
+    },
     replaceDocument: (document, initial) => {
       if (!editor || editor.isDestroyed) return;
       isReplacingDocument.current = true;
@@ -2210,6 +2218,9 @@ function App() {
         if (transaction) editor.view.dispatch(transaction);
         if (!transaction && !initial) return;
         ensureScenarioBlockIds(editor);
+        const anchored = resolveProjectCommentAnchors(commentsRef.current, editor.getJSON());
+        commentsRef.current = anchored; setComments(anchored);
+        syncProjectCommentMarks(editor, anchored);
         setDocumentState((previous) => ({ ...previous, ...(initial ? { filePath: null } : {}), isDirty: true, status: 'Projet cloud actualisé' }));
       } finally { isReplacingDocument.current = false; }
     },
@@ -2217,7 +2228,7 @@ function App() {
       collaborationListeners.current.add(listener);
       return () => { collaborationListeners.current.delete(listener); };
     },
-    setReadOnly: (value) => editor?.setEditable(!value),
+    setReadOnly: (value) => { editor?.setEditable(!value); setCloudReadOnly(value); },
   };
 
   const coverPagePresent = hasCoverPageContent(coverPage);
@@ -2241,6 +2252,7 @@ function App() {
         <nav aria-label="Menu principal">
           <button className="menu-button" type="button" onClick={() => setCloudProjectsOpen(true)}>Projets cloud</button>
           <CloudProjectStatus onOpen={() => setCloudProjectsOpen(true)} />
+          <button className="menu-button" type="button" onClick={() => setCommentsPanelOpen(true)}>Commentaires ({comments.length})</button>
           <div className="file-menu-container">
             <button
               className="menu-button"
@@ -2328,6 +2340,8 @@ function App() {
                 }}
               >
                 <h2>Page de garde</h2>
+                {cloudReadOnly && <p role="status">Ce projet est en lecture seule.</p>}
+                <fieldset disabled={cloudReadOnly} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>
                 <label>
                   Nom du projet
                   <input
@@ -2396,9 +2410,10 @@ function App() {
                     <small>Masque la page de garde dans l’éditeur uniquement.</small>
                   </span>
                 </label>
+                </fieldset>
                 <footer>
                   <button type="button" onClick={() => setCoverMenuOpen(false)}>Fermer</button>
-                  <button className="primary-button" type="submit">Appliquer</button>
+                  <button className="primary-button" type="submit" disabled={cloudReadOnly}>Appliquer</button>
                 </footer>
               </form>
             )}
@@ -2485,7 +2500,7 @@ function App() {
         </button>
       </div>
 
-      {commentActionTarget && !commentComposerOpen && (
+      {commentActionTarget && !commentComposerOpen && !cloudReadOnly && (
         <button
           className="comment-inline-button"
           type="button"
@@ -2511,13 +2526,6 @@ function App() {
                 style={commentCardPositions[thread.id]}
                 onMouseEnter={() => setActiveCommentId(thread.id)}
               >
-                {editingCommentId === thread.id ? (
-                  <>
-                    <textarea value={editingCommentText} onChange={(event) => setEditingCommentText(event.target.value)} />
-                    <footer><button type="button" onClick={saveEditedComment}>Valider</button><button type="button" onClick={() => setEditingCommentId(null)}>Annuler</button></footer>
-                  </>
-                ) : (
-                  <>
                     <button className="comment-preview" type="button" onClick={() => {
                       setExpandedCommentId((current) => current === thread.id ? null : thread.id);
                       navigateToComment(thread);
@@ -2526,12 +2534,9 @@ function App() {
                     </button>
                     {expandedCommentId === thread.id && (
                       <footer>
-                        <button type="button" onClick={() => { setEditingCommentId(thread.id); setEditingCommentText(thread.messages[0]?.text ?? ""); }}>Modifier</button>
-                        <button type="button" onClick={() => void deleteCommentThread(thread.id)}>Supprimer</button>
+                        <button type="button" onClick={() => setCommentsPanelOpen(true)}>Ouvrir la discussion</button>
                       </footer>
                     )}
-                  </>
-                )}
               </article>
             ))}
         </div>
@@ -2857,6 +2862,10 @@ function App() {
         onSignIn={() => { setCloudProjectsOpen(false); setAccountPanelOpen(true); }}
       />}
 
+      {commentsPanelOpen && <ProjectCommentsPanel threads={comments} readOnly={cloudReadOnly}
+        onClose={() => setCommentsPanelOpen(false)} onNavigate={navigateToComment}
+        onUpdate={updateCommentThread} onDelete={(id) => void deleteCommentThread(id)} />}
+
       {commentComposerOpen && (
         <div className="modal-backdrop" role="presentation" onMouseDown={() => setCommentComposerOpen(false)}>
           <section className="comment-composer" role="dialog" aria-modal="true" aria-label="Ajouter un commentaire" onMouseDown={(event) => event.stopPropagation()}>
@@ -2865,6 +2874,8 @@ function App() {
             <textarea
               ref={commentInput}
               placeholder="Écrire un commentaire…"
+              maxLength={16384}
+              disabled={cloudReadOnly}
               value={commentDraft}
               onChange={(event) => setCommentDraft(event.target.value)}
               onKeyDown={(event) => {

@@ -6,10 +6,13 @@ import type { ScenarioEditorBridge } from './collaborationClient';
 import { collaborationRuntime, type CollaborationRuntime } from './collaborationRuntime';
 import { loadCloudProjectFile } from './studioBase';
 import { cloudProjectStore, type CloudProjectStore } from './cloudProjectStore';
+import { metadataFromRegisters, type ProjectMetadata } from './contractsV10';
+import { ProjectMetadataClient } from './projectMetadataClient';
 
 export interface CloudProjectEditor extends ScenarioEditorBridge {
   readFile(): ScenarioFile;
   openFile(file: ScenarioFile): void;
+  replaceMetadata(metadata:ProjectMetadata):void;
 }
 export interface OpenProjectState {
   project: CloudProject | null;
@@ -44,6 +47,8 @@ export class CloudProjectRuntime {
   private pendingRequest: { body: CloudSyncRequest; key: string; identity: string } | null = null;
   private running = false;
   private saving: Promise<void> = Promise.resolve();
+  private metadata:ProjectMetadataClient|null=null;
+  private textPending=false;
   constructor(private readonly store: CloudProjectStore = cloudProjectStore, private readonly live: CollaborationRuntime = collaborationRuntime, private readonly load = loadCloudProjectFile) {}
   subscribe(listener: (state: OpenProjectState) => void) {
     this.listeners.add(listener); listener(structuredClone(this.state));
@@ -62,6 +67,7 @@ export class CloudProjectRuntime {
     this.timer = null;
     this.unsubscribe?.(); this.unsubscribe = null;
     this.unsubscribeLive?.(); this.unsubscribeLive = null;
+    this.metadata?.stop();this.metadata=null;
     this.pendingRequest = null;
     this.api = null; this.editor = null;
     this.state.project = null;
@@ -86,7 +92,9 @@ export class CloudProjectRuntime {
       const version = versions.find((v) => v.id === project.currentVersionId);
       if (!version) throw new Error('Version du projet indisponible.');
       const cached = await this.store.read(accountId, project.id);
-      const file = await this.load(api, version, this.scope.signal);
+      let file = await this.load(api, version, this.scope.signal);
+      const metadataState=project.realtimeStudioId?(await api.getProjectMetadata(project.id,this.scope.signal)).state:null;
+      if(metadataState)file={...file,...metadataFromRegisters(metadataState.registers)};
       if (generation !== this.generation) return;
       this.state.project = project; this.parent = version.id; this.confirmed = fileIdentity(file);
       if (cached?.pending && !useRemote && fileIdentity(cached.file) !== this.confirmed) {
@@ -99,10 +107,14 @@ export class CloudProjectRuntime {
       editor.openFile(file);
       this.unsubscribe = editor.subscribe(() => this.changed());
       if (project.realtimeStudioId) {
+        if(!metadataState)throw new Error('Commentaires et premières pages indisponibles.');
+        this.metadata=new ProjectMetadataClient(api,metadataState,()=>editor.readFile(),(metadata)=>editor.replaceMetadata(metadata),this.scope.signal,project.role==='viewer');
+        this.textPending=true;
         const root = versions.find((v) => v.id === project.realtimeBaseVersionId && v.scenarioId === project.id);
         if (!root) throw new Error('Base du partage indisponible. Votre copie locale est conservée.');
         this.unsubscribeLive = this.live.subscribe((state) => {
           if (generation !== this.generation || state.studioId !== project.realtimeStudioId) return;
+          this.textPending=Boolean(state.syncLag)||!['online','read_only'].includes(state.status)||Boolean(state.lastErrorCode);
           if ((state.status === 'online' || state.status === 'read_only') && !state.syncLag && !state.lastErrorCode) {
             this.confirmed = fileIdentity({ ...file, content: editor.readFile().content });
             void this.saveCopy().catch(() => this.update('error', 'Copie locale indisponible. Exportez votre scénario.'));
@@ -127,31 +139,46 @@ export class CloudProjectRuntime {
   }
   private changed() {
     if (!this.editor || !this.state.project) return;
+    if(this.state.project.realtimeStudioId)this.textPending=true;
     void this.saveCopy().catch(() => this.update('error', 'Copie locale indisponible : exportez votre scénario.'));
     if (!this.state.project.realtimeStudioId && !['read_only', 'conflict'].includes(this.state.status)) {
       this.update('pending'); this.schedule(1500);
+    }
+  }
+  metadataChanged() {
+    if(!this.state.project||!this.editor)return;
+    if(!this.state.project.realtimeStudioId){this.changed();return;}
+    if(this.metadata?.hasPending()&&!['conflict','read_only','error'].includes(this.state.status)) {
+      void this.saveCopy().catch(()=>this.update('error','Copie locale indisponible.'));
+      this.update('realtime','Commentaires et premières pages : synchronisation…');this.schedule(800);
     }
   }
   private async saveCopy() {
     const editor = this.editor, project = this.state.project;
     if (!editor || !project) return;
     const file = editor.readFile();
-    const copy = { accountId: this.accountId, projectId: project.id, parentVersionId: this.parent, file, pending: fileIdentity(file) !== this.confirmed, savedAt: new Date().toISOString() };
+    const pending=project.realtimeStudioId?this.textPending||Boolean(this.metadata?.hasPending()):fileIdentity(file)!==this.confirmed;
+    const copy = { accountId: this.accountId, projectId: project.id, parentVersionId: this.parent, file, pending, savedAt: new Date().toISOString() };
     this.saving = this.saving.catch(() => undefined).then(() => this.store.write(copy));
     await this.saving;
   }
-  private schedule(delay = 10_000) {
+  private schedule(delay = this.state.project?.realtimeStudioId ? 4_000 : 10_000) {
     if (this.timer) clearTimeout(this.timer);
     this.timer = setTimeout(() => { this.timer = null; void this.flush(); }, delay);
   }
   async flush(): Promise<void> {
-    if (this.running || !this.api || !this.editor || !this.state.project || ['conflict', 'error'].includes(this.state.status)) return;
+    if (this.running || !this.api || !this.editor || !this.state.project || ['conflict', 'error', 'read_only'].includes(this.state.status)) return;
     this.running = true;
     const generation = this.generation, api = this.api, editor = this.editor, project = this.state.project;
-    let delay = 10_000;
+    let delay = project.realtimeStudioId ? 4_000 : 10_000;
     try {
       await this.saveCopy();
-      if (project.realtimeStudioId) return;
+      if (project.realtimeStudioId) {
+        await this.metadata?.sync();
+        if(generation!==this.generation)return;
+        this.update('realtime',this.metadata?.hasPending()?'Commentaires et premières pages : synchronisation…':'Commentaires et premières pages à jour.');
+        await this.saveCopy();return;
+      }
       if (project.sharing === 'shared') { editor.setReadOnly(true); this.update('read_only', 'Canal collaboratif non autorisé.'); return; }
       // A retry uses the exact original bytes + key, even if the editor changed meanwhile.
       if (this.pendingRequest) {
@@ -184,12 +211,12 @@ export class CloudProjectRuntime {
     } catch (error) {
       if (generation !== this.generation) return;
       const status = (error as { status?: number }).status;
-      if (status === 409) { editor.setReadOnly(true); this.update('conflict', 'Une autre version existe. Votre copie locale est conservée.'); }
-      else if (status && [401, 403, 404, 426].includes(status)) { editor.setReadOnly(true); this.update('read_only', 'Accès suspendu. Votre copie locale reste disponible.'); }
+      if (status === 409) { if(project.realtimeStudioId)await this.live.disconnect(); editor.setReadOnly(true); this.update('conflict', 'Commentaire, première page ou version modifié ailleurs. Votre copie locale est conservée.'); }
+      else if (status && [401, 403, 404, 426].includes(status)) { if(project.realtimeStudioId)await this.live.disconnect(); editor.setReadOnly(true); this.update('read_only', 'Accès suspendu. Votre copie locale reste disponible.'); }
       else { delay = 30_000; this.update('offline', 'Connexion indisponible. Les modifications restent sur cet appareil.'); }
     } finally {
       this.running = false;
-      if (generation === this.generation && this.state.project && !['conflict', 'error'].includes(this.state.status)) this.schedule(delay);
+      if (generation === this.generation && this.state.project && !['conflict', 'error', 'read_only'].includes(this.state.status)) this.schedule(delay);
     }
   }
 }

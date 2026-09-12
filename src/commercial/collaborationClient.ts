@@ -8,6 +8,7 @@ import type {
   CollaborativeOperationRequest,
 } from './contractsV8';
 import { applyScenarioMutation, blockId, CollaborationDocument } from './collaborationDocument';
+import { stripProjectCommentMarks } from './projectMetadataClient';
 export { applyScenarioMutation } from './collaborationDocument';
 
 export type CollaborationStatus =
@@ -60,6 +61,8 @@ export function diffScenarioBlocks(
   before: JSONContent,
   after: JSONContent,
 ): CollaborativeMutation[] {
+  before = stripProjectCommentMarks(before);
+  after = stripProjectCommentMarks(after);
   const oldBlocks = new Map(
     (before.content ?? []).flatMap((block) => {
       const id = blockId(block);
