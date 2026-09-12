@@ -29,6 +29,11 @@ export interface ScenarioEditorBridge {
   setReadOnly(value: boolean): void;
 }
 
+// The preproduction API limits each authenticated route to 60 requests/minute.
+// Keep ordinary catch-up traffic comfortably below that ceiling so heartbeats,
+// operations and user actions retain headroom.
+const IDLE_POLL_DELAY_MS = 2_000;
+
 function canonical(value: unknown): string {
   if (value === null || typeof value !== 'object') return JSON.stringify(value);
   if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`;
@@ -126,6 +131,8 @@ export class StudioCollaborationClient {
   private heartbeatTimer: ReturnType<typeof setTimeout> | null = null;
   private reconnectAttempts = 0;
   private applyingRemote = false;
+  private readOnly = false;
+  private heartbeatDelayMs = 10_000;
 
   constructor(
     private readonly api: AuthenticatedCommercialApi,
@@ -157,9 +164,12 @@ export class StudioCollaborationClient {
       this.connectionId = connection.connectionId;
       this.cursor = connection.cursor;
       this.reconnectAttempts = 0;
-      this.editor.setReadOnly(connection.role === 'viewer');
+      this.readOnly = connection.role === 'viewer';
+      this.heartbeatDelayMs =
+        connection.limits.heartbeatIntervalSeconds * 1_000;
+      this.editor.setReadOnly(this.readOnly);
       this.update({
-        status: connection.role === 'viewer' ? 'read_only' : 'online',
+        status: this.readOnly ? 'read_only' : 'online',
         presence: connection.presence,
         syncLag: 0,
       });
@@ -167,9 +177,7 @@ export class StudioCollaborationClient {
         (document) => void this.onLocalDocument(document),
       );
       this.schedulePoll(0);
-      this.scheduleHeartbeat(
-        connection.limits.heartbeatIntervalSeconds * 1_000,
-      );
+      this.scheduleHeartbeat(this.heartbeatDelayMs);
       await this.flush();
     } catch (error) {
       this.update({ status: 'offline' });
@@ -304,23 +312,17 @@ export class StudioCollaborationClient {
         }
       }
       this.update({ syncLag: response.syncLag });
-      this.schedulePoll(response.hasMore ? 0 : 500);
+      if (this.state.status === 'offline' || this.state.status === 'reconnecting')
+        this.update({
+          status: this.state.conflict
+            ? 'conflict'
+            : this.readOnly
+              ? 'read_only'
+              : 'online',
+        });
+      this.schedulePoll(response.hasMore ? 0 : IDLE_POLL_DELAY_MS);
     } catch (error) {
-      const code = (error as { code?: string }).code;
-      this.connectionId = null;
-      if (
-        [
-          'studio_not_found',
-          'studio_write_forbidden',
-          'collaboration_connection_closed',
-        ].includes(code ?? '')
-      ) {
-        this.editor.setReadOnly(true);
-        this.update({ status: 'read_only' });
-      } else {
-        this.update({ status: 'offline' });
-        this.scheduleReconnect();
-      }
+      this.handleConnectionFailure(error);
     }
   }
   private schedulePoll(delay: number) {
@@ -338,12 +340,17 @@ export class StudioCollaborationClient {
         this.studioId,
         this.connectionId,
       );
-      this.update({ presence: response.presence });
+      this.update({
+        presence: response.presence,
+        status: this.state.conflict
+          ? 'conflict'
+          : this.readOnly
+            ? 'read_only'
+            : 'online',
+      });
       this.scheduleHeartbeat(delay);
-    } catch {
-      this.connectionId = null;
-      this.update({ status: 'offline' });
-      this.scheduleReconnect();
+    } catch (error) {
+      this.handleConnectionFailure(error);
     }
   }
   private scheduleReconnect() {
@@ -354,9 +361,50 @@ export class StudioCollaborationClient {
       500 * 2 ** Math.min(this.reconnectAttempts++, 6),
     );
     this.pollTimer = setTimeout(
-      () => void this.connect().catch(() => undefined),
+      () => void this.resume().catch(() => undefined),
       delay,
     );
+  }
+  private async resume() {
+    if (this.disposed) return;
+    this.update({ status: 'reconnecting' });
+    if (!this.connectionId) {
+      await this.connect();
+      return;
+    }
+    try {
+      const response = await this.api.heartbeatCollaboration(
+        this.studioId,
+        this.connectionId,
+      );
+      this.reconnectAttempts = 0;
+      this.update({
+        presence: response.presence,
+        status: this.state.conflict
+          ? 'conflict'
+          : this.readOnly
+            ? 'read_only'
+            : 'online',
+      });
+      this.schedulePoll(IDLE_POLL_DELAY_MS);
+      this.scheduleHeartbeat(this.heartbeatDelayMs);
+      await this.flush();
+    } catch (error) {
+      this.handleConnectionFailure(error);
+    }
+  }
+  private handleConnectionFailure(error: unknown) {
+    const code = (error as { code?: string }).code;
+    if (['studio_not_found', 'studio_write_forbidden'].includes(code ?? '')) {
+      this.connectionId = null;
+      this.readOnly = true;
+      this.editor.setReadOnly(true);
+      this.update({ status: 'read_only' });
+      return;
+    }
+    if (code === 'collaboration_connection_closed') this.connectionId = null;
+    this.update({ status: 'offline' });
+    this.scheduleReconnect();
   }
   private clearTimers() {
     if (this.pollTimer) clearTimeout(this.pollTimer);
