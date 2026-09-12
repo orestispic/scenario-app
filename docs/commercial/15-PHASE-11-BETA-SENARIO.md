@@ -1,6 +1,6 @@
 # Phase 11 — senario, bêta Windows
 
-Nom public demandé : **senario**. Le domaine souhaité `senario.app` n'est pas
+Nom public demandé : **senario**. Le domaine `senario.app` a depuis été
 acheté ; pas de boîte support ni certificat Windows fourni. Le site commercial
 et son parcours font l'objet du document `18-PHASE-11-BETA-SENARIO.md` dans le
 worktree site. La publication publique n'est pas déclarée prête.

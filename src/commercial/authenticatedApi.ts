@@ -68,7 +68,7 @@ export class CommercialHttpError extends Error {
   constructor(
     readonly status: number,
     readonly code = "commercial_api_error",
-    message = `API Scénario indisponible (${status}).`,
+    message = `API senario indisponible (${status}).`,
     readonly requestId: string | null = null,
     readonly details: Record<string, unknown> | null = null,
     readonly retryAfterMs: number | null = null,
@@ -254,7 +254,7 @@ export function createAuthenticatedCommercialApi(options: {
         typeof error.code === "string" ? error.code : "commercial_api_error",
         typeof error.message === "string"
           ? error.message
-          : `API Scénario indisponible (${response.status}).`,
+          : `API senario indisponible (${response.status}).`,
         typeof error.request_id === "string"
           ? error.request_id
           : response.headers.get("x-request-id"),

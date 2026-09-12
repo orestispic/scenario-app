@@ -47,7 +47,7 @@ Préserve exactement le texte, les accents, les apostrophes, la ponctuation, les
 Vérifie avant de répondre que chaque paragraphe possède le bon scenarioType et que le JSON est complet et valide.`;
 
 /** Prompt destiné à une conversion manuelle dans ChatGPT avec le PDF joint. */
-export const PDF_MANUAL_PROMPT = `Tu dois convertir le PDF joint en un véritable fichier téléchargeable nommé scenario-importe.scenario, compatible avec mon logiciel Scénario.
+export const PDF_MANUAL_PROMPT = `Tu dois convertir le PDF joint en un véritable fichier téléchargeable nommé scenario-importe.scenario, compatible avec mon logiciel senario.
 
 Utilise l’analyse de fichiers ou le mode Code Interpreter pour créer réellement le fichier sur le disque. Ne renvoie pas seulement un exemple, un extrait JSON ou du Markdown : crée le fichier .scenario et donne-moi son lien de téléchargement.
 

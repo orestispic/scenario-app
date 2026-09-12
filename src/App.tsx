@@ -8,6 +8,7 @@ import {
   type WheelEvent as ReactWheelEvent,
 } from "react";
 import type { Editor, JSONContent } from "@tiptap/core";
+import { ReleaseInfo } from "./commercial/ReleaseInfo";
 import { EditorContent, useEditor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import Placeholder from "@tiptap/extension-placeholder";
@@ -2802,7 +2803,7 @@ function App() {
           <section className="help-panel" role="dialog" aria-modal="true" aria-label="Aide" onMouseDown={(event) => event.stopPropagation()}>
             <header>
               <div>
-                <h2>Bien démarrer</h2>
+                <h2>Bien démarrer avec senario</h2>
                 <p>Les gestes essentiels pour écrire ton scénario.</p>
               </div>
               <button className="panel-close-button" type="button" aria-label="Fermer" onClick={() => setHelpOpen(false)}>×</button>
@@ -2840,6 +2841,7 @@ function App() {
               <p>Connecte-toi dans <strong>Compte et licence</strong>, puis active cet appareil. Les modèles, droits et quotas sont vérifiés par le serveur avant chaque demande.</p>
               <p>Aucune clé de fournisseur IA n’est demandée ni conservée par l’application.</p>
             </section>
+            <ReleaseInfo />
           </section>
         </div>
       )}

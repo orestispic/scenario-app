@@ -31,8 +31,8 @@
     "fileAssociations": [
       {
         "ext": ["scenario"],
-        "name": "Projet Scénario",
-        "description": "Projet Scénario",
+        "name": "Projet senario",
+        "description": "Projet senario",
         "role": "Editor",
         "mimeType": "application/x-scenario-project"
       }
