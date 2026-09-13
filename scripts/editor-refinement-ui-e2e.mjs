@@ -48,6 +48,8 @@ try {
     const card=page.locator('.margin-note').first();const hit=card.locator('.margin-note-hitbox');
     const collapsed=await hit.locator('span').evaluate(el=>({whiteSpace:getComputedStyle(el).whiteSpace,scrollHeight:el.scrollHeight,clientHeight:el.clientHeight}));
     assert.equal(collapsed.whiteSpace,'nowrap');assert(collapsed.scrollHeight<=collapsed.clientHeight+1,'inactive comment stays on one line');
+    assert((await card.boundingBox()).height<=36,'inactive comment has no unused vertical space');
+    await hit.hover();assert.match(await card.evaluate(el=>getComputedStyle(el).backgroundColor),/253, 198, 69/);
     await hit.scrollIntoViewIfNeeded();const hitbox=await hit.boundingBox();await page.mouse.click(hitbox.x+hitbox.width-5,hitbox.y+hitbox.height-5);
     await card.getByRole('button',{name:'Modifier',exact:true}).waitFor();
     const expanded=await hit.locator('span').evaluate(el=>({whiteSpace:getComputedStyle(el).whiteSpace,scrollHeight:el.scrollHeight,clientHeight:el.clientHeight,text:el.textContent}));
@@ -57,7 +59,11 @@ try {
     assert.equal(await page.evaluate(()=>window.getSelection()?.toString()),'');
     assert.equal(await page.getByRole('dialog',{name:'Commentaires du projet'}).count(),0);
     assert.match(await page.locator('.scenario-comment-anchor').first().evaluate(el=>getComputedStyle(el).backgroundColor),/253, 198, 69/);
-    await card.getByRole('button',{name:'Modifier',exact:true}).click();await card.getByLabel('Modifier le commentaire').fill('Une note modifiée sur place.');
+    await card.getByRole('button',{name:'Modifier',exact:true}).click();
+    assert.equal(await card.locator('.margin-note-hitbox').count(),0,'editing replaces the old text instead of duplicating it');
+    const editField=card.getByLabel('Modifier le commentaire');
+    const [editBox,cardBox]=await Promise.all([editField.boundingBox(),card.boundingBox()]);assert(editBox.y-cardBox.y<=11,'editing field starts at the top of the card');
+    await editField.fill('Une note modifiée sur place.');
     await page.waitForFunction(()=>{
       const cards=[...document.querySelectorAll('.margin-note')].map(el=>el.getBoundingClientRect()).sort((a,b)=>a.top-b.top);
       const sheet=document.querySelector('.page-sheet').getBoundingClientRect();

@@ -66,23 +66,22 @@ export function CommentMargin({editor, threads, readOnly, activeId, onActivate, 
       return <article className={`margin-note ${expanded ? 'is-active' : ''}`} key={thread.id}
         onClick={event=>{if(event.target===event.currentTarget)onActivate(thread);}}
         data-comment-card-id={thread.id} style={{top: positions[thread.id] ?? 0, visibility: positions[thread.id] === undefined ? 'hidden' : 'visible'}}>
-        <button className="margin-note-hitbox" type="button" aria-expanded={expanded}
+        {!editing && <button className="margin-note-hitbox" type="button" aria-expanded={expanded}
           onClick={() => onActivate(thread)}>
           {expanded && (thread.anchor.lost || thread.status === 'resolved') && <small>{thread.anchor.lost ? 'Passage introuvable' : 'Commentaire résolu'}</small>}
           <span>{thread.messages[0]?.text}</span>
-        </button>
+        </button>}
         {expanded && <div className="margin-note-details">
-          {thread.messages.slice(1).map(message => <p key={message.id} className="margin-note-reply">{message.text}</p>)}
-          {readOnly && <small>Lecture seule</small>}
           {editing ? <form onSubmit={event => {event.preventDefault(); save();}}>
-            <label>Modifier le commentaire<UiTextarea autoFocus maxLength={16384} value={draft.text} disabled={readOnly}
-              onChange={event => setDraft({...draft,text:event.target.value})} /></label>
+            <UiTextarea autoFocus aria-label="Modifier le commentaire" maxLength={16384} value={draft.text} disabled={readOnly}
+              onChange={event => setDraft({...draft,text:event.target.value})} />
             {changed && <p role="alert">Ce commentaire a changé ou a été supprimé. Copiez votre brouillon avant d’annuler.</p>}
             <div className="margin-note-actions"><button type="submit" disabled={readOnly || changed || !draft.text.trim()}>Enregistrer</button><button type="button" onClick={() => setDraft(null)}>Annuler</button></div>
-          </form> : !readOnly && <div className="margin-note-actions">
-            <button type="button" disabled={Boolean(draft)} onClick={() => setDraft({thread,original:thread.messages[0]?.text ?? '',text:thread.messages[0]?.text ?? ''})}>Modifier</button>
-            <button type="button" className="margin-note-delete" disabled={Boolean(draft)} onClick={() => onDelete(thread.id)}>Supprimer</button>
-          </div>}
+          </form> : <>{thread.messages.slice(1).map(message => <p key={message.id} className="margin-note-reply">{message.text}</p>)}
+            {readOnly ? <small>Lecture seule</small> : <div className="margin-note-actions">
+              <button type="button" disabled={Boolean(draft)} onClick={() => setDraft({thread,original:thread.messages[0]?.text ?? '',text:thread.messages[0]?.text ?? ''})}>Modifier</button>
+              <button type="button" className="margin-note-delete" disabled={Boolean(draft)} onClick={() => onDelete(thread.id)}>Supprimer</button>
+            </div>}</>}
         </div>}
       </article>;
     })}
