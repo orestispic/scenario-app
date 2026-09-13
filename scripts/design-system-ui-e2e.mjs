@@ -81,6 +81,10 @@ try {
       const [aiButtonBox,aiMenuBox]=await Promise.all([aiButton.boundingBox(),aiMenu.boundingBox()]);
       assert(aiButtonBox&&aiMenuBox&&Math.abs(aiMenuBox.x-aiButtonBox.x)<2&&Math.abs(aiMenuBox.y-aiButtonBox.y-aiButtonBox.height)<=3,'AI menu opens directly below its button');
       await aiButton.click();
+      await action.hover();await page.getByRole('button',{name:'Ajouter une transition'}).click();
+      await page.locator('.transition-popover').waitFor();
+      await editor.locator('p[data-scenario-type="SCENE_HEADING"]').first().hover();
+      await page.locator('.transition-popover').waitFor({state:'detached'});
       for (const [name, label] of [['Rechercher', 'Rechercher et remplacer'], ['Raccourcis', 'Raccourcis de texte'], ['IA', 'Réglages IA'], ['Aide', 'Aide']]) {
         await page.getByRole('navigation', { name: 'Menu principal' }).getByRole('button', { name, exact: true }).click();
         const dialog = page.getByRole('dialog', { name: label, exact: true });

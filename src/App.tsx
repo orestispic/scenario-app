@@ -764,12 +764,6 @@ function App() {
       if (!editor) {
         return;
       }
-      // Une transition ouverte reste attachée au paragraphe d'origine :
-      // les déplacements de souris ne doivent ni la fermer ni déplacer sa
-      // surbrillance vers un autre paragraphe.
-      if (transitionMenuOpen) {
-        return;
-      }
       if (
         target instanceof HTMLElement &&
         target.closest(
@@ -795,6 +789,9 @@ function App() {
         paragraph.dataset.scenarioEnding === "true"
       ) {
         setAiPromptMenuOpen(false);
+        setTransitionMenuOpen(false);
+        setCustomTransitionOpen(false);
+        setCustomTransitionText("");
         if (!aiBusy) {
           setAiTarget(null);
         }
@@ -815,6 +812,9 @@ function App() {
 
       if (aiTarget && aiTarget.position !== position) {
         setAiPromptMenuOpen(false);
+        setTransitionMenuOpen(false);
+        setCustomTransitionOpen(false);
+        setCustomTransitionText("");
       }
       const appShellRect = appShellRef.current?.getBoundingClientRect();
       const paragraphOverlay = clientRectToOverlay(rect, zoom, appShellRect);
@@ -832,7 +832,7 @@ function App() {
         type,
       });
     },
-    [aiBusy, aiTarget, editor, transitionMenuOpen, zoom],
+    [aiBusy, aiTarget, editor, zoom],
   );
 
   useEffect(() => {
@@ -2208,7 +2208,25 @@ function App() {
     : textReplacementDrafts;
 
   return (
-    <div ref={appShellRef} className="app-shell theme-dark">
+    <div
+      ref={appShellRef}
+      className="app-shell theme-dark"
+      onMouseMove={(event) => {
+        aiPointerPosition.current = {
+          clientX: event.clientX,
+          clientY: event.clientY,
+        };
+        refreshAiTarget(event.target, event.clientX, event.clientY);
+      }}
+      onMouseLeave={() => {
+        aiPointerPosition.current = null;
+        setAiPromptMenuOpen(false);
+        setTransitionMenuOpen(false);
+        setCustomTransitionOpen(false);
+        setCustomTransitionText("");
+        if (!aiBusy) setAiTarget(null);
+      }}
+    >
       <header className="menu-bar">
         <div className="app-brand" title="senario — la meilleure page blanche">
           <img src="/senario-logo.png" alt="" width="28" height="28" />
@@ -2531,13 +2549,6 @@ function App() {
               ),
             );
           }
-        }}
-        onMouseMove={(event) => {
-          aiPointerPosition.current = {
-            clientX: event.clientX,
-            clientY: event.clientY,
-          };
-          refreshAiTarget(event.target, event.clientX, event.clientY);
         }}
         onWheel={handleWorkspaceWheel}
         onContextMenu={openScenarioContextMenu}
