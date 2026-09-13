@@ -2735,7 +2735,7 @@ function App() {
             <div
               className="ai-popover"
               role="menu"
-              style={{ left: aiTarget.left + 34, top: aiTarget.top - 10 }}
+              style={{ left: aiTarget.left, top: aiTarget.top + 18 }}
               onMouseDown={(event) => event.preventDefault()}
             >
               <div className="ai-popover-heading">

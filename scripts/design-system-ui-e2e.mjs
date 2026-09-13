@@ -70,6 +70,11 @@ try {
       const [highlightBox,sheetBox]=await Promise.all([highlight.boundingBox(),page.locator('.page-sheet').first().boundingBox()]);
       assert(highlightBox&&sheetBox&&Math.abs(highlightBox.x-sheetBox.x)<2&&Math.abs(highlightBox.width-sheetBox.width)<2,'AI hover highlight spans the complete sheet width');
       const aiButton=page.getByRole('button',{name:'Actions IA'});assert.equal((await aiButton.textContent()).trim(),'');assert.equal(await aiButton.locator('svg use').count(),1,'AI action uses the supplied sparkle icon');
+      await aiButton.click();
+      const aiMenu=page.locator('.ai-popover');await aiMenu.waitFor();
+      const [aiButtonBox,aiMenuBox]=await Promise.all([aiButton.boundingBox(),aiMenu.boundingBox()]);
+      assert(aiButtonBox&&aiMenuBox&&Math.abs(aiMenuBox.x-aiButtonBox.x)<2&&Math.abs(aiMenuBox.y-aiButtonBox.y-aiButtonBox.height)<2,'AI menu opens directly below its button');
+      await aiButton.click();
       for (const [name, label] of [['Rechercher', 'Rechercher et remplacer'], ['Raccourcis', 'Raccourcis de texte'], ['IA', 'Réglages IA'], ['Aide', 'Aide']]) {
         await page.getByRole('navigation', { name: 'Menu principal' }).getByRole('button', { name, exact: true }).click();
         const dialog = page.getByRole('dialog', { name: label, exact: true });
