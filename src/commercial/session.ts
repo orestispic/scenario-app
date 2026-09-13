@@ -14,12 +14,22 @@ export class SessionManager {
   private queue: Promise<unknown> = Promise.resolve();
   private refreshing: Promise<string | null> | null = null;
   private generation = 0;
+  private listeners = new Set<(authenticated: boolean) => void>();
   constructor(
     private readonly auth: AuthAdapter,
     private readonly vault: RefreshTokenVault,
     private readonly revoke: (accessToken: string) => Promise<void>,
     private readonly now = Date.now,
   ) {}
+
+  subscribe(listener: (authenticated: boolean) => void): () => void {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  }
+
+  private publish(authenticated: boolean): void {
+    this.listeners.forEach((listener) => listener(authenticated));
+  }
 
   private serial<T>(operation: () => Promise<T>): Promise<T> {
     const result = this.queue.then(operation, operation);
@@ -54,6 +64,7 @@ export class SessionManager {
       throw new Error("Le coffre-fort système est indisponible. Reconnectez-vous.");
     }
     this.access = { token: session.accessToken, expiresAt };
+    this.publish(true);
     return session.accessToken;
   }
 
@@ -69,7 +80,10 @@ export class SessionManager {
     this.refreshing = this.serial(async () => {
       if (generation !== this.generation) return null;
       const refreshToken = await this.vault.read();
-      if (!refreshToken) return null;
+      if (!refreshToken) {
+        this.publish(false);
+        return null;
+      }
       try {
         const session = await this.auth.refreshSession(refreshToken);
         if (generation !== this.generation) {
@@ -83,7 +97,10 @@ export class SessionManager {
         return await this.persist(session);
       } catch (error) {
         this.access = null;
-        if (error instanceof AuthSessionError && error.terminal) await this.vault.clear();
+        if (error instanceof AuthSessionError && error.terminal) {
+          await this.vault.clear();
+          this.publish(false);
+        }
         throw error;
       }
     }).finally(() => {
@@ -95,6 +112,7 @@ export class SessionManager {
   async invalidate(): Promise<void> {
     this.generation += 1;
     this.access = null;
+    this.publish(false);
     await this.serial(() => this.vault.clear());
   }
 
@@ -102,6 +120,7 @@ export class SessionManager {
     const accessToken = this.access?.token;
     this.generation += 1;
     this.access = null;
+    this.publish(false);
     await this.serial(async () => {
       await this.vault.clear();
       if (accessToken) await this.revoke(accessToken);

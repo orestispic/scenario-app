@@ -114,6 +114,8 @@ import {
   type ScenarioTranslationSegment,
 } from "./document/aiConfig";
 import { AccountLicensePanel } from "./commercial/AccountLicensePanel";
+import { CommercialHttpError } from "./commercial/authenticatedApi";
+import { AuthSessionError } from "./commercial/auth";
 import { OfflineLicenseStatus } from './commercial/OfflineLicenseStatus';
 import { CloudProjectsPanel, CloudProjectStatus } from './commercial/CloudProjectsPanel';
 import { resolveProjectCommentAnchors } from './commercial/projectMetadataClient';
@@ -121,7 +123,13 @@ import { CommentMargin } from './editor/CommentMargin';
 import { getDocumentStatistics } from './editor/documentStatistics';
 import { cloudProjectRuntime, type CloudProjectEditor } from './commercial/cloudProjectRuntime';
 import { collaborationTransaction } from './editor/collaborationTransaction';
-import { cloudSyncQueue, createRuntimeCommercialApi, sessions, authenticatedOperations } from "./commercial/runtime";
+import {
+  authenticatedOperations,
+  cloudSyncQueue,
+  createRuntimeCommercialApi,
+  offlineLicense,
+  sessions,
+} from "./commercial/runtime";
 import "./App.css";
 
 const UNTITLED_DOCUMENT = "Sans titre";
@@ -319,7 +327,95 @@ function findTextMatches(editor: Editor, search: string, matchCase: boolean): Te
   return matches;
 }
 
+type AuthenticationState = "checking" | "required" | "authenticated";
+
+function isTemporaryAuthenticationFailure(error: unknown): boolean {
+  return (
+    error instanceof TypeError ||
+    (error instanceof CommercialHttpError && [502, 503, 504].includes(error.status))
+  );
+}
+
 function App() {
+  const [authentication, setAuthentication] = useState<AuthenticationState>("checking");
+
+  useEffect(() => {
+    let active = true;
+    const stopListening = sessions.subscribe((authenticated) => {
+      if (!active || authenticated) return;
+      authenticatedOperations.stop();
+      void cloudProjectRuntime.close().catch(() => undefined);
+      setAuthentication("required");
+    });
+
+    void sessions
+      .getAccessToken()
+      .then((token) => {
+        if (!active) return;
+        if (token) {
+          authenticatedOperations.reset();
+          setAuthentication("authenticated");
+        } else {
+          setAuthentication("required");
+        }
+      })
+      .catch(async (error) => {
+        if (!active) return;
+        if (isTemporaryAuthenticationFailure(error)) {
+          const restored = await offlineLicense.restore().catch(() => null);
+          if (!active) return;
+          if (restored) {
+            authenticatedOperations.reset();
+            setAuthentication("authenticated");
+            return;
+          }
+        }
+        if (error instanceof AuthSessionError && error.terminal) {
+          await offlineLicense.clear().catch(() => undefined);
+        }
+        if (active) setAuthentication("required");
+      });
+
+    return () => {
+      active = false;
+      stopListening();
+    };
+  }, []);
+
+  if (authentication === "checking") {
+    return (
+      <main className="authentication-gate" aria-busy="true" aria-label="Vérification de la session">
+        <img src="/senario-logo.png" alt="" width="48" height="48" />
+        <strong>senario</strong>
+        <span>Vérification de la session…</span>
+      </main>
+    );
+  }
+
+  if (authentication === "required") {
+    return (
+      <div className="app-shell theme-dark authentication-required">
+        <AccountLicensePanel
+          required
+          onClose={() => undefined}
+          onAuthenticated={() => {
+            authenticatedOperations.reset();
+            setAuthentication("authenticated");
+          }}
+          onSignedOut={() => setAuthentication("required")}
+        />
+      </div>
+    );
+  }
+
+  return <AuthenticatedApp onAuthenticationLost={() => setAuthentication("required")} />;
+}
+
+interface AuthenticatedAppProps {
+  onAuthenticationLost(): void;
+}
+
+function AuthenticatedApp({ onAuthenticationLost }: AuthenticatedAppProps) {
   const [currentType, setCurrentType] = useState<ScenarioElementType>(
     DEFAULT_SCENARIO_ELEMENT_TYPE,
   );
@@ -787,7 +883,7 @@ function App() {
       if (
         target instanceof HTMLElement &&
         target.closest(
-          ".ai-popover, .ai-inline-button, .ai-settings-panel, .transition-popover, .transition-inline-button",
+          ".paragraph-action-cluster, .ai-settings-panel",
         )
       ) {
         return;
@@ -865,7 +961,7 @@ function App() {
       if (
         target instanceof Element &&
         target.closest(
-          ".transition-popover, .transition-inline-button, .ai-inline-button",
+          ".paragraph-action-cluster",
         )
       ) {
         return;
@@ -2676,117 +2772,129 @@ function App() {
               height: aiTarget.highlightHeight,
             }}
           />
-          <button
-            className={`ai-inline-button ${aiBusy ? "is-busy" : ""}`}
-            type="button"
-            aria-label="Actions IA"
-            title="Actions IA"
-            style={
-              {
-                left: aiTarget.left,
-                top: aiTarget.top,
-                "--ai-scale": zoom / 100,
-              } as CSSProperties
-            }
-            disabled={aiBusy}
-            onMouseDown={(event) => event.preventDefault()}
-            onClick={() => {
+          <div
+            className={`paragraph-action-cluster ai-action-cluster ${aiPromptMenuOpen ? "is-open" : ""}`}
+            style={{
+              left: aiTarget.left,
+              top: aiTarget.top - 16,
+              "--ai-scale": zoom / 100,
+            } as CSSProperties}
+            onMouseLeave={() => setAiPromptMenuOpen(false)}
+          >
+            <button
+              className={`ai-inline-button ${aiBusy ? "is-busy" : ""}`}
+              type="button"
+              aria-label="Actions IA"
+              title="Actions IA"
+              aria-expanded={aiPromptMenuOpen}
+              disabled={aiBusy}
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() => {
+                setTransitionMenuOpen(false);
+                setCustomTransitionOpen(false);
+                setCustomTransitionText("");
+                setAiPromptMenuOpen((isOpen) => !isOpen);
+              }}
+            >
+              <UiIcon name="star"/>
+            </button>
+            {aiPromptMenuOpen && (
+              <div
+                className="ai-popover"
+                role="menu"
+                onMouseDown={(event) => event.preventDefault()}
+              >
+                <div className="ai-popover-heading">
+                  <span>IA</span>
+                  <small>{getScenarioElementLabel(aiTarget.type)}</small>
+                </div>
+                {aiConfig.prompts.map((prompt) => (
+                  <button
+                    type="button"
+                    role="menuitem"
+                    key={prompt.id}
+                    onClick={() => void applyAiPrompt(prompt)}
+                  >
+                    {prompt.name}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+          <div
+            className={`paragraph-action-cluster transition-action-cluster ${transitionMenuOpen ? "is-open" : ""}`}
+            style={{
+              left: aiTarget.transitionLeft,
+              top: aiTarget.top - 16,
+              "--ai-scale": zoom / 100,
+            } as CSSProperties}
+            onMouseLeave={() => {
               setTransitionMenuOpen(false);
               setCustomTransitionOpen(false);
               setCustomTransitionText("");
-              setAiPromptMenuOpen((isOpen) => !isOpen);
             }}
           >
-            <UiIcon name="star"/>
-          </button>
-          <button
-            className="transition-inline-button"
-            type="button"
-            aria-label="Ajouter une transition"
-            title="Ajouter une transition"
-            style={{
-              left: aiTarget.transitionLeft,
-              top: aiTarget.top,
-              "--ai-scale": zoom / 100,
-            } as CSSProperties}
-            onMouseDown={(event) => event.preventDefault()}
-            onClick={() => {
-              setAiPromptMenuOpen(false);
-              setCustomTransitionOpen(false);
-              setTransitionMenuOpen((isOpen) => !isOpen);
-            }}
-          >
-            Transition
-          </button>
-          {transitionMenuOpen && (
-            <div
-              className="transition-popover"
-              role="menu"
-              style={{ left: aiTarget.transitionLeft, top: aiTarget.top + 18 }}
+            <button
+              className="transition-inline-button"
+              type="button"
+              aria-label="Ajouter une transition"
+              title="Ajouter une transition"
+              aria-expanded={transitionMenuOpen}
               onMouseDown={(event) => event.preventDefault()}
+              onClick={() => {
+                setAiPromptMenuOpen(false);
+                setCustomTransitionOpen(false);
+                setTransitionMenuOpen((isOpen) => !isOpen);
+              }}
             >
-              <div className="transition-popover-heading">Transition</div>
-              {STANDARD_PARAGRAPH_TRANSITIONS.map((transition) => (
-                <button
-                  type="button"
-                  role="menuitem"
-                  key={transition}
-                  onClick={() => insertTransition(transition)}
-                >
-                  {transition}
-                </button>
-              ))}
-              {!customTransitionOpen ? (
-                <button
-                  type="button"
-                  role="menuitem"
-                  onClick={() => setCustomTransitionOpen(true)}
-                >
-                  PERSONNALISÉ
-                </button>
-              ) : (
-                <form
-                  className="transition-custom-form"
-                  onSubmit={(event) => {
-                    event.preventDefault();
-                    insertTransition(customTransitionText);
-                  }}
-                >
-                  <input
-                    autoFocus
-                    value={customTransitionText}
-                    onChange={(event) => setCustomTransitionText(event.target.value)}
-                    placeholder="Votre transition"
-                    aria-label="Transition personnalisée"
-                  />
-                  <button type="submit" disabled={!customTransitionText.trim()}>Ajouter</button>
-                </form>
-              )}
-            </div>
-          )}
-          {aiPromptMenuOpen && (
-            <div
-              className="ai-popover"
-              role="menu"
-              style={{ left: aiTarget.left, top: aiTarget.top + 18 }}
-              onMouseDown={(event) => event.preventDefault()}
-            >
-              <div className="ai-popover-heading">
-                <span>IA</span>
-                <small>{getScenarioElementLabel(aiTarget.type)}</small>
+              Transition
+            </button>
+            {transitionMenuOpen && (
+              <div
+                className="transition-popover"
+                role="menu"
+                onMouseDown={(event) => event.preventDefault()}
+              >
+                <div className="transition-popover-heading">Transition</div>
+                {STANDARD_PARAGRAPH_TRANSITIONS.map((transition) => (
+                  <button
+                    type="button"
+                    role="menuitem"
+                    key={transition}
+                    onClick={() => insertTransition(transition)}
+                  >
+                    {transition}
+                  </button>
+                ))}
+                {!customTransitionOpen ? (
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => setCustomTransitionOpen(true)}
+                  >
+                    PERSONNALISÉ
+                  </button>
+                ) : (
+                  <form
+                    className="transition-custom-form"
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      insertTransition(customTransitionText);
+                    }}
+                  >
+                    <input
+                      autoFocus
+                      value={customTransitionText}
+                      onChange={(event) => setCustomTransitionText(event.target.value)}
+                      placeholder="Votre transition"
+                      aria-label="Transition personnalisée"
+                    />
+                    <button type="submit" disabled={!customTransitionText.trim()}>Ajouter</button>
+                  </form>
+                )}
               </div>
-              {aiConfig.prompts.map((prompt) => (
-                <button
-                  type="button"
-                  role="menuitem"
-                  key={prompt.id}
-                  onClick={() => void applyAiPrompt(prompt)}
-                >
-                  {prompt.name}
-                </button>
-              ))}
-            </div>
-          )}
+            )}
+          </div>
         </>
       )}
 
@@ -2842,6 +2950,7 @@ function App() {
         <AccountLicensePanel
           onClose={() => setAccountPanelOpen(false)}
           onOpenCloud={() => { setAccountPanelOpen(false); setCloudProjectsOpen(true); }}
+          onSignedOut={onAuthenticationLost}
         />
       )}
 
@@ -2850,10 +2959,14 @@ function App() {
           await cloudProjectRuntime.close();
           authenticatedOperations.stop();
           await sessions.invalidate();
+          onAuthenticationLost();
         })}
         editor={cloudEditor}
         onClose={() => setCloudProjectsOpen(false)}
-        onSignIn={() => { setCloudProjectsOpen(false); setAccountPanelOpen(true); }}
+        onSignIn={() => {
+          setCloudProjectsOpen(false);
+          onAuthenticationLost();
+        }}
       />}
 
       {commentComposerOpen && (

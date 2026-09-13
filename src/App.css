@@ -756,6 +756,29 @@ textarea {
   background: #2d628c;
 }
 
+.paragraph-action-cluster {
+  position: absolute;
+  z-index: 22;
+  display: grid;
+  width: max-content;
+  gap: 4px;
+  align-items: start;
+  justify-items: start;
+}
+
+.transition-action-cluster {
+  z-index: 23;
+}
+
+.paragraph-action-cluster > .ai-inline-button,
+.paragraph-action-cluster > .transition-inline-button,
+.paragraph-action-cluster > .ai-popover,
+.paragraph-action-cluster > .transition-popover {
+  position: relative;
+  inset: auto;
+  transform: none;
+}
+
 .ai-inline-button {
   position: absolute;
   z-index: 18;
@@ -2357,6 +2380,7 @@ textarea {
 
   .menu-bar,
   .smart-type,
+  .paragraph-action-cluster,
   .ai-inline-button,
   .ai-popover,
   .modal-backdrop,

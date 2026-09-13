@@ -21,10 +21,19 @@ import { cloudProjectRuntime } from './cloudProjectRuntime';
 interface AccountLicensePanelProps {
   onClose(): void;
   onOpenCloud?(): void;
+  onAuthenticated?(): void;
+  onSignedOut?(): void;
+  required?: boolean;
 }
 type AuthScreen = "signin" | "signup" | "recover";
 
-export function AccountLicensePanel({ onClose, onOpenCloud }: AccountLicensePanelProps) {
+export function AccountLicensePanel({
+  onClose,
+  onOpenCloud,
+  onAuthenticated,
+  onSignedOut,
+  required = false,
+}: AccountLicensePanelProps) {
   const [screen, setScreen] = useState<AuthScreen>("signin");
   const [session, setSession] = useState(false);
   const [me, setMe] = useState<MeResponse | null>(null);
@@ -46,9 +55,17 @@ export function AccountLicensePanel({ onClose, onOpenCloud }: AccountLicensePane
   function accountApi() {
     return createRuntimeCommercialApi(async () => {
       setSession(false);
-      await cloudProjectRuntime.close();
-      await sessions.invalidate();
-      await offlineLicense.clear();
+      try {
+        try {
+          await cloudProjectRuntime.close();
+        } catch {
+          // L'invalidation de sécurité reste prioritaire sur l'arrêt du temps réel.
+        }
+        await sessions.invalidate();
+        await offlineLicense.clear();
+      } finally {
+        onSignedOut?.();
+      }
     });
   }
 
@@ -82,6 +99,7 @@ export function AccountLicensePanel({ onClose, onOpenCloud }: AccountLicensePane
       setMessage(
         "Connexion indisponible. Les droits affichés proviennent du cache signé encore valide.",
       );
+      onAuthenticated?.();
       return true;
     } catch {
       return false;
@@ -114,6 +132,7 @@ export function AccountLicensePanel({ onClose, onOpenCloud }: AccountLicensePane
     setDevices(nextDevices);
     setBilling(nextBilling.billing);
     setActivations(nextActivations.activations);
+    onAuthenticated?.();
   }
 
   async function run(action: () => Promise<void>, success: string) {
@@ -166,22 +185,30 @@ export function AccountLicensePanel({ onClose, onOpenCloud }: AccountLicensePane
   }
 
   async function signOut() {
-    await cloudProjectRuntime.close();
     authenticatedOperations.stop();
     try {
-      await sessions.logout();
+      try {
+        await cloudProjectRuntime.close();
+      } catch {
+        // La déconnexion du compte doit continuer même si une liaison temps réel est déjà rompue.
+      }
+      try {
+        await sessions.logout();
+      } finally {
+        setOffline(false);
+        window.localStorage.removeItem("scenario-commercial-signed-entitlements-v2");
+        window.localStorage.removeItem(BOUND_CACHE_KEY);
+        setSession(false);
+        setMe(null);
+        setEntitlements(null);
+        setDevices([]);
+        setBilling(null);
+        setActivations([]);
+        await offlineLicense.clear();
+        await cloudSyncQueue.pauseAndForgetAccount();
+      }
     } finally {
-      setOffline(false);
-      window.localStorage.removeItem("scenario-commercial-signed-entitlements-v2");
-      window.localStorage.removeItem(BOUND_CACHE_KEY);
-      setSession(false);
-      setMe(null);
-      setEntitlements(null);
-      setDevices([]);
-      setBilling(null);
-      setActivations([]);
-      await offlineLicense.clear();
-      await cloudSyncQueue.pauseAndForgetAccount();
+      onSignedOut?.();
     }
   }
 
@@ -213,7 +240,11 @@ export function AccountLicensePanel({ onClose, onOpenCloud }: AccountLicensePane
   }
 
   return (
-    <div className="modal-backdrop" role="presentation" onMouseDown={onClose}>
+    <div
+      className={`modal-backdrop ${required ? "is-auth-required" : ""}`}
+      role="presentation"
+      onMouseDown={required ? undefined : onClose}
+    >
       <section
         className={`account-license-panel ${session && me && entitlements ? '' : 'account-signin-panel'}`}
         role="dialog"
@@ -226,14 +257,16 @@ export function AccountLicensePanel({ onClose, onOpenCloud }: AccountLicensePane
             <h2>{session && me && entitlements ? 'Compte et licence' : screen === 'signin' ? 'Se connecter' : screen === 'signup' ? 'Créer un compte' : 'Réinitialiser le mot de passe'}</h2>
             {session && me && entitlements && localTestMode && <p>Compte de démonstration</p>}
           </div>
-          <button
-            className="panel-close-button"
-            type="button"
-            aria-label="Fermer"
-            onClick={onClose}
-          >
-            <UiIcon name="x"/>
-          </button>
+          {!required && (
+            <button
+              className="panel-close-button"
+              type="button"
+              aria-label="Fermer"
+              onClick={onClose}
+            >
+              <UiIcon name="x"/>
+            </button>
+          )}
         </header>
 
         {session && me && entitlements ? (

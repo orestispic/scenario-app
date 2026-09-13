@@ -13,6 +13,11 @@
 }
 @media screen {
   :root {color-scheme:dark;background:var(--bg);color:var(--text);font-family:var(--font-ui);}
+  .authentication-gate {width:100%;height:100%;display:grid;place-content:center;justify-items:center;gap:10px;background:var(--bg);color:var(--text);font:14px/1.45 var(--font-ui);}
+  .authentication-gate strong {font-size:17px;font-weight:650;}
+  .authentication-gate span {color:var(--text-2);font-size:12px;}
+  .app-shell.theme-dark.authentication-required {grid-template-rows:minmax(0,1fr);}
+  .app-shell.theme-dark .modal-backdrop.is-auth-required {background:var(--bg);}
   .app-shell.theme-dark {grid-template-rows:minmax(42px,auto) 42px minmax(0,1fr) auto;background:var(--bg);color:var(--text);font:14px/1.45 var(--font-ui);-webkit-font-smoothing:antialiased;}
   .app-shell * {box-sizing:border-box;scrollbar-width:thin;scrollbar-color:#344252 transparent;}
   .app-shell ::selection {background:rgba(70,153,243,.36);color:var(--text);}
@@ -173,7 +178,7 @@
   .app-shell.theme-dark button.comment-inline-button.comment-inline-button {width:26px;height:26px;min-height:26px;padding:0;background:var(--surface-3);border:1px solid #344153;border-radius:8px;box-shadow:var(--shadow-2);color:var(--text-2);}
   .app-shell.theme-dark button.ai-inline-button.ai-inline-button {width:32px;height:32px;min-height:32px;padding:0;color:var(--amber);background:var(--surface-3);border-color:rgba(253,198,69,.48);border-radius:6px;}
   .app-shell.theme-dark button.ai-inline-button.ai-inline-button:hover:not(:disabled),.app-shell.theme-dark button.ai-inline-button.ai-inline-button.is-busy {color:#fff0bf;background:color-mix(in srgb,var(--surface-3) 82%,var(--amber));border-color:var(--amber);}
-  .app-shell.theme-dark button:is(.ai-inline-button,.transition-inline-button):active:not(:disabled) {transform:translateY(calc(-50% + 1px));}
+  .app-shell.theme-dark .paragraph-action-cluster>button:is(.ai-inline-button,.transition-inline-button):active:not(:disabled) {transform:translateY(1px);}
   .app-shell.theme-dark .ai-paragraph-highlight {background:rgba(70,153,243,.08);border-top:1px solid rgba(70,153,243,.16);border-bottom:1px solid rgba(70,153,243,.16);}
   .app-shell.theme-dark .response-only-ghost {color:var(--text-3);}
   .app-shell.theme-dark .transition-inline-button {color:var(--text-2);background:var(--surface-3);border-color:var(--border);}

@@ -101,4 +101,19 @@ describe("system-vault session lifecycle", () => {
     expect(s.revoke).toHaveBeenCalledWith("access-a");
     await expect(s.manager.accept({ ...s.session("b"), expiresAt: "invalid" })).rejects.toThrow();
   });
+  it("publishes authentication changes for restore, invalidation and logout", async () => {
+    const s = setup();
+    const listener = vi.fn();
+    const unsubscribe = s.manager.subscribe(listener);
+    await s.manager.accept(s.session("a"));
+    expect(listener).toHaveBeenLastCalledWith(true);
+    await s.manager.invalidate();
+    expect(listener).toHaveBeenLastCalledWith(false);
+    await s.manager.accept(s.session("b"));
+    await s.manager.logout();
+    expect(listener).toHaveBeenLastCalledWith(false);
+    unsubscribe();
+    await s.manager.accept(s.session("c"));
+    expect(listener).toHaveBeenCalledTimes(4);
+  });
 });
