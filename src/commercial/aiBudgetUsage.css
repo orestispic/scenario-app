@@ -1,0 +1,5 @@
+.ai-budget-usage { padding: 16px; margin-block: 16px; border: 1px solid var(--ui-border, #27313e); border-radius: 6px; background: var(--ui-panel, #11161e); }
+.ai-budget-usage h3 { margin: 0 0 12px; font-size: 14px; }
+.ai-budget-usage p { margin: 8px 0; font-size: 14px; }
+.ai-budget-usage small { display: block; color: var(--ui-text-secondary, #9aa7b7); line-height: 1.5; }
+.ai-budget-period { margin-bottom: 12px; }

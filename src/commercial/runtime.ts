@@ -6,6 +6,7 @@ import { createRuntimeTokenVault } from "./tokenVault";
 import { CloudSyncQueue, createBrowserSyncQueueStorage } from "./syncQueue";
 import { readScenario } from "../document/persistence";
 import { OfflineLicense } from './offlineLicense';
+import { version as clientVersion } from '../../package.json';
 
 export const localTestMode =
   import.meta.env.DEV && import.meta.env.VITE_SCENARIO_AUTH_MODE === "local-test";
@@ -70,7 +71,8 @@ export function createRuntimeCommercialApi(onUnauthorized?: () => Promise<void>)
     onUnauthorized,
     signal: authenticatedOperations.signal,
     clientContext: {
-      clientVersion: import.meta.env.VITE_SCENARIO_CLIENT_VERSION ?? "",
+      // The published artifact must report its own version even without a local .env.
+      clientVersion,
       deviceFingerprint: getDeviceFingerprint,
       platform: getClientPlatform,
     },

@@ -17,6 +17,7 @@ import {
   authenticatedOperations,
 } from "./runtime";
 import { cloudProjectRuntime } from './cloudProjectRuntime';
+import { AiBudgetUsage } from './AiBudgetUsage';
 
 interface AccountLicensePanelProps {
   onClose(): void;
@@ -271,6 +272,7 @@ export function AccountLicensePanel({
 
         {session && me && entitlements ? (
           <div className="account-license-details">
+            <AiBudgetUsage />
             <dl>
               <div>
                 <dt>Compte</dt>

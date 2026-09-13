@@ -1,4 +1,5 @@
 import { parseMetadataResponse, type MetadataResponse, type MetadataWrite } from './contractsV10';
+import { parseAiTokenBudgets, notifyAiUsageChanged, type AiTokenBudgets } from './aiTokenUsage';
 import type {
   DeviceView,
   EntitlementsResponse,
@@ -98,6 +99,7 @@ export interface AuthenticatedCommercialApi {
   }): Promise<DeviceView>;
   deactivateDevice(deviceId: string): Promise<void>;
   getUsage(): Promise<UsageView[]>;
+  getAiTokenUsage(): Promise<AiTokenBudgets>;
   logout(): Promise<void>;
   getBilling(): Promise<BillingOverviewResponse>;
   createCheckoutSession(input: CheckoutSessionRequest): Promise<CheckoutSessionResponse>;
@@ -344,6 +346,8 @@ export function createAuthenticatedCommercialApi(options: {
       )
         pendingAiKeys.delete(pendingKey);
       throw error;
+    } finally {
+      notifyAiUsageChanged();
     }
   }
 
@@ -365,6 +369,7 @@ export function createAuthenticatedCommercialApi(options: {
         body: JSON.stringify({ deviceId }),
       }),
     getUsage: async () => (await request<{ usage: UsageView[] }>("/v1/usage")).usage,
+    getAiTokenUsage: async () => parseAiTokenBudgets((await request<{ budgets: unknown }>("/v4/ai/usage")).budgets),
     logout: () => request<void>("/v1/auth/logout", { method: "POST", body: "{}" }),
     getBilling: () => request<BillingOverviewResponse>("/v2/billing"),
     createCheckoutSession: (input) =>

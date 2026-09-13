@@ -1,4 +1,5 @@
 import { UiTextarea } from './ui/UiTextarea';
+import { AiBudgetUsage } from './commercial/AiBudgetUsage';
 import { UiSelect } from './ui/UiSelect';
 import {
   useCallback,
@@ -3197,6 +3198,7 @@ function AuthenticatedApp({ onAuthenticationLost }: AuthenticatedAppProps) {
               ><UiIcon name="x"/></button>
             </header>
 
+            <AiBudgetUsage />
             <div className="prompt-editor-heading">
               <div>
                 <span>Prompts enregistrés</span>
