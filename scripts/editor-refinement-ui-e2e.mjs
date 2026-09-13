@@ -41,13 +41,17 @@ try {
     for (let i=0;i<3;i++) {
       await paragraph.click();await page.keyboard.press('Control+Home');await page.keyboard.press('Shift+End');
       await page.getByRole('button',{name:'Ajouter un commentaire',exact:true}).click();
-      await page.getByPlaceholder('Écrire un commentaire…').fill(`Note ${i+1} : vérifier ce passage.`);
+      await page.getByPlaceholder('Écrire un commentaire…').fill(i===0 ? 'Note 1 : vérifier ce passage en entier.\nLa deuxième ligne doit rester cachée au repos puis apparaître une fois le commentaire ouvert.' : `Note ${i+1} : vérifier ce passage.`);
       await page.getByRole('button',{name:'Commenter',exact:true}).click();
     }
     await page.waitForFunction(()=>document.querySelectorAll('.margin-note').length===3);
     const card=page.locator('.margin-note').first();const hit=card.locator('.margin-note-hitbox');
+    const collapsed=await hit.locator('span').evaluate(el=>({whiteSpace:getComputedStyle(el).whiteSpace,scrollHeight:el.scrollHeight,clientHeight:el.clientHeight}));
+    assert.equal(collapsed.whiteSpace,'nowrap');assert(collapsed.scrollHeight<=collapsed.clientHeight+1,'inactive comment stays on one line');
     await hit.scrollIntoViewIfNeeded();const hitbox=await hit.boundingBox();await page.mouse.click(hitbox.x+hitbox.width-5,hitbox.y+hitbox.height-5);
     await card.getByRole('button',{name:'Modifier',exact:true}).waitFor();
+    const expanded=await hit.locator('span').evaluate(el=>({whiteSpace:getComputedStyle(el).whiteSpace,scrollHeight:el.scrollHeight,clientHeight:el.clientHeight,text:el.textContent}));
+    assert.equal(expanded.whiteSpace,'pre-wrap');assert(expanded.scrollHeight<=expanded.clientHeight+1,'active comment shows its complete text');assert.match(expanded.text,/deuxième ligne/);
     assert.equal(await page.evaluate(()=>window.getSelection()?.toString()),'');
     assert.equal(await page.getByRole('dialog',{name:'Commentaires du projet'}).count(),0);
     assert.match(await page.locator('.scenario-comment-anchor').first().evaluate(el=>getComputedStyle(el).backgroundColor),/253, 198, 69/);

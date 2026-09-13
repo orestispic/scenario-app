@@ -68,7 +68,7 @@ export function CommentMargin({editor, threads, readOnly, activeId, onActivate, 
         data-comment-card-id={thread.id} style={{top: positions[thread.id] ?? 0, visibility: positions[thread.id] === undefined ? 'hidden' : 'visible'}}>
         <button className="margin-note-hitbox" type="button" aria-expanded={expanded}
           onClick={() => onActivate(thread)}>
-          {(thread.anchor.lost || thread.status === 'resolved') && <small>{thread.anchor.lost ? 'Passage introuvable' : 'Commentaire résolu'}</small>}
+          {expanded && (thread.anchor.lost || thread.status === 'resolved') && <small>{thread.anchor.lost ? 'Passage introuvable' : 'Commentaire résolu'}</small>}
           <span>{thread.messages[0]?.text}</span>
         </button>
         {expanded && <div className="margin-note-details">
