@@ -49,7 +49,7 @@ try {
     await cover.getByRole('button', { name: 'Appliquer', exact: true }).click();
     await page.screenshot({ path: `outputs/ui-charter/cover-${width}.png` });
 
-    await page.getByRole('button', { name: /^Commentaires \(/ }).click();
+    assert.equal(await page.getByRole('button', { name: /^Commentaires \(/ }).count(), 0);
     assert.equal(await page.getByRole('dialog', { name: 'Commentaires du projet' }).count(), 0);
 
     await page.getByRole('button', { name: 'Compte', exact: true }).click();
@@ -65,6 +65,11 @@ try {
     await account.getByRole('button', { name: 'Fermer', exact: true }).click();
 
     if (width === 1440) {
+      const action=editor.locator('p[data-scenario-type="ACTION"]').last();await action.hover();
+      const highlight=page.locator('.ai-paragraph-highlight');await highlight.waitFor();
+      const [highlightBox,sheetBox]=await Promise.all([highlight.boundingBox(),page.locator('.page-sheet').first().boundingBox()]);
+      assert(highlightBox&&sheetBox&&Math.abs(highlightBox.x-sheetBox.x)<2&&Math.abs(highlightBox.width-sheetBox.width)<2,'AI hover highlight spans the complete sheet width');
+      const aiButton=page.getByRole('button',{name:'Actions IA'});assert.equal((await aiButton.textContent()).trim(),'');assert.equal(await aiButton.locator('svg use').count(),1,'AI action uses the supplied sparkle icon');
       for (const [name, label] of [['Rechercher', 'Rechercher et remplacer'], ['Raccourcis', 'Raccourcis de texte'], ['IA', 'Réglages IA'], ['Aide', 'Aide']]) {
         await page.getByRole('navigation', { name: 'Menu principal' }).getByRole('button', { name, exact: true }).click();
         const dialog = page.getByRole('dialog', { name: label, exact: true });

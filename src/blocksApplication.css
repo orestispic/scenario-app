@@ -171,8 +171,9 @@
   .app-shell.theme-dark .scenario-comment-anchor {background:rgba(253,198,69,.12);box-shadow:0 0 0 1px rgba(253,198,69,.12);border-radius:3px;}
   .app-shell.theme-dark .scenario-comment-anchor:is(.is-active,.is-hovered,:hover) {background:rgba(253,198,69,.22);}
   .app-shell.theme-dark button.comment-inline-button.comment-inline-button {width:26px;height:26px;min-height:26px;padding:0;background:var(--surface-3);border:1px solid #344153;border-radius:8px;box-shadow:var(--shadow-2);color:var(--text-2);}
-  .app-shell.theme-dark .ai-inline-button {height:32px;min-height:32px;color:var(--amber);background:var(--surface-3);border-color:var(--border);border-radius:6px;}
-  .app-shell.theme-dark .ai-paragraph-highlight {background:transparent;}
+  .app-shell.theme-dark button.ai-inline-button.ai-inline-button {width:32px;height:32px;min-height:32px;padding:0;color:var(--amber);background:var(--surface-3);border-color:rgba(253,198,69,.48);border-radius:6px;}
+  .app-shell.theme-dark button.ai-inline-button.ai-inline-button:hover:not(:disabled),.app-shell.theme-dark button.ai-inline-button.ai-inline-button.is-busy {color:#fff0bf;background:color-mix(in srgb,var(--surface-3) 82%,var(--amber));border-color:var(--amber);}
+  .app-shell.theme-dark .ai-paragraph-highlight {background:rgba(70,153,243,.08);border-top:1px solid rgba(70,153,243,.16);border-bottom:1px solid rgba(70,153,243,.16);}
   .app-shell.theme-dark .response-only-ghost {color:var(--text-3);}
   .app-shell.theme-dark .transition-inline-button {color:var(--text-2);background:var(--surface-3);border-color:var(--border);}
 

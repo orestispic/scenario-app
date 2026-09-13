@@ -821,7 +821,7 @@ function App() {
       const canvasOverlay = clientRectToOverlay(canvasRect, zoom, appShellRect);
       setAiTarget({
         left: paragraphOverlay.left + paragraphOverlay.width,
-        transitionLeft: paragraphOverlay.left + paragraphOverlay.width + 36 * (zoom / 100),
+        transitionLeft: paragraphOverlay.left + paragraphOverlay.width + 36,
         top: paragraphOverlay.top + paragraphOverlay.height / 2,
         highlightLeft: canvasOverlay.left,
         highlightTop: paragraphOverlay.top,
@@ -2214,13 +2214,6 @@ function App() {
         </div>
         <nav aria-label="Menu principal">
           <button className="menu-button" type="button" onClick={() => setCloudProjectsOpen(true)}>Projets cloud</button>
-          <button className="menu-button" type="button" onClick={() => {
-            const thread = comments.find(item => item.id === activeCommentId) ?? comments[0];
-            if (thread) {
-              navigateToComment(thread);
-              requestAnimationFrame(() => document.querySelector<HTMLElement>(`[data-comment-card-id="${thread.id}"]`)?.scrollIntoView({block:'nearest', inline:'nearest'}));
-            } else { setDocumentState(previous => ({...previous,status:'Sélectionne du texte pour ajouter un commentaire.'})); }
-          }}>Commentaires ({comments.length})</button>
           <div className="file-menu-container">
             <button
               className="menu-button"
@@ -2671,7 +2664,7 @@ function App() {
               setAiPromptMenuOpen((isOpen) => !isOpen);
             }}
           >
-            <UiIcon name="star"/> IA
+            <UiIcon name="star"/>
           </button>
           <button
             className="transition-inline-button"
