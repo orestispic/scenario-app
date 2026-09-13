@@ -13,6 +13,8 @@
     "windows": [
       {
         "title": "senario",
+        "theme": "Dark",
+        "backgroundColor": "#080b10",
         "width": 800,
         "height": 600,
         "maximized": true

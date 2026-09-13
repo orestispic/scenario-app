@@ -1,0 +1,103 @@
+// Isolated browser, local assets only. No hosted session, email or payment.
+import assert from 'node:assert/strict';
+import { pathToFileURL } from 'node:url';
+import { mkdir } from 'node:fs/promises';
+const { chromium } = await import(process.env.SCENARIO_PLAYWRIGHT_PATH
+  ? pathToFileURL(process.env.SCENARIO_PLAYWRIGHT_PATH).href : 'playwright');
+const base = process.env.SCENARIO_TEST_APP_URL ?? 'http://127.0.0.1:1420';
+assert(['127.0.0.1', 'localhost'].includes(new URL(base).hostname));
+await mkdir('outputs/ui-charter', { recursive: true });
+const browser = await chromium.launch({ channel: 'msedge', headless: true });
+const errors = [];
+try {
+  for (const width of [1440, 900, 390]) {
+    const context = await browser.newContext({ viewport: { width, height: 960 }, reducedMotion: 'reduce' });
+    await context.route('**/*', route => new URL(route.request().url()).origin === base ? route.continue() : route.abort());
+    // A previously saved light preference must not restore the retired skin.
+    await context.addInitScript(() => localStorage.setItem('scenario-theme', 'light'));
+    const page = await context.newPage();
+    page.on('pageerror', error => errors.push(error.message));
+    await page.goto(base);
+    await page.locator('.scenario-editor').waitFor();
+    await page.getByRole('button', { name: 'Zoom 100 %, rétablir la taille réelle' }).waitFor();
+    await page.evaluate(() => document.fonts.ready);
+    assert.equal(await page.locator('.app-shell').evaluate(el => getComputedStyle(el).backgroundColor), 'rgb(8, 11, 16)');
+    assert.equal(await page.locator('.page-sheet').first().evaluate(el => getComputedStyle(el).backgroundColor), 'rgb(17, 22, 30)');
+    assert.match(await page.locator('.scenario-editor').evaluate(el => getComputedStyle(el).fontFamily), /Courier Prime/);
+    assert(await page.evaluate(() => document.fonts.check('14px Inter') && document.fonts.check('16px "Courier Prime"')));
+    assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+    for (const button of await page.getByRole('navigation', { name: 'Menu principal' }).getByRole('button').all()) {
+      const box = await button.boundingBox();
+      assert(box && box.x >= 0 && box.x + box.width <= width + 1, 'Main navigation remains reachable');
+    }
+    const editor = page.locator('.scenario-editor');
+    await editor.locator('p').first().click();
+    await page.keyboard.type('INT. ATELIER - JOUR');
+    await page.keyboard.press('Enter');
+    await page.keyboard.insertText('Une feuille attend sur la table. Camille ouvre la fenêtre.');
+    await page.keyboard.press('Escape');
+    await page.screenshot({ path: `outputs/ui-charter/editor-${width}.png` });
+
+    await page.getByRole('button', { name: 'Page de garde', exact: true }).click();
+    const cover = page.locator('.cover-menu');
+    await cover.waitFor();
+    const box = await cover.boundingBox();
+    assert(box && box.x >= 0 && box.x + box.width <= width + 1 && box.y + box.height <= 960, 'Cover menu fits screen');
+    assert.equal(await cover.getByRole('button', { name: 'Appliquer', exact: true }).evaluate(el => getComputedStyle(el).backgroundColor), 'rgb(25, 104, 185)');
+    await page.screenshot({ path: `outputs/ui-charter/cover-menu-${width}.png` });
+    await cover.getByLabel('Scénariste', { exact: true }).fill('Camille');
+    await cover.getByRole('button', { name: 'Appliquer', exact: true }).click();
+    await page.screenshot({ path: `outputs/ui-charter/cover-${width}.png` });
+
+    await page.getByRole('button', { name: /^Commentaires \(/ }).click();
+    const comments = page.getByRole('dialog', { name: 'Commentaires du projet' });
+    await comments.waitFor();
+    assert.equal(await comments.evaluate(el => getComputedStyle(el).backgroundColor), 'rgb(17, 22, 30)');
+    await page.screenshot({ path: `outputs/ui-charter/comments-${width}.png` });
+    await comments.getByRole('button', { name: 'Fermer les commentaires' }).click();
+
+    await page.getByRole('button', { name: 'Compte', exact: true }).click();
+    const account = page.locator('.account-license-panel');
+    await account.waitFor();
+    assert.equal(await account.evaluate(el => getComputedStyle(el).backgroundColor), 'rgb(17, 22, 30)');
+    await account.getByRole('button', { name: 'Connexion', exact: true, pressed: true }).waitFor();
+    const input = account.getByLabel('Adresse e-mail');
+    await input.focus();
+    assert.equal(await input.evaluate(el => getComputedStyle(el).outlineColor), 'rgb(42, 134, 230)');
+    await page.screenshot({ path: `outputs/ui-charter/account-${width}.png` });
+    await account.getByRole('button', { name: 'Fermer', exact: true }).click();
+
+    if (width === 1440) {
+      for (const [name, label] of [['Rechercher', 'Rechercher et remplacer'], ['Raccourcis', 'Raccourcis de texte'], ['IA', 'Réglages IA'], ['Aide', 'Aide']]) {
+        await page.getByRole('navigation', { name: 'Menu principal' }).getByRole('button', { name, exact: true }).click();
+        const dialog = page.getByRole('dialog', { name: label, exact: true });
+        await dialog.waitFor();
+        assert.equal(await dialog.evaluate(el => getComputedStyle(el).backgroundColor), 'rgb(17, 22, 30)');
+        await page.screenshot({ path: `outputs/ui-charter/panel-${name}.png` });
+        await dialog.getByRole('button', { name: 'Fermer', exact: true }).click();
+      }
+      // Real browser pagination with the new font: long content is preserved.
+      await editor.locator('p').last().click();
+      await page.keyboard.press('End');
+      const longText = ' Un paragraphe long reste entier lorsque la page change.'.repeat(180);
+      await page.keyboard.insertText(longText);
+      await page.waitForFunction(() => document.querySelectorAll('.page-sheet').length > 3);
+      const documentText = await editor.evaluate(el => {
+        const copy = el.cloneNode(true);
+        // Pagination decorations are not document content.
+        copy.querySelectorAll('.page-continuation').forEach(widget => widget.remove());
+        return copy.textContent;
+      });
+      assert(documentText.includes(longText));
+    }
+
+    await page.emulateMedia({ media: 'print' });
+    assert.equal(await page.locator('.page-sheet').first().evaluate(el => getComputedStyle(el).backgroundColor), 'rgb(255, 255, 255)');
+    assert.equal(await editor.evaluate(el => getComputedStyle(el).color), 'rgb(17, 17, 17)');
+    assert.equal(await page.locator('.formatting-toolbar').evaluate(el => getComputedStyle(el).display), 'none');
+    assert.equal(await page.locator('.cover-page').evaluate(el => getComputedStyle(el).color), 'rgb(17, 17, 17)');
+    console.log(`PASS: charter, legacy preference, fonts, navigation, cover, comments, account, print at ${width}px`);
+    await context.close();
+  }
+  assert.deepEqual(errors, []);
+} finally { await browser.close(); }

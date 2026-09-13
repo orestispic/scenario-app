@@ -13,7 +13,7 @@ try {
     });
     await context.addInitScript((value) => localStorage.setItem('scenario-zoom', String(value)), zoom);
     const page = await context.newPage();
-    await page.goto('http://127.0.0.1:1420/');
+    await page.goto(process.env.SCENARIO_TEST_APP_URL ?? 'http://127.0.0.1:1420/');
     await page.locator('.scenario-editor').waitFor();
     const canvas = await page.locator('.document-canvas').first().boundingBox();
     assert(canvas);

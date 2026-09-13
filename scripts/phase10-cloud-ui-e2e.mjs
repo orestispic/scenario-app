@@ -3,9 +3,10 @@ import assert from 'node:assert/strict';
 import { pathToFileURL } from 'node:url';
 import { createLocalRuntime } from '../../scenario-site-commercial/worker/src/localRuntime.ts';
 const { chromium } = await import(process.env.SCENARIO_PLAYWRIGHT_PATH ? pathToFileURL(process.env.SCENARIO_PLAYWRIGHT_PATH).href : 'playwright');
-const runtime = await createLocalRuntime({telemetry: {record() {}}});
-const browser = await chromium.launch({channel: 'msedge', headless: true});
 const base = process.env.SCENARIO_TEST_APP_URL ?? 'http://127.0.0.1:1420';
+assert(['127.0.0.1', 'localhost'].includes(new URL(base).hostname), 'Local test origin required');
+const runtime = await createLocalRuntime({allowedOrigins: [base], telemetry: {record() {}}});
+const browser = await chromium.launch({channel: 'msedge', headless: true});
 const profileId = '10000000-0000-4000-8000-000000000003';
 let testPage;
 try {

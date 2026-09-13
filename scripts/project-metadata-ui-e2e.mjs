@@ -4,8 +4,9 @@ import assert from 'node:assert/strict';
 import { pathToFileURL } from 'node:url';
 import { createLocalRuntime } from '../../scenario-site-commercial/worker/src/localRuntime.ts';
 const {chromium}=await import(process.env.SCENARIO_PLAYWRIGHT_PATH?pathToFileURL(process.env.SCENARIO_PLAYWRIGHT_PATH).href:'playwright');
-const runtime=await createLocalRuntime({telemetry:{record(){}}});
 const base=process.env.SCENARIO_TEST_APP_URL??'http://127.0.0.1:1420';
+assert(['127.0.0.1','localhost'].includes(new URL(base).hostname), 'Local test origin required');
+const runtime=await createLocalRuntime({allowedOrigins:[base],telemetry:{record(){}}});
 const browser=await chromium.launch({channel:'msedge',headless:true});
 const profiles={studio:'10000000-0000-4000-8000-000000000003',author:'10000000-0000-4000-8000-000000000002',discovery:'10000000-0000-4000-8000-000000000001'};
 const errors=[],pages=[];
@@ -80,6 +81,9 @@ try {
   await comments(editor).getByRole('button',{name:'Résoudre',exact:true}).click();await flush(editor);await flush(owner);await comments(owner).getByText('Résolu',{exact:true}).waitFor();
   await comments(owner).getByRole('button',{name:'Rouvrir',exact:true}).click();await flush(owner);await flush(editor);
   console.log('PASS: comment creation, reply, editing without losing replies, resolve and reopen converge.');
+  const passageButton = comments(owner).getByRole('button',{name:'Voir le passage',exact:true});
+  assert(await passageButton.evaluate(el => el.scrollWidth <= el.clientWidth && el.scrollHeight <= el.clientHeight), 'Comment navigation label must fit its button');
+  await owner.screenshot({path:'outputs/ui-charter-shared-comments.png',fullPage:true});
   for(const page of pages)await closeComments(page);
   // Delete the anchor's text: the discussion must remain available, not vanish.
   await editor.locator('.scenario-editor p').first().click();await editor.keyboard.press('Home');await editor.keyboard.press('Shift+End');await editor.keyboard.press('Backspace');

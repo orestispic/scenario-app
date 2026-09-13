@@ -401,6 +401,7 @@ export function AccountLicensePanel({ onClose, onOpenCloud }: AccountLicensePane
                   key={tab}
                   type="button"
                   className={screen === tab ? "is-active" : ""}
+                  aria-pressed={screen === tab}
                   onClick={() => setScreen(tab)}
                 >
                   {tab === "signin" ? "Connexion" : "Inscription"}

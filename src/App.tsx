@@ -260,7 +260,6 @@ interface TextMatch {
   to: number;
 }
 
-type Theme = "light" | "dark";
 
 const smartTypeLabels: Record<SmartTypeContext["kind"], string> = {
   CHARACTER: "Personnages",
@@ -402,11 +401,8 @@ function App() {
   const [cloudProjectsOpen, setCloudProjectsOpen] = useState(false);
   const [scenarioContextMenu, setScenarioContextMenu] =
     useState<ScenarioContextMenuState | null>(null);
-  const [theme, setTheme] = useState<Theme>(() =>
-    readLocalSetting("scenario-theme") === "dark" ? "dark" : "light",
-  );
   const [zoom, setZoom] = useState(() => {
-    const storedZoom = Number(readLocalSetting("scenario-zoom"));
+    const storedZoom = Number(readLocalSetting("scenario-zoom") ?? "100");
     return Number.isFinite(storedZoom)
       ? Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, storedZoom))
       : 100;
@@ -1669,10 +1665,6 @@ function App() {
     [aiTarget, editor, refreshEditorState],
   );
 
-  const toggleTheme = useCallback(() => {
-    setTheme((previous) => (previous === "light" ? "dark" : "light"));
-  }, []);
-
   const changeZoom = useCallback((amount: number) => {
     setZoom((previous) =>
       Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, previous + amount)),
@@ -1904,9 +1896,23 @@ function App() {
   ]);
 
   useEffect(() => {
-    writeLocalSetting("scenario-theme", theme);
     writeLocalSetting("scenario-zoom", String(zoom));
-  }, [theme, zoom]);
+  }, [zoom]);
+
+  useEffect(() => {
+    if (!editor) return;
+    let cancelled = false;
+    const repaginate = () => {
+      if (!cancelled && !editor.isDestroyed) refreshPagination(editor);
+    };
+    // A self-hosted font can finish loading after the initial pagination.
+    void document.fonts.ready.then(repaginate);
+    document.fonts.addEventListener('loadingdone', repaginate);
+    return () => {
+      cancelled = true;
+      document.fonts.removeEventListener('loadingdone', repaginate);
+    };
+  }, [editor, refreshPagination]);
 
   useEffect(() => {
     if (editor) {
@@ -2070,10 +2076,6 @@ function App() {
         event.preventDefault();
         openPdfExport();
       }
-      if (key === "d" && event.shiftKey) {
-        event.preventDefault();
-        toggleTheme();
-      }
       if (key === "+" || key === "=") {
         event.preventDefault();
         changeZoom(ZOOM_STEP);
@@ -2099,7 +2101,6 @@ function App() {
     openCommentComposer,
     resetZoom,
     saveDocument,
-    toggleTheme,
   ]);
 
   const acceptSuggestion = useCallback(
@@ -2248,11 +2249,14 @@ function App() {
     : textReplacementDrafts;
 
   return (
-    <div ref={appShellRef} className={`app-shell ${theme === "dark" ? "theme-dark" : ""}`}>
+    <div ref={appShellRef} className="app-shell theme-dark">
       <header className="menu-bar">
+        <div className="app-brand" title="senario — la meilleure page blanche">
+          <img src="/senario-logo.png" alt="" width="28" height="28" />
+          <span>senario</span>
+        </div>
         <nav aria-label="Menu principal">
           <button className="menu-button" type="button" onClick={() => setCloudProjectsOpen(true)}>Projets cloud</button>
-          <CloudProjectStatus onOpen={() => setCloudProjectsOpen(true)} />
           <button className="menu-button" type="button" onClick={() => setCommentsPanelOpen(true)}>Commentaires ({comments.length})</button>
           <div className="file-menu-container">
             <button
@@ -2430,10 +2434,6 @@ function App() {
             </button>
             {viewMenuOpen && (
               <div className="file-menu view-menu" role="menu">
-                <button type="button" role="menuitem" onClick={() => runViewAction(toggleTheme)}>
-                  {theme === "dark" ? "Mode clair" : "Mode sombre"} <kbd>Ctrl+Maj+D</kbd>
-                </button>
-                <hr />
                 <button type="button" role="menuitem" onClick={() => runViewAction(() => changeZoom(ZOOM_STEP))}>
                   Zoom avant <kbd>Ctrl++</kbd>
                 </button>
@@ -2472,10 +2472,6 @@ function App() {
             </button>
           </div>
         </nav>
-        <p>
-          {documentState.title}
-          {documentState.isDirty ? " *" : ""} · {getScenarioElementLabel(currentType)} · Page {currentPage + (coverPageVisible ? 1 : 0)}/{documentSheetCount} · {zoom} % · {documentState.status}
-        </p>
       </header>
 
       <div className="formatting-toolbar" role="toolbar" aria-label="Mise en forme">
@@ -2499,6 +2495,17 @@ function App() {
         >
           <u>S</u>
         </button>
+        <span className="toolbar-divider" aria-hidden="true" />
+        <span className="document-title" title={documentState.title}>
+          {documentState.title}{documentState.isDirty ? " *" : ""}
+        </span>
+        <span className="document-element">{getScenarioElementLabel(currentType)}</span>
+        <div className="document-status">
+          <CloudProjectStatus onOpen={() => setCloudProjectsOpen(true)} />
+          <span className="document-save-status" title={documentState.status}>{documentState.status}</span>
+          <span>Page {currentPage + (coverPageVisible ? 1 : 0)}/{documentSheetCount}</span>
+          <button className="zoom-reset" type="button" onClick={resetZoom} title="Taille réelle (Ctrl+0)" aria-label={`Zoom ${zoom} %, rétablir la taille réelle`}>{zoom} %</button>
+        </div>
       </div>
 
       {commentActionTarget && !commentComposerOpen && !cloudReadOnly && (
@@ -2511,7 +2518,7 @@ function App() {
           onMouseDown={(event) => event.preventDefault()}
           onClick={() => void openCommentComposer()}
         >
-          💬
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true"><path d="M4 4h16v12H9l-5 4V4Z" /></svg>
         </button>
       )}
 
@@ -2828,7 +2835,7 @@ function App() {
 
             <section>
               <h3>Commentaires</h3>
-              <p>Sélectionne un passage : une petite bulle 💬 apparaît sous la sélection. Clique dessus, écris ta note puis valide avec <kbd>Ctrl + Entrée</kbd>. Le passage reste discrètement jaune et la note se trouve dans la marge gauche.</p>
+              <p>Sélectionne un passage : un bouton de commentaire apparaît sous la sélection. Clique dessus, écris ta note puis valide avec <kbd>Ctrl + Entrée</kbd>. Le passage est surligné en bleu et la note se trouve dans la marge gauche.</p>
             </section>
 
             <section>
