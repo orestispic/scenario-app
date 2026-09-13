@@ -11,6 +11,7 @@ import {
 } from "react";
 import type { Editor, JSONContent } from "@tiptap/core";
 import { UiIcon } from './ui/UiIcon';
+import { createAutomaticUpdater, type AutomaticUpdater } from './updates/automaticUpdater';
 import { ReleaseInfo } from "./commercial/ReleaseInfo";
 import { EditorContent, useEditor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
@@ -427,6 +428,7 @@ function App() {
   const aiPointerPosition = useRef<{ clientX: number; clientY: number } | null>(null);
   const findInput = useRef<HTMLInputElement | null>(null);
   const currentDocumentState = useRef(documentState);
+  const automaticUpdater = useRef<AutomaticUpdater | null>(null);
   // La tête fait partie du document .scenario. Cette référence donne toujours
   // à l'enregistrement (manuel comme automatique) la dernière valeur saisie,
   // sans attendre un rendu React ou un clic sur « Appliquer ».
@@ -458,6 +460,23 @@ function App() {
   useEffect(() => {
     currentDocumentState.current = documentState;
   }, [documentState]);
+
+  useEffect(() => {
+    const updater = createAutomaticUpdater({
+      isSafeToInstall: () => !currentDocumentState.current.isDirty,
+      onStatus: (status) => setDocumentState((previous) => ({ ...previous, status })),
+    });
+    automaticUpdater.current = updater;
+    const stop = updater.start();
+    return () => {
+      automaticUpdater.current = null;
+      stop();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!documentState.isDirty) void automaticUpdater.current?.installWhenSafe();
+  }, [documentState.isDirty]);
 
   useEffect(() => {
     coverPageRef.current = coverPage;

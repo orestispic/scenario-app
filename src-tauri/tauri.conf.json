@@ -26,6 +26,7 @@
   },
   "bundle": {
     "active": true,
+    "createUpdaterArtifacts": true,
     "targets": "all",
     "resources": {
       "icons/scenario-file-icon.ico": "scenario-file-icon.ico"
@@ -51,5 +52,16 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ]
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDg3MzVBQjVCRUY5RDk2NzIKUldSeWxwM3ZXNnMxaDFsRmk1RHpHcDl6ZS8ybllIR3U1eXE2YXF4K2FZWnViOXB3UThGMk16UkYK",
+      "endpoints": [
+        "https://github.com/orestispic/scenario-app/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
+    }
   }
 }

@@ -1,4 +1,4 @@
-name: Publier Scénario
+name: Publier Senario pour Windows
 
 on:
   push:
@@ -10,71 +10,39 @@ permissions:
 
 jobs:
   windows:
-    name: Version Windows
+    name: Installateur et mise à jour Windows
     runs-on: windows-latest
+    env:
+      VITE_SCENARIO_API_BASE_URL: https://scenario-commercial-api-preproduction.ore-picard.workers.dev
+      VITE_SUPABASE_URL: https://zblnsdyaoljnezxdidtx.supabase.co
+      VITE_SUPABASE_ANON_KEY: sb_publishable_tAI1UPbu2UnelkOeuI1WNg_hPegJP4Y
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
+      - uses: dtolnay/rust-toolchain@stable
       - name: Installer les dépendances
         run: npm ci
-      - name: Créer l’installateur Windows
-        run: npm run tauri build
-      - name: Préparer le téléchargement Windows
-        shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Path release -Force | Out-Null
-          $installer = Get-ChildItem -Path "src-tauri/target/release/bundle/nsis" -Filter "*.exe" | Select-Object -First 1
-          if (-not $installer) { throw "Installateur Windows introuvable." }
-          Copy-Item -LiteralPath $installer.FullName -Destination "release/Scenario-Setup.exe"
-      - uses: actions/upload-artifact@v4
+      - name: Vérifier l’application
+        run: npm test -- --run
+      - name: Construire et publier la version signée
+        uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
-          name: windows
-          path: release/Scenario-Setup.exe
-
-  macos:
-    name: Version macOS
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-      - name: Installer les cibles macOS
-        run: rustup target add aarch64-apple-darwin x86_64-apple-darwin
-      - name: Installer les dépendances
-        run: npm ci
-      - name: Créer l’application macOS universelle
-        run: npm run tauri build -- --config src-tauri/tauri.macos.conf.json --target universal-apple-darwin
-      - name: Préparer le paquet macOS avec son guide
-        run: |
-          mkdir -p release
-          app_path="$(find src-tauri/target/universal-apple-darwin/release/bundle/macos -maxdepth 1 -type d -name '*.app' -print -quit)"
-          test -n "$app_path"
-          package_path="release/Scénario macOS"
-          mkdir -p "$package_path"
-          ditto "$app_path" "$package_path/Scénario.app"
-          cp "docs/Guide-installation-macOS.pdf" "$package_path/Guide-installation-macOS.pdf"
-          ditto -c -k --sequesterRsrc "$package_path" "release/Scenario-macOS.zip"
-      - uses: actions/upload-artifact@v4
-        with:
-          name: macos
-          path: release/Scenario-macOS.zip
-
-  release:
-    name: Publication
-    needs: [windows, macos]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          path: release-files
-          merge-multiple: true
-      - name: Publier les téléchargements
-        uses: softprops/action-gh-release@v2
-        with:
-          files: release-files/*
-          generate_release_notes: true
+          tagName: v__VERSION__
+          releaseName: Senario __VERSION__
+          releaseBody: |
+            Version bêta de Senario pour Windows 10 et 11 (64 bits).
+            Téléchargez Scenario-Setup.exe puis suivez les étapes de l’installateur.
+          releaseDraft: false
+          prerelease: false
+          args: --config src-tauri/tauri.preproduction.conf.json --bundles nsis
+          updaterJsonPreferNsis: true
+          uploadUpdaterJson: true
+          uploadUpdaterSignatures: true
+          releaseAssetNamePattern: Scenario-Setup[ext]

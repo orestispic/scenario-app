@@ -106,8 +106,8 @@ fn read_pdf(path: String) -> Result<Vec<u8>, String> {
     {
         return Err("Le fichier sélectionné n’est pas un PDF.".to_string());
     }
-    let metadata = fs::metadata(&path)
-        .map_err(|error| format!("Impossible d’ouvrir le PDF : {error}"))?;
+    let metadata =
+        fs::metadata(&path).map_err(|error| format!("Impossible d’ouvrir le PDF : {error}"))?;
     if metadata.len() > MAX_PDF_SIZE {
         return Err("Ce PDF est trop volumineux pour être importé en sécurité.".to_string());
     }
@@ -475,6 +475,7 @@ fn normalize_prompts(prompts: Vec<AiPrompt>) -> Vec<AiPrompt> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(ClosePermission::default())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
