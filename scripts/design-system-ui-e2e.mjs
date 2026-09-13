@@ -50,17 +50,14 @@ try {
     await page.screenshot({ path: `outputs/ui-charter/cover-${width}.png` });
 
     await page.getByRole('button', { name: /^Commentaires \(/ }).click();
-    const comments = page.getByRole('dialog', { name: 'Commentaires du projet' });
-    await comments.waitFor();
-    assert.equal(await comments.evaluate(el => getComputedStyle(el).backgroundColor), 'rgb(17, 22, 30)');
-    await page.screenshot({ path: `outputs/ui-charter/comments-${width}.png` });
-    await comments.getByRole('button', { name: 'Fermer les commentaires' }).click();
+    assert.equal(await page.getByRole('dialog', { name: 'Commentaires du projet' }).count(), 0);
 
     await page.getByRole('button', { name: 'Compte', exact: true }).click();
     const account = page.locator('.account-license-panel');
     await account.waitFor();
     assert.equal(await account.evaluate(el => getComputedStyle(el).backgroundColor), 'rgb(17, 22, 30)');
-    await account.getByRole('button', { name: 'Connexion', exact: true, pressed: true }).waitFor();
+    await account.getByRole('heading', { name: 'Se connecter', exact: true }).waitFor();
+    await account.getByRole('button', { name: 'Créer un compte', exact: true }).waitFor();
     const input = account.getByLabel('Adresse e-mail');
     await input.focus();
     assert.equal(await input.evaluate(el => getComputedStyle(el).outlineColor), 'rgb(42, 134, 230)');

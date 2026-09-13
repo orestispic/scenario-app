@@ -243,3 +243,63 @@
   .comments-panel, .transition-popover { display: none; }
   .theme-dark .cover-page { color: #111; }
 }
+
+/* Editing controls and notes share the document's scroll container, not its zoom. */
+@media screen {
+  .app-shell.theme-dark { grid-template-rows: minmax(48px, auto) 40px minmax(0, 1fr) auto; }
+  .app-shell.theme-dark .formatting-toolbar .paragraph-type-control {
+    width: 160px; min-height: 30px; height: 30px; padding: 3px 8px;
+    color: var(--ui-text); background: var(--ui-panel); font-size: 12px;
+  }
+  .editor-stage { position: relative; width: fit-content; margin: 0 auto; }
+  .editor-stage:has(.margin-note) { padding-left: 252px; }
+  .app-shell .editor-stage .document-zoom { margin: 0; }
+  .editor-statistics { display: flex; flex-wrap: wrap; align-items: center; justify-content: center;
+    gap: 8px 24px; min-height: 36px; padding: 8px 16px; background: var(--ui-panel);
+    color: var(--ui-muted); border-top: 1px solid var(--ui-border); font-size: 12px; z-index: 10; }
+  .editor-statistics strong { color: var(--ui-text); font-weight: 500; }
+  .app-shell.theme-dark .smart-type button:is(:hover, .is-selected) { background: var(--ui-selected); color: var(--ui-text); border-color: var(--ui-border); }
+  .app-shell.theme-dark .scenario-comment-anchor { background: #e5b33e18; }
+  .app-shell.theme-dark .scenario-comment-anchor:is(.is-active, :hover) { background: #e5b33e36; }
+  .comment-rail { position: absolute; width: 228px; top: 0; left: 0; }
+  .margin-note { position: absolute; left: 0; width: 228px; border: 1px solid var(--ui-border);
+    border-left: 3px solid var(--ui-accent); border-radius: 8px; background: var(--ui-floating);
+    overflow: hidden; box-shadow: 0 4px 12px #0003; }
+  .margin-note.is-active { border-color: #e5b33e66; }
+  .app-shell.theme-dark .margin-note-hitbox { display: block; width: 100%; min-height: 52px; padding: 12px;
+    margin: 0; text-align: left; color: var(--ui-text); background: transparent; border: 0; border-radius: 0;
+    font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
+  .margin-note-hitbox > span { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; white-space: pre-wrap; }
+  .margin-note.is-active .margin-note-hitbox > span { display: block; max-height: 260px; overflow: auto; }
+  .margin-note small { display: block; margin-bottom: 6px; color: var(--ui-muted); font-size: 11px; }
+  .margin-note-details { padding: 0 12px 12px; }
+  .margin-note-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+  .app-shell.theme-dark .margin-note-actions button { padding: 6px 8px; min-height: 32px;
+    border: 1px solid var(--ui-border); background: var(--ui-panel); font-size: 12px; }
+  .app-shell.theme-dark .margin-note-actions .margin-note-delete { color: var(--ui-error); }
+  .margin-note textarea { width: 100%; min-height: 96px; max-height: 260px; margin-top: 8px; }
+  .margin-note label { font-size: 12px; }
+  .margin-note-reply { color: var(--ui-muted); font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .margin-note [role=alert] { font-size: 12px; color: var(--ui-accent); }
+
+  .app-shell.theme-dark .account-signin-panel { width: min(520px, 100%); padding: 32px; gap: 24px; }
+  .app-shell.theme-dark .account-signin-panel h2 { font-size: 24px; }
+  .app-shell.theme-dark .account-signin-panel .account-auth-form { gap: 20px; }
+  .app-shell.theme-dark .account-signin-panel label { font-size: 14px; font-weight: 400; gap: 10px; }
+  .app-shell.theme-dark .account-signin-panel input { min-height: 44px; background: var(--ui-panel); font-size: 15px; }
+  .app-shell.theme-dark .account-signin-panel .primary-button { min-height: 44px; background: var(--ui-primary); }
+  .app-shell.theme-dark .account-signin-panel .account-password-recovery { justify-self: end; min-height: 24px; padding: 0; font-size: 13px; text-decoration: none; }
+  .account-auth-switch { border-top: 1px solid var(--ui-border); padding-top: 24px; color: var(--ui-muted); text-align: center; font-size: 13px; }
+  .app-shell.theme-dark .account-auth-switch button { color: var(--ui-info); background: transparent; border: 0; padding: 4px 6px; min-height: 24px; }
+  @media (max-width: 760px) {
+    .app-shell.theme-dark .document-title { display: none; }
+    .app-shell.theme-dark .formatting-toolbar .paragraph-type-control { width: 136px; }
+    .document-status > span, .toolbar-divider { display: none; }
+    .editor-statistics { gap: 6px 14px; font-size: 11px; }
+    .app-shell.theme-dark .account-signin-panel { padding: 24px; }
+  }
+}
+@media print {
+  .comment-rail, .editor-statistics { display: none; }
+  .editor-stage { padding-left: 0; min-height: 0 !important; }
+}

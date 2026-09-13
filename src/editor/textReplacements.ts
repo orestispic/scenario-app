@@ -12,7 +12,6 @@ const DEFAULT_REPLACEMENT_ENTRIES = `
 ac|avec
 ajd|aujourd’hui
 are|are
-as|après
 askip|à ce qu’il parait
 att|attends
 audi|aussi
@@ -252,7 +251,7 @@ yena|il y en a
 
 const RETIRED_DEFAULT_SHORTCUTS = new Set([
   "yt", "wdym", "tpj", "taina", "pdc", "ore", "oremail", "ofc", "nr", "lt",
-  "jmlp", "idk", "idgf", "gabin", "fw", "br",
+  "jmlp", "idk", "idgf", "gabin", "fw", "br", "as",
 ]);
 
 export function createDefaultTextReplacements(): TextReplacement[] {

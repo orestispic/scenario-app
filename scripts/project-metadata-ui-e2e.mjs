@@ -46,9 +46,8 @@ async function open(page,title) {
   await panel.getByRole('button',{name:'Ouvrir le projet',exact:true}).click();await panel.waitFor({state:'hidden'});
   await page.waitForFunction(()=>{let state;const stop=window.__metadataCloud.subscribe(s=>{state=s;});stop();return state.status==='realtime';});
 }
-const comments=page=>page.getByRole('dialog',{name:'Commentaires du projet'});
-const openComments=async page=>{await page.getByRole('button',{name:/^Commentaires \(/}).click();await comments(page).waitFor();};
-const closeComments=page=>comments(page).getByRole('button',{name:'Fermer les commentaires'}).click();
+const comments=page=>page.locator('.comment-rail');
+const openComments=async page=>{await page.getByRole('button',{name:/^Commentaires \(/}).click();await comments(page).locator('.margin-note').first().waitFor();};
 try {
   const owner=await pageFor('studio'),editor=await pageFor('author'),viewer=await pageFor('discovery');
   const project=await owner.evaluate(async()=>{
@@ -74,17 +73,17 @@ try {
   await owner.getByRole('button',{name:'Ajouter un commentaire',exact:true}).click();await owner.getByPlaceholder('Écrire un commentaire…').fill('Commentaire partagé initial');await owner.getByRole('button',{name:'Commenter',exact:true}).click();
   await flush(owner);await flush(editor);await flush(viewer);
   for(const page of pages){await openComments(page);await comments(page).getByText('Commentaire partagé initial',{exact:false}).waitFor();}
-  assert.equal(await comments(viewer).getByRole('button',{name:'Répondre',exact:true}).count(),0);
-  await comments(editor).getByRole('button',{name:'Répondre',exact:true}).click();await comments(editor).getByLabel('Votre réponse').fill('Réponse partagée');await comments(editor).getByRole('button',{name:'Enregistrer',exact:true}).click();await flush(editor);await flush(owner);
+  assert.equal(await comments(viewer).getByRole('button',{name:'Modifier',exact:true}).count(),0);
+  assert.equal(await viewer.getByLabel('Type de paragraphe').isDisabled(),true);
+  await comments(editor).getByRole('button',{name:'Modifier',exact:true}).click();await comments(editor).getByLabel('Modifier le commentaire').fill('Brouillon local');
   await comments(owner).getByRole('button',{name:'Modifier',exact:true}).click();await comments(owner).getByLabel('Modifier le commentaire').fill('Commentaire corrigé');await comments(owner).getByRole('button',{name:'Enregistrer',exact:true}).click();await flush(owner);await flush(editor);
-  await comments(editor).getByText('Commentaire corrigé',{exact:false}).waitFor();await comments(editor).getByText('Réponse partagée',{exact:false}).waitFor();
-  await comments(editor).getByRole('button',{name:'Résoudre',exact:true}).click();await flush(editor);await flush(owner);await comments(owner).getByText('Résolu',{exact:true}).waitFor();
-  await comments(owner).getByRole('button',{name:'Rouvrir',exact:true}).click();await flush(owner);await flush(editor);
-  console.log('PASS: comment creation, reply, editing without losing replies, resolve and reopen converge.');
-  const passageButton = comments(owner).getByRole('button',{name:'Voir le passage',exact:true});
-  assert(await passageButton.evaluate(el => el.scrollWidth <= el.clientWidth && el.scrollHeight <= el.clientHeight), 'Comment navigation label must fit its button');
+  await comments(editor).getByRole('alert').waitFor();
+  assert.equal(await comments(editor).getByLabel('Modifier le commentaire').inputValue(),'Brouillon local');
+  assert.equal(await comments(editor).getByRole('button',{name:'Enregistrer',exact:true}).isDisabled(),true);
+  await comments(editor).getByRole('button',{name:'Annuler',exact:true}).click();
+  await comments(editor).getByText('Commentaire corrigé',{exact:false}).waitFor();
+  console.log('PASS: inline editing converges, concurrent draft preserved and stale overwrite blocked.');
   await owner.screenshot({path:'outputs/ui-charter-shared-comments.png',fullPage:true});
-  for(const page of pages)await closeComments(page);
   // Delete the anchor's text: the discussion must remain available, not vanish.
   await editor.locator('.scenario-editor p').first().click();await editor.keyboard.press('Home');await editor.keyboard.press('Shift+End');await editor.keyboard.press('Backspace');
   await owner.waitForFunction(()=>!document.querySelector('.scenario-editor').textContent.includes('Un passage partagé'));

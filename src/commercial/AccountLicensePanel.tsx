@@ -237,7 +237,7 @@ export function AccountLicensePanel({ onClose, onOpenCloud }: AccountLicensePane
   return (
     <div className="modal-backdrop" role="presentation" onMouseDown={onClose}>
       <section
-        className="account-license-panel"
+        className={`account-license-panel ${session && me && entitlements ? '' : 'account-signin-panel'}`}
         role="dialog"
         aria-modal="true"
         aria-label="Compte et licence"
@@ -245,8 +245,8 @@ export function AccountLicensePanel({ onClose, onOpenCloud }: AccountLicensePane
       >
         <header>
           <div>
-            <h2>Compte et licence</h2>
-            <p>{localTestMode ? "Serveur local isolé" : "Session Supabase sécurisée"}</p>
+            <h2>{session && me && entitlements ? 'Compte et licence' : screen === 'signin' ? 'Se connecter' : screen === 'signup' ? 'Créer un compte' : 'Réinitialiser le mot de passe'}</h2>
+            {session && me && entitlements && localTestMode && <p>Compte de démonstration</p>}
           </div>
           <button
             className="panel-close-button"
@@ -395,19 +395,6 @@ export function AccountLicensePanel({ onClose, onOpenCloud }: AccountLicensePane
                 </div>
               </section>
             )}
-            <nav className="account-auth-tabs" aria-label="Accès au compte">
-              {(["signin", "signup"] as const).map((tab) => (
-                <button
-                  key={tab}
-                  type="button"
-                  className={screen === tab ? "is-active" : ""}
-                  aria-pressed={screen === tab}
-                  onClick={() => setScreen(tab)}
-                >
-                  {tab === "signin" ? "Connexion" : "Inscription"}
-                </button>
-              ))}
-            </nav>
             <form className="account-auth-form" onSubmit={(event) => void submitCredentials(event)}>
               {screen === "signup" && (
                 <label>
@@ -447,8 +434,13 @@ export function AccountLicensePanel({ onClose, onOpenCloud }: AccountLicensePane
                   : screen === "signup"
                     ? "Créer le compte"
                     : "Envoyer le lien"}
+                <span aria-hidden="true"> →</span>
               </button>
             </form>
+            <div className="account-auth-switch">
+              {screen === 'signin' ? <>Pas encore de compte ? <button type="button" disabled={busy} onClick={() => setScreen('signup')}>Créer un compte</button></>
+                : <>Déjà un compte ? <button type="button" disabled={busy} onClick={() => setScreen('signin')}>Se connecter</button></>}
+            </div>
           </>
         )}
         {message && (

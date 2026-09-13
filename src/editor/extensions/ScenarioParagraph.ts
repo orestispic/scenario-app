@@ -70,8 +70,15 @@ export const ScenarioParagraph = Node.create({
     return {
       setScenarioElementType:
         (type) =>
-        ({ editor }) =>
-          setCurrentScenarioElementType(editor, type),
+        ({ tr, dispatch }) => {
+          const { $from } = tr.selection;
+          if ($from.depth < 1 || $from.parent.type.name !== 'paragraph') return false;
+          // Tiptap dispatches this transaction once, including inside chains/can().
+          if (dispatch) tr.setNodeMarkup($from.before($from.depth), undefined, {
+            ...$from.parent.attrs, scenarioType: type,
+          }).scrollIntoView();
+          return true;
+        },
     };
   },
 });

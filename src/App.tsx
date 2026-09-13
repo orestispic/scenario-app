@@ -50,6 +50,7 @@ import {
 import {
   DEFAULT_SCENARIO_ELEMENT_TYPE,
   getScenarioElementLabel,
+  SCENARIO_ELEMENT_TYPES,
   toScenarioElementType,
   type ScenarioElementType,
 } from "./editor/scenarioTypes";
@@ -111,7 +112,8 @@ import {
 import { AccountLicensePanel } from "./commercial/AccountLicensePanel";
 import { CloudProjectsPanel, CloudProjectStatus } from './commercial/CloudProjectsPanel';
 import { resolveProjectCommentAnchors } from './commercial/projectMetadataClient';
-import { ProjectCommentsPanel } from './editor/ProjectCommentsPanel';
+import { CommentMargin } from './editor/CommentMargin';
+import { getDocumentStatistics } from './editor/documentStatistics';
 import { cloudProjectRuntime, type CloudProjectEditor } from './commercial/cloudProjectRuntime';
 import { collaborationTransaction } from './editor/collaborationTransaction';
 import { cloudSyncQueue, createRuntimeCommercialApi, sessions, authenticatedOperations } from "./commercial/runtime";
@@ -153,7 +155,7 @@ const initialContent: JSONContent = {
 };
 
 const placeholders: Record<ScenarioElementType, string> = {
-  SCENE_HEADING: "INT. LIEU - JOUR",
+  SCENE_HEADING: "",
   ACTION: "Action...",
   CHARACTER: "PERSONNAGE",
   DIALOGUE: "Dialogue...",
@@ -326,10 +328,7 @@ function App() {
   const [commentAnchor, setCommentAnchor] = useState<CommentAnchor | null>(null);
   const [commentDraft, setCommentDraft] = useState("");
   const [activeCommentId, setActiveCommentId] = useState<string | null>(null);
-  const [expandedCommentId, setExpandedCommentId] = useState<string | null>(null);
-  const [commentCardPositions, setCommentCardPositions] = useState<Record<string, { top: number; left: number }>>({});
   const [comments, setComments] = useState<CommentThread[]>([]);
-  const [commentsPanelOpen, setCommentsPanelOpen] = useState(false);
   const [cloudReadOnly, setCloudReadOnly] = useState(false);
   const [recentScenarios, setRecentScenarios] = useState<RecentScenario[]>([]);
   const [findReplaceOpen, setFindReplaceOpen] = useState(false);
@@ -686,6 +685,7 @@ function App() {
         frame = null;
         if (!editor.isDestroyed) {
           refreshSmartType(editor);
+          setCommentActionTarget(getCommentActionPosition(editor, zoom, appShellRef.current));
         }
       });
     };
@@ -735,7 +735,7 @@ function App() {
       const target = event.target;
       if (
         !(target instanceof Element) ||
-        target.closest(".comment-inline-button") ||
+        target.closest(".comment-inline-button, .formatting-toolbar") ||
         editor?.view.dom.contains(target)
       ) {
         return;
@@ -755,58 +755,6 @@ function App() {
     return () => window.removeEventListener("pointerdown", clearCommentActionOutsideEditor);
   }, [editor]);
 
-  useEffect(() => {
-    if (!editor) {
-      return;
-    }
-    const updatePositions = () => {
-      const next: Record<string, { top: number; left: number }> = {};
-      const canvas = editor.view.dom.closest<HTMLElement>(".document-canvas");
-      const canvasRect = canvas?.getBoundingClientRect();
-      const appShellRect = appShellRef.current?.getBoundingClientRect();
-      const anchoredComments = comments
-        .filter((item) => item.status === "open" && !item.anchor.lost)
-        .flatMap((thread) => {
-        const position = findCommentAnchorPosition(editor, thread.anchor);
-        if (!position) {
-          return [];
-        }
-        const coords = editor.view.coordsAtPos(position.from);
-        const overlay = clientPointToOverlay(coords.left, coords.top, zoom, appShellRect);
-        return [{ thread, desiredTop: Math.max(82, overlay.top), coords, overlay }];
-        })
-        .sort((left, right) => left.desiredTop - right.desiredTop);
-
-      let occupiedBottom = 82;
-      for (const { thread, desiredTop, coords } of anchoredComments) {
-        const card = document.querySelector<HTMLElement>(`[data-comment-card-id="${thread.id}"]`);
-        const cardHeight = card?.offsetHeight ?? (expandedCommentId === thread.id ? 230 : 48);
-        const top = Math.max(desiredTop, occupiedBottom);
-        next[thread.id] = {
-          top,
-          left: Math.max(
-            8,
-            clientPointToOverlay(canvasRect?.left ?? coords.left, 0, zoom, appShellRect).left - 168,
-          ),
-        };
-        occupiedBottom = top + cardHeight + 6;
-      }
-      setCommentCardPositions((previous) => JSON.stringify(previous) === JSON.stringify(next) ? previous : next);
-    };
-    const frame = requestAnimationFrame(updatePositions);
-    const workspace = editor.view.dom.closest<HTMLElement>(".workspace");
-    const handleLayoutChange = () => {
-      updatePositions();
-      setCommentActionTarget(getCommentActionPosition(editor, zoom, appShellRef.current));
-    };
-    window.addEventListener("resize", handleLayoutChange);
-    workspace?.addEventListener("scroll", handleLayoutChange);
-    return () => {
-      cancelAnimationFrame(frame);
-      window.removeEventListener("resize", handleLayoutChange);
-      workspace?.removeEventListener("scroll", handleLayoutChange);
-    };
-  }, [comments, editor, expandedCommentId, zoom]);
 
   const refreshAiTarget = useCallback(
     (target: EventTarget | null, clientX: number, clientY: number) => {
@@ -1354,7 +1302,8 @@ function App() {
       setActiveCommentId(thread.id);
       return;
     }
-    editor.chain().focus().setTextSelection(position).scrollIntoView().run();
+    editor.chain().setTextSelection(position.from).run();
+    window.getSelection()?.removeAllRanges();
     setActiveCommentId(thread.id);
   }, [editor]);
 
@@ -2234,6 +2183,7 @@ function App() {
   };
 
   const coverPagePresent = hasCoverPageContent(coverPage);
+  const statistics = getDocumentStatistics(editor?.getJSON() ?? initialContent);
   const coverPageVisible = coverPagePresent && !coverPageHidden;
   const documentSheetCount = pageCount + (coverPageVisible ? 1 : 0);
   // Feuille purement visuelle, toujours après le scénario : elle apporte de
@@ -2257,7 +2207,13 @@ function App() {
         </div>
         <nav aria-label="Menu principal">
           <button className="menu-button" type="button" onClick={() => setCloudProjectsOpen(true)}>Projets cloud</button>
-          <button className="menu-button" type="button" onClick={() => setCommentsPanelOpen(true)}>Commentaires ({comments.length})</button>
+          <button className="menu-button" type="button" onClick={() => {
+            const thread = comments.find(item => item.id === activeCommentId) ?? comments[0];
+            if (thread) {
+              navigateToComment(thread);
+              requestAnimationFrame(() => document.querySelector<HTMLElement>(`[data-comment-card-id="${thread.id}"]`)?.scrollIntoView({block:'nearest', inline:'nearest'}));
+            } else { setDocumentState(previous => ({...previous,status:'Sélectionne du texte pour ajouter un commentaire.'})); }
+          }}>Commentaires ({comments.length})</button>
           <div className="file-menu-container">
             <button
               className="menu-button"
@@ -2485,6 +2441,10 @@ function App() {
         >
           <strong>G</strong>
         </button>
+        <button className={editor?.isActive('italic') ? 'is-active' : ''} type="button"
+          disabled={cloudReadOnly} aria-label="Mettre en italique" aria-pressed={editor?.isActive('italic') ?? false}
+          title="Italique (Ctrl+I)" onMouseDown={event => event.preventDefault()}
+          onClick={() => editor?.chain().focus().toggleItalic().run()}><em>I</em></button>
         <button
           className={editor?.isActive("underline") ? "is-active" : ""}
           type="button"
@@ -2499,7 +2459,14 @@ function App() {
         <span className="document-title" title={documentState.title}>
           {documentState.title}{documentState.isDirty ? " *" : ""}
         </span>
-        <span className="document-element">{getScenarioElementLabel(currentType)}</span>
+        <select className="paragraph-type-control" aria-label="Type de paragraphe" value={currentType}
+          disabled={cloudReadOnly} onChange={event => {
+            if (editor?.isEditable) {
+              editor.commands.setScenarioElementType(toScenarioElementType(event.target.value));
+              editor.commands.focus();
+              refreshEditorState(editor);
+            }
+          }}>{SCENARIO_ELEMENT_TYPES.map(type => <option value={type} key={type}>{getScenarioElementLabel(type)}</option>)}</select>
         <div className="document-status">
           <CloudProjectStatus onOpen={() => setCloudProjectsOpen(true)} />
           <span className="document-save-status" title={documentState.status}>{documentState.status}</span>
@@ -2522,33 +2489,6 @@ function App() {
         </button>
       )}
 
-      {comments.some((thread) => thread.status === "open" && !thread.anchor.lost) && (
-        <div className="comment-margin" aria-label="Commentaires ouverts">
-          {comments
-            .filter((thread) => thread.status === "open" && !thread.anchor.lost && commentCardPositions[thread.id] !== undefined)
-            .map((thread) => (
-              <article
-                className={`comment-margin-card ${activeCommentId === thread.id ? "is-active" : ""} ${expandedCommentId === thread.id ? "is-expanded" : ""}`}
-                key={thread.id}
-                data-comment-card-id={thread.id}
-                style={commentCardPositions[thread.id]}
-                onMouseEnter={() => setActiveCommentId(thread.id)}
-              >
-                    <button className="comment-preview" type="button" onClick={() => {
-                      setExpandedCommentId((current) => current === thread.id ? null : thread.id);
-                      navigateToComment(thread);
-                    }}>
-                      {thread.messages[0]?.text}
-                    </button>
-                    {expandedCommentId === thread.id && (
-                      <footer>
-                        <button type="button" onClick={() => setCommentsPanelOpen(true)}>Ouvrir la discussion</button>
-                      </footer>
-                    )}
-              </article>
-            ))}
-        </div>
-      )}
 
       <main
         className="workspace"
@@ -2601,6 +2541,10 @@ function App() {
         onWheel={handleWorkspaceWheel}
         onContextMenu={openScenarioContextMenu}
       >
+        <div className={`editor-stage ${comments.length ? 'has-comment-margin' : ''}`}>
+        {editor && <CommentMargin editor={editor} threads={comments} readOnly={cloudReadOnly}
+          activeId={activeCommentId} onActivate={navigateToComment} zoom={zoom}
+          onUpdate={updateCommentThread} onDelete={id => void deleteCommentThread(id)} />}
         <div
           className="document-zoom"
           style={{ "--document-zoom": zoom / 100 } as CSSProperties}
@@ -2646,7 +2590,15 @@ function App() {
             </div>
           </div>
         </div>
+        </div>
       </main>
+      <footer className="editor-statistics" aria-label="Statistiques du scénario">
+        <span><strong>{statistics.words}</strong> mots</span>
+        <span title="Estimation indicative : une page de scénario correspond à environ une minute à l’écran.">Temps estimé : <strong>≈ {statistics.words ? pageCount : 0} min</strong></span>
+        <span><strong>{documentSheetCount}</strong> pages</span>
+        <span><strong>{statistics.scenes}</strong> scènes</span>
+        <span><strong>{statistics.locations}</strong> décors</span>
+      </footer>
 
       {smartType && (
         <div
@@ -2835,7 +2787,7 @@ function App() {
 
             <section>
               <h3>Commentaires</h3>
-              <p>Sélectionne un passage : un bouton de commentaire apparaît sous la sélection. Clique dessus, écris ta note puis valide avec <kbd>Ctrl + Entrée</kbd>. Le passage est surligné en bleu et la note se trouve dans la marge gauche.</p>
+              <p>Sélectionne un passage, puis clique sur le bouton de commentaire. Le passage est surligné en jaune et la note apparaît dans la marge gauche. Clique sur la note pour la modifier ou la supprimer.</p>
             </section>
 
             <section>
@@ -2870,10 +2822,6 @@ function App() {
         onClose={() => setCloudProjectsOpen(false)}
         onSignIn={() => { setCloudProjectsOpen(false); setAccountPanelOpen(true); }}
       />}
-
-      {commentsPanelOpen && <ProjectCommentsPanel threads={comments} readOnly={cloudReadOnly}
-        onClose={() => setCommentsPanelOpen(false)} onNavigate={navigateToComment}
-        onUpdate={updateCommentThread} onDelete={(id) => void deleteCommentThread(id)} />}
 
       {commentComposerOpen && (
         <div className="modal-backdrop" role="presentation" onMouseDown={() => setCommentComposerOpen(false)}>

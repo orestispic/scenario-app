@@ -12,11 +12,11 @@ export type ScenarioElementType = (typeof SCENARIO_ELEMENT_TYPES)[number];
 export const DEFAULT_SCENARIO_ELEMENT_TYPE: ScenarioElementType = "SCENE_HEADING";
 
 export const SCENARIO_ELEMENT_LABELS: Record<ScenarioElementType, string> = {
-  SCENE_HEADING: "Titre de scene",
+  SCENE_HEADING: "Titre de scène",
   ACTION: "Action",
   CHARACTER: "Personnage",
   DIALOGUE: "Dialogue",
-  PARENTHETICAL: "Parenthese",
+  PARENTHETICAL: "Parenthèse",
   TRANSITION: "Transition",
 };
 
