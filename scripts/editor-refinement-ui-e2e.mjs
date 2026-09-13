@@ -41,10 +41,10 @@ try {
     for (let i=0;i<3;i++) {
       await page.locator('.scenario-editor').focus();await page.keyboard.press('Control+Home');await page.keyboard.press('Shift+End');
       const addComment=page.getByRole('button',{name:'Ajouter un commentaire',exact:true});
-      if(i===0){assert.equal(await addComment.evaluate(el=>getComputedStyle(el).color),'rgb(253, 198, 69)');await addComment.hover();assert.notEqual(await addComment.evaluate(el=>getComputedStyle(el).backgroundColor),'rgb(32, 42, 54)');}
+      if(i===0){assert.notEqual(await addComment.evaluate(el=>getComputedStyle(el).color),'rgb(253, 198, 69)');}
       await addComment.click();
       const composer=page.getByRole('dialog',{name:'Ajouter un commentaire'}),composerField=page.getByPlaceholder('Écrire un commentaire…');
-      if(i===0){assert.match(await composer.evaluate(el=>getComputedStyle(el).borderColor),/253, 198, 69/);await composerField.focus();assert.equal(await composerField.evaluate(el=>getComputedStyle(el).outlineColor),'rgb(253, 198, 69)');assert.equal(await composer.getByRole('button',{name:'Commenter'}).evaluate(el=>getComputedStyle(el).backgroundColor),'rgb(253, 198, 69)');}
+      if(i===0){assert.doesNotMatch(await composer.evaluate(el=>getComputedStyle(el).borderColor),/253, 198, 69/);await composerField.focus();assert.equal(await composerField.evaluate(el=>getComputedStyle(el).outlineColor),'rgb(110, 179, 255)');assert.equal(await composer.getByRole('button',{name:'Commenter'}).evaluate(el=>getComputedStyle(el).backgroundColor),'rgb(70, 153, 243)');}
       await composerField.fill(i===0 ? 'Note 1 : vérifier ce passage en entier.\nLa deuxième ligne doit rester cachée au repos puis apparaître une fois le commentaire ouvert.' : `Note ${i+1} : vérifier ce passage.`);
       await page.getByRole('button',{name:'Commenter',exact:true}).click();
     }
@@ -53,9 +53,9 @@ try {
     const collapsed=await hit.locator('span').evaluate(el=>({whiteSpace:getComputedStyle(el).whiteSpace,scrollHeight:el.scrollHeight,clientHeight:el.clientHeight}));
     assert.equal(collapsed.whiteSpace,'nowrap');assert(collapsed.scrollHeight<=collapsed.clientHeight+1,'inactive comment stays on one line');
     assert((await card.boundingBox()).height<=36,'inactive comment has no unused vertical space');
-    assert.match(await card.evaluate(el=>getComputedStyle(el).borderColor),/253, 198, 69/,'comment styling is always amber');
+    assert.doesNotMatch(await card.evaluate(el=>getComputedStyle(el).borderColor),/253, 198, 69/,'only the annotated text uses amber');
     const idleColor=await card.evaluate(el=>getComputedStyle(el).backgroundColor);await hit.hover();
-    assert.notEqual(await card.evaluate(el=>getComputedStyle(el).backgroundColor),idleColor,'hover strengthens the amber card');
+    assert.notEqual(await card.evaluate(el=>getComputedStyle(el).backgroundColor),idleColor,'hover uses the standard interface state');
     assert.equal(await hit.evaluate(el=>getComputedStyle(el).backgroundColor),'rgba(0, 0, 0, 0)','comment hover never falls back to the generic blue button state');
     assert(await page.locator('.scenario-comment-anchor').first().evaluate(el=>el.classList.contains('is-hovered')),'hovering the card strengthens its text anchor');
     await paragraph.click();await page.keyboard.press('Control+End');await page.keyboard.insertText(' SUITE NON COMMENTÉE');
@@ -74,7 +74,7 @@ try {
     assert.equal(await card.locator('.margin-note-hitbox').count(),0,'editing replaces the old text instead of duplicating it');
     const editField=card.getByLabel('Modifier le commentaire');
     const [editBox,cardBox]=await Promise.all([editField.boundingBox(),card.boundingBox()]);assert(editBox.y-cardBox.y<=11,'editing field starts at the top of the card');
-    assert.equal(await editField.evaluate(el=>getComputedStyle(el).outlineColor),'rgb(253, 198, 69)','comment editing focus stays amber');
+    assert.equal(await editField.evaluate(el=>getComputedStyle(el).outlineColor),'rgb(110, 179, 255)','comment editing uses the standard focus state');
     await editField.fill('Une note modifiée sur place.');
     await page.waitForFunction(()=>{
       const cards=[...document.querySelectorAll('.margin-note')].map(el=>el.getBoundingClientRect()).sort((a,b)=>a.top-b.top);
