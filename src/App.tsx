@@ -1284,7 +1284,7 @@ function App() {
       addCommentMark(editor, thread.id, thread.anchor);
     }
     setComments((previous) => [...previous, thread]);
-    setActiveCommentId(thread.id);
+    setActiveCommentId(null);
     setCommentComposerOpen(false);
     setCommentAnchor(null);
     setDocumentState((previous) => ({ ...previous, isDirty: true, status: "Commentaire ajouté" }));
@@ -1296,8 +1296,12 @@ function App() {
     setDocumentState((previous) => ({ ...previous, isDirty: true, status: "Commentaires modifiés" }));
   }, [editor]);
 
-  const navigateToComment = useCallback((thread: CommentThread) => {
+  const navigateToComment = useCallback((thread: CommentThread, toggle = false) => {
     if (!editor) {
+      return;
+    }
+    if (toggle && activeCommentId === thread.id) {
+      setActiveCommentId(null);
       return;
     }
     const position = findCommentAnchorPosition(editor, thread.anchor);
@@ -1308,7 +1312,7 @@ function App() {
     editor.chain().setTextSelection(position.from).run();
     window.getSelection()?.removeAllRanges();
     setActiveCommentId(thread.id);
-  }, [editor]);
+  }, [activeCommentId, editor]);
 
   const deleteCommentThread = useCallback(async (threadId: string) => {
     if (!editor?.isEditable) return;
@@ -1479,7 +1483,7 @@ function App() {
       isDirty: true,
       status: hidden ? "Page de garde masquée" : "Page de garde affichée",
     }));
-  }, [editor]);
+  }, [activeCommentId, editor]);
 
   const saveAiSettings = useCallback(async () => {
     try {
@@ -2546,7 +2550,7 @@ function App() {
       >
         <div className={`editor-stage ${comments.length ? 'has-comment-margin' : ''}`}>
         {editor && <CommentMargin editor={editor} threads={comments} readOnly={cloudReadOnly}
-          activeId={activeCommentId} onActivate={navigateToComment} zoom={zoom}
+          activeId={activeCommentId} onActivate={(thread) => navigateToComment(thread, true)} zoom={zoom}
           onUpdate={updateCommentThread} onDelete={id => void deleteCommentThread(id)} />}
         <div
           className="document-zoom"

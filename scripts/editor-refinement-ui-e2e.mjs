@@ -52,6 +52,8 @@ try {
     await card.getByRole('button',{name:'Modifier',exact:true}).waitFor();
     const expanded=await hit.locator('span').evaluate(el=>({whiteSpace:getComputedStyle(el).whiteSpace,scrollHeight:el.scrollHeight,clientHeight:el.clientHeight,text:el.textContent}));
     assert.equal(expanded.whiteSpace,'pre-wrap');assert(expanded.scrollHeight<=expanded.clientHeight+1,'active comment shows its complete text');assert.match(expanded.text,/deuxième ligne/);
+    await hit.click();await card.getByRole('button',{name:'Modifier',exact:true}).waitFor({state:'hidden'});assert.equal(await hit.getAttribute('aria-expanded'),'false');
+    await hit.click();await card.getByRole('button',{name:'Modifier',exact:true}).waitFor();
     assert.equal(await page.evaluate(()=>window.getSelection()?.toString()),'');
     assert.equal(await page.getByRole('dialog',{name:'Commentaires du projet'}).count(),0);
     assert.match(await page.locator('.scenario-comment-anchor').first().evaluate(el=>getComputedStyle(el).backgroundColor),/253, 198, 69/);
