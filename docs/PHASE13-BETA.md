@@ -21,11 +21,17 @@
   et de son commentaire, fichier altéré refusé. `--published` vérifie aussi le manifeste
   et l'installateur téléchargés depuis GitHub, sans installation.
 - La clé publique des mises à jour reste celle de la 0.1.8.
+- Publication GitHub réussie : [exécution 34776260920](https://github.com/orestispic/scenario-app/actions/runs/34776260920).
+  Manifeste public 0.1.9 et installateur téléchargé vérifiés après publication :
+  signature valide, copie altérée refusée, 4 732 533 octets.
+  SHA-256 : `68ab140fdc629c214375bd640217a1141ec41692e1c68ca6178c82a76f3fbb85`.
+  Le lien API d'asset généré par tauri-action est vérifié contre la release attendue
+  et téléchargé avec `Accept: application/octet-stream`, comme le client Tauri.
 
 ## Essais manuels encore nécessaires
 
 1. Sur Windows vierge : installation, ouverture, connexion, activation de l'appareil.
-2. Depuis 0.1.8 : ouvrir un scénario de test, enregistrer, accepter la mise à jour,
+2. Depuis 0.1.8 : ouvrir un scénario de test, enregistrer, laisser la mise à jour s'installer,
    vérifier la version, la conservation du scénario et de la connexion.
 3. Fermer puis rouvrir hors connexion avec une licence encore valide ; vérifier
    l'écriture locale, puis le retour en ligne et le renouvellement des droits.

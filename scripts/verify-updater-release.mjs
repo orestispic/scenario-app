@@ -31,9 +31,17 @@ if (process.argv.includes('--published')) {
   assert.ok(windows);
   const url = new URL(windows.url);
   assert.equal(url.protocol, 'https:');
-  assert.equal(url.hostname, 'github.com');
-  assert.equal(url.pathname, `/orestispic/scenario-app/releases/download/v${version}/Scenario-Setup.exe`);
-  const installer = await fetch(url);
+  const releaseResponse = await fetch(`https://api.github.com/repos/orestispic/scenario-app/releases/tags/v${version}`);
+  assert.ok(releaseResponse.ok);
+  const release = await releaseResponse.json();
+  const asset = release.assets.find(item => item.name === 'Scenario-Setup.exe');
+  assert.ok(asset);
+  const publicUrl = `https://github.com/orestispic/scenario-app/releases/download/v${version}/Scenario-Setup.exe`;
+  assert.equal(asset.browser_download_url, publicUrl);
+  // tauri-action can use the API asset URL; validate its identity against the
+  // expected tagged release before fetching with the same Accept header as Tauri.
+  assert.ok(windows.url === publicUrl || windows.url === `https://api.github.com/repos/orestispic/scenario-app/releases/assets/${asset.id}`);
+  const installer = await fetch(url, { headers: { Accept: 'application/octet-stream' } });
   assert.ok(installer.ok);
   bytes = Buffer.from(await installer.arrayBuffer());
   assert.ok(bytes.length > 1000000 && bytes.length < 64000000);
