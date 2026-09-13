@@ -153,6 +153,7 @@
   .margin-note {position:absolute;left:0;width:250px;background:color-mix(in srgb,var(--surface-3) 88%,var(--amber));border:1px solid rgba(253,198,69,.48);border-radius:var(--r-md);box-shadow:var(--shadow-2);padding:0;overflow:hidden;transition:background var(--fast) var(--ease),border-color var(--fast) var(--ease);}
   .margin-note:is(.is-active,:has(.margin-note-hitbox:hover)) {background:color-mix(in srgb,var(--surface-3) 78%,var(--amber));border-color:rgba(253,198,69,.78);}
   .app-shell.theme-dark .margin-note-hitbox {display:block;width:100%;height:auto;min-height:32px;padding:8px 10px;margin:0;text-align:left;border:0;border-radius:0;background:transparent;font-size:11px;line-height:1.45;font-weight:400;color:var(--text-2);overflow:hidden;}
+  .app-shell.theme-dark .margin-note.margin-note button.margin-note-hitbox:hover:not(:disabled) {background:transparent;border-color:transparent;color:var(--text-2);}
   .app-shell.theme-dark .margin-note-hitbox:focus-visible {outline:0;}
   .margin-note:focus-within {border-color:var(--amber);}
   .margin-note-hitbox>span {display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}

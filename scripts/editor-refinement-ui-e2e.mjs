@@ -39,7 +39,7 @@ try {
       assert.equal(await paragraph.getAttribute('data-scenario-type'),type);
     }
     for (let i=0;i<3;i++) {
-      await paragraph.click();await page.keyboard.press('Control+Home');await page.keyboard.press('Shift+End');
+      await page.locator('.scenario-editor').focus();await page.keyboard.press('Control+Home');await page.keyboard.press('Shift+End');
       await page.getByRole('button',{name:'Ajouter un commentaire',exact:true}).click();
       await page.getByPlaceholder('Écrire un commentaire…').fill(i===0 ? 'Note 1 : vérifier ce passage en entier.\nLa deuxième ligne doit rester cachée au repos puis apparaître une fois le commentaire ouvert.' : `Note ${i+1} : vérifier ce passage.`);
       await page.getByRole('button',{name:'Commenter',exact:true}).click();
@@ -52,7 +52,11 @@ try {
     assert.match(await card.evaluate(el=>getComputedStyle(el).borderColor),/253, 198, 69/,'comment styling is always amber');
     const idleColor=await card.evaluate(el=>getComputedStyle(el).backgroundColor);await hit.hover();
     assert.notEqual(await card.evaluate(el=>getComputedStyle(el).backgroundColor),idleColor,'hover strengthens the amber card');
+    assert.equal(await hit.evaluate(el=>getComputedStyle(el).backgroundColor),'rgba(0, 0, 0, 0)','comment hover never falls back to the generic blue button state');
     assert(await page.locator('.scenario-comment-anchor').first().evaluate(el=>el.classList.contains('is-hovered')),'hovering the card strengthens its text anchor');
+    await paragraph.click();await page.keyboard.press('Control+End');await page.keyboard.insertText(' SUITE NON COMMENTÉE');
+    assert.equal(await page.locator('.scenario-comment-anchor').evaluateAll(nodes=>nodes.some(node=>node.textContent?.includes('SUITE NON COMMENTÉE'))),false,'typing after a comment never extends its highlight');
+    await page.keyboard.press('Control+z');
     await hit.scrollIntoViewIfNeeded();const hitbox=await hit.boundingBox();await page.mouse.click(hitbox.x+hitbox.width-5,hitbox.y+hitbox.height-5);
     await card.getByRole('button',{name:'Modifier',exact:true}).waitFor();
     const expanded=await hit.locator('span').evaluate(el=>({whiteSpace:getComputedStyle(el).whiteSpace,scrollHeight:el.scrollHeight,clientHeight:el.clientHeight,text:el.textContent}));

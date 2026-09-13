@@ -130,6 +130,9 @@ export function findCommentAnchorPosition(editor: Editor, anchor: CommentAnchor)
 export const CommentAnchorMark = Mark.create({
   name: "commentAnchor",
   excludes: "",
+  // A comment belongs only to the range explicitly selected by the author.
+  // Typing at either edge must never extend that highlighted range.
+  inclusive: false,
 
   addAttributes() {
     return {
