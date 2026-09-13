@@ -382,6 +382,10 @@ export function AccountLicensePanel({
           </div>
         ) : (
           <>
+            <p className="account-auth-intro">
+              Le compte est facultatif pour écrire et enregistrer des fichiers sur cet appareil.
+              Connectez-vous seulement pour activer les fonctions Auteur ou Studio.
+            </p>
             {localTestMode && (
               <section className="account-local-test">
                 <strong>Profils locaux</strong>

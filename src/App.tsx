@@ -328,8 +328,6 @@ function findTextMatches(editor: Editor, search: string, matchCase: boolean): Te
   return matches;
 }
 
-type AuthenticationState = "checking" | "required" | "authenticated";
-
 function isTemporaryAuthenticationFailure(error: unknown): boolean {
   return (
     error instanceof TypeError ||
@@ -338,15 +336,12 @@ function isTemporaryAuthenticationFailure(error: unknown): boolean {
 }
 
 function App() {
-  const [authentication, setAuthentication] = useState<AuthenticationState>("checking");
-
   useEffect(() => {
     let active = true;
     const stopListening = sessions.subscribe((authenticated) => {
       if (!active || authenticated) return;
       authenticatedOperations.stop();
       void cloudProjectRuntime.close().catch(() => undefined);
-      setAuthentication("required");
     });
 
     void sessions
@@ -355,9 +350,6 @@ function App() {
         if (!active) return;
         if (token) {
           authenticatedOperations.reset();
-          setAuthentication("authenticated");
-        } else {
-          setAuthentication("required");
         }
       })
       .catch(async (error) => {
@@ -367,14 +359,12 @@ function App() {
           if (!active) return;
           if (restored) {
             authenticatedOperations.reset();
-            setAuthentication("authenticated");
             return;
           }
         }
         if (error instanceof AuthSessionError && error.terminal) {
           await offlineLicense.clear().catch(() => undefined);
         }
-        if (active) setAuthentication("required");
       });
 
     return () => {
@@ -383,40 +373,10 @@ function App() {
     };
   }, []);
 
-  if (authentication === "checking") {
-    return (
-      <main className="authentication-gate" aria-busy="true" aria-label="Vérification de la session">
-        <img src="/senario-logo.png" alt="" width="48" height="48" />
-        <strong>senario</strong>
-        <span>Vérification de la session…</span>
-      </main>
-    );
-  }
-
-  if (authentication === "required") {
-    return (
-      <div className="app-shell theme-dark authentication-required">
-        <AccountLicensePanel
-          required
-          onClose={() => undefined}
-          onAuthenticated={() => {
-            authenticatedOperations.reset();
-            setAuthentication("authenticated");
-          }}
-          onSignedOut={() => setAuthentication("required")}
-        />
-      </div>
-    );
-  }
-
-  return <AuthenticatedApp onAuthenticationLost={() => setAuthentication("required")} />;
+  return <AuthenticatedApp />;
 }
 
-interface AuthenticatedAppProps {
-  onAuthenticationLost(): void;
-}
-
-function AuthenticatedApp({ onAuthenticationLost }: AuthenticatedAppProps) {
+function AuthenticatedApp() {
   const [currentType, setCurrentType] = useState<ScenarioElementType>(
     DEFAULT_SCENARIO_ELEMENT_TYPE,
   );
@@ -2951,7 +2911,6 @@ function AuthenticatedApp({ onAuthenticationLost }: AuthenticatedAppProps) {
         <AccountLicensePanel
           onClose={() => setAccountPanelOpen(false)}
           onOpenCloud={() => { setAccountPanelOpen(false); setCloudProjectsOpen(true); }}
-          onSignedOut={onAuthenticationLost}
         />
       )}
 
@@ -2960,13 +2919,14 @@ function AuthenticatedApp({ onAuthenticationLost }: AuthenticatedAppProps) {
           await cloudProjectRuntime.close();
           authenticatedOperations.stop();
           await sessions.invalidate();
-          onAuthenticationLost();
+          setCloudProjectsOpen(false);
+          setAccountPanelOpen(true);
         })}
         editor={cloudEditor}
         onClose={() => setCloudProjectsOpen(false)}
         onSignIn={() => {
           setCloudProjectsOpen(false);
-          onAuthenticationLost();
+          setAccountPanelOpen(true);
         }}
       />}
 

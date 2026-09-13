@@ -289,6 +289,7 @@
   .app-shell.theme-dark .account-signin-panel input { min-height: 44px; background: var(--ui-panel); font-size: 15px; }
   .app-shell.theme-dark .account-signin-panel .primary-button { min-height: 44px; background: var(--ui-primary); }
   .app-shell.theme-dark .account-signin-panel .account-password-recovery { justify-self: end; min-height: 24px; padding: 0; font-size: 13px; text-decoration: none; }
+  .app-shell.theme-dark .account-signin-panel .account-auth-intro { margin: -8px 0 0; color: var(--ui-muted); font-size: 13px; line-height: 1.55; }
   .account-auth-switch { border-top: 1px solid var(--ui-border); padding-top: 24px; color: var(--ui-muted); text-align: center; font-size: 13px; }
   .app-shell.theme-dark .account-auth-switch button { color: var(--ui-info); background: transparent; border: 0; padding: 4px 6px; min-height: 24px; }
   @media (max-width: 760px) {

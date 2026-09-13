@@ -27,10 +27,12 @@ try {
   const page = await context.newPage();
   const errors = []; page.on('pageerror', error => errors.push(error.message));
   await page.goto(base);
-  await page.getByRole('button', { name: 'studio', exact: true }).waitFor();
-  assert.equal(await page.locator('.scenario-editor').count(), 0, 'No editor before authentication');
-  await page.getByRole('button', { name: 'studio', exact: true }).click();
   await page.locator('.scenario-editor').waitFor();
+  assert.equal(await page.getByRole('dialog', { name: 'Compte et licence' }).count(), 0, 'Anonymous editor must not force the account dialog');
+  await page.getByRole('button', { name: 'Compte', exact: true }).click();
+  await page.getByRole('button', { name: 'studio', exact: true }).waitFor();
+  await page.getByRole('button', { name: 'studio', exact: true }).click();
+  await page.getByRole('button', { name: 'Fermer', exact: true }).click();
   await page.getByRole('button', { name: 'IA', exact: true }).click();
   const panel = page.getByRole('dialog', { name: 'Réglages IA' });
   await panel.waitFor();
@@ -50,5 +52,5 @@ try {
   assert.deepEqual(errors, []);
   const storage = await page.evaluate(() => JSON.stringify(localStorage));
   assert.doesNotMatch(storage, /local-test:studio/, 'No authentication tokens in localStorage');
-  console.log('PASS: auth gate, login, server percentages, refresh, quota warning, unavailable state, no token in localStorage');
+  console.log('PASS: anonymous editor, optional login, server percentages, refresh, quota warning, unavailable state, no token in localStorage');
 } finally { await browser.close(); }
