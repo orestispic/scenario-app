@@ -4,15 +4,14 @@ import { CommercialHttpError } from "./authenticatedApi";
 import { type LocalTestAuthAdapter } from "./auth";
 import type { DeviceView, EntitlementsResponse, MeResponse, SessionTokens } from "./contractsV2";
 import type { ActivationRedemptionView, BillingState } from "./contractsV3";
-import { BOUND_CACHE_KEY, readBoundCache, writeBoundCache } from "./boundEntitlementCache";
+import { BOUND_CACHE_KEY } from "./boundEntitlementCache";
 import {
   auth,
-  browserStorage,
   createRuntimeCommercialApi,
   getClientPlatform,
   getDeviceFingerprint,
   localTestMode,
-  offlineTrust,
+  offlineLicense,
   sessions,
   cloudSyncQueue,
   authenticatedOperations,
@@ -37,12 +36,19 @@ export function AccountLicensePanel({ onClose, onOpenCloud }: AccountLicensePane
   const [offline, setOffline] = useState(false);
   const [message, setMessage] = useState("");
 
+  useEffect(() => offlineLicense.subscribe(() => {
+    if (offline && offlineLicense.state.kind !== 'valid') {
+      setEntitlements(null);
+      setMessage('Licence hors ligne indisponible. Vos fichiers locaux restent accessibles ; reconnectez-vous pour actualiser les droits.');
+    }
+  }), [offline]);
+
   function accountApi() {
     return createRuntimeCommercialApi(async () => {
       setSession(false);
       await cloudProjectRuntime.close();
       await sessions.invalidate();
-      await offlineTrust.clear();
+      await offlineLicense.clear();
     });
   }
 
@@ -67,18 +73,10 @@ export function AccountLicensePanel({ onClose, onOpenCloud }: AccountLicensePane
     )
       return false;
     try {
-      const trust = await offlineTrust.read();
-      if (!trust) return false;
-      const snapshot = await readBoundCache(
-        browserStorage(),
-        trust.publicKey,
-        trust.keyId,
-        trust.me.account.id,
-      );
-      if (!snapshot) return false;
-      const cached = JSON.parse(browserStorage().getItem(BOUND_CACHE_KEY)!);
-      setMe(trust.me);
-      setEntitlements({ offlineGrant: cached.grant, snapshot });
+      const restored = await offlineLicense.restore();
+      if (!restored) return false;
+      setMe(restored.me);
+      setEntitlements(restored.entitlements);
       setSession(true);
       setOffline(true);
       setMessage(
@@ -94,33 +92,19 @@ export function AccountLicensePanel({ onClose, onOpenCloud }: AccountLicensePane
     if (nextSession) {
       await cloudProjectRuntime.close();
       authenticatedOperations.reset();
-      await offlineTrust.clear();
+      await offlineLicense.clear();
       await sessions.accept(nextSession);
     }
     const api = accountApi();
-    const [configuration, nextMe, nextEntitlements, nextDevices, nextBilling, nextActivations] =
+    const [nextMe, nextEntitlements, nextDevices, nextBilling, nextActivations] =
       await Promise.all([
-        api.getConfiguration(),
         api.getMe(),
         api.getEntitlements(),
         api.getDevices(),
         api.getBilling(),
         api.getActivationStatus(),
       ]);
-    await writeBoundCache(
-      browserStorage(),
-      nextEntitlements.snapshot,
-      nextEntitlements.offlineGrant,
-      configuration.offlineGrantPublicKey,
-      configuration.offlineGrantKeyId,
-      nextMe.account.id,
-    );
-    await offlineTrust.write({
-      schemaVersion: 1,
-      me: nextMe,
-      publicKey: configuration.offlineGrantPublicKey,
-      keyId: configuration.offlineGrantKeyId,
-    });
+    await offlineLicense.refresh();
     await cloudSyncQueue.bindAccount(nextMe.account.id);
     void cloudSyncQueue.process();
     setOffline(false);
@@ -178,6 +162,7 @@ export function AccountLicensePanel({ onClose, onOpenCloud }: AccountLicensePane
       platform: getClientPlatform(),
     });
     setDevices(await api.getDevices());
+    await offlineLicense.refresh();
   }
 
   async function signOut() {
@@ -195,7 +180,7 @@ export function AccountLicensePanel({ onClose, onOpenCloud }: AccountLicensePane
       setDevices([]);
       setBilling(null);
       setActivations([]);
-      await offlineTrust.clear();
+      await offlineLicense.clear();
       await cloudSyncQueue.pauseAndForgetAccount();
     }
   }
@@ -212,22 +197,14 @@ export function AccountLicensePanel({ onClose, onOpenCloud }: AccountLicensePane
       label: "Cet appareil",
       platform: getClientPlatform(),
     });
-    const [configuration, nextEntitlements, nextBilling, nextActivations, nextDevices] =
+    const [nextEntitlements, nextBilling, nextActivations, nextDevices] =
       await Promise.all([
-        api.getConfiguration(),
         api.getEntitlements(),
         api.getBilling(),
         api.getActivationStatus(),
         api.getDevices(),
       ]);
-    await writeBoundCache(
-      browserStorage(),
-      nextEntitlements.snapshot,
-      nextEntitlements.offlineGrant,
-      configuration.offlineGrantPublicKey,
-      configuration.offlineGrantKeyId,
-      me!.account.id,
-    );
+    await offlineLicense.refresh();
     setEntitlements(nextEntitlements);
     setBilling(nextBilling.billing);
     setActivations(nextActivations.activations);

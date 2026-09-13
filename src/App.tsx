@@ -113,6 +113,7 @@ import {
   type ScenarioTranslationSegment,
 } from "./document/aiConfig";
 import { AccountLicensePanel } from "./commercial/AccountLicensePanel";
+import { OfflineLicenseStatus } from './commercial/OfflineLicenseStatus';
 import { CloudProjectsPanel, CloudProjectStatus } from './commercial/CloudProjectsPanel';
 import { resolveProjectCommentAnchors } from './commercial/projectMetadataClient';
 import { CommentMargin } from './editor/CommentMargin';
@@ -2605,6 +2606,7 @@ function App() {
         </div>
       </main>
       <footer className="editor-statistics" aria-label="Statistiques du scénario">
+        <OfflineLicenseStatus />
         <span><strong>{statistics.words}</strong> mots</span>
         <span title="Estimation indicative : une page de scénario correspond à environ une minute à l’écran.">Temps estimé : <strong>≈ {statistics.words ? pageCount : 0} min</strong></span>
         <span><strong>{documentSheetCount}</strong> pages</span>

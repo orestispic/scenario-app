@@ -5,6 +5,7 @@ import { SessionManager } from "./session";
 import { createRuntimeTokenVault } from "./tokenVault";
 import { CloudSyncQueue, createBrowserSyncQueueStorage } from "./syncQueue";
 import { readScenario } from "../document/persistence";
+import { OfflineLicense } from './offlineLicense';
 
 export const localTestMode =
   import.meta.env.DEV && import.meta.env.VITE_SCENARIO_AUTH_MODE === "local-test";
@@ -81,3 +82,6 @@ export const cloudSyncQueue = new CloudSyncQueue(
   () => createRuntimeCommercialApi(async () => sessions.invalidate()),
   readScenario,
 );
+
+export const offlineLicense = new OfflineLicense(offlineTrust, browserStorage(), getDeviceFingerprint,
+  () => createRuntimeCommercialApi(), () => sessions.getAccessToken());

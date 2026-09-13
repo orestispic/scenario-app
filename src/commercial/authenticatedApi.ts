@@ -350,7 +350,7 @@ export function createAuthenticatedCommercialApi(options: {
   return {
     getConfiguration: () => request<PublicConfiguration>("/v1/config"),
     getMe: () => request<MeResponse>("/v1/me"),
-    getEntitlements: () => request<EntitlementsResponse>("/v3/entitlements"),
+    getEntitlements: () => request<EntitlementsResponse>(options.clientContext ? "/v3/entitlements?offline=1" : "/v3/entitlements", options.clientContext ? { headers: cloudHeaders() } : {}),
     getDevices: async () => (await request<{ devices: DeviceView[] }>("/v1/devices")).devices,
     activateDevice: async (input) =>
       (

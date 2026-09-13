@@ -6,6 +6,7 @@ export interface OfflineTrust {
   me: MeResponse;
   publicKey: JsonWebKey;
   keyId: string;
+  lease?: { digest: string; deviceFingerprint: string; lastSeen: number; serverTime: number };
 }
 export interface OfflineTrustStore {
   read(): Promise<OfflineTrust | null>;
