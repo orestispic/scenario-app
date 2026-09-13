@@ -2550,7 +2550,7 @@ function App() {
       >
         <div className={`editor-stage ${comments.length ? 'has-comment-margin' : ''}`}>
         {editor && <CommentMargin editor={editor} threads={comments} readOnly={cloudReadOnly}
-          activeId={activeCommentId} onActivate={(thread) => navigateToComment(thread, true)} zoom={zoom}
+          activeId={activeCommentId} onActivate={(thread) => navigateToComment(thread, true)} onDeactivate={() => setActiveCommentId(null)} zoom={zoom}
           onUpdate={updateCommentThread} onDelete={id => void deleteCommentThread(id)} />}
         <div
           className="document-zoom"

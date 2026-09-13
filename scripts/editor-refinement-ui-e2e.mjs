@@ -49,7 +49,10 @@ try {
     const collapsed=await hit.locator('span').evaluate(el=>({whiteSpace:getComputedStyle(el).whiteSpace,scrollHeight:el.scrollHeight,clientHeight:el.clientHeight}));
     assert.equal(collapsed.whiteSpace,'nowrap');assert(collapsed.scrollHeight<=collapsed.clientHeight+1,'inactive comment stays on one line');
     assert((await card.boundingBox()).height<=36,'inactive comment has no unused vertical space');
-    await hit.hover();assert.match(await card.evaluate(el=>getComputedStyle(el).backgroundColor),/253, 198, 69/);
+    assert.match(await card.evaluate(el=>getComputedStyle(el).borderColor),/253, 198, 69/,'comment styling is always amber');
+    const idleColor=await card.evaluate(el=>getComputedStyle(el).backgroundColor);await hit.hover();
+    assert.notEqual(await card.evaluate(el=>getComputedStyle(el).backgroundColor),idleColor,'hover strengthens the amber card');
+    assert(await page.locator('.scenario-comment-anchor').first().evaluate(el=>el.classList.contains('is-hovered')),'hovering the card strengthens its text anchor');
     await hit.scrollIntoViewIfNeeded();const hitbox=await hit.boundingBox();await page.mouse.click(hitbox.x+hitbox.width-5,hitbox.y+hitbox.height-5);
     await card.getByRole('button',{name:'Modifier',exact:true}).waitFor();
     const expanded=await hit.locator('span').evaluate(el=>({whiteSpace:getComputedStyle(el).whiteSpace,scrollHeight:el.scrollHeight,clientHeight:el.clientHeight,text:el.textContent}));
@@ -63,6 +66,7 @@ try {
     assert.equal(await card.locator('.margin-note-hitbox').count(),0,'editing replaces the old text instead of duplicating it');
     const editField=card.getByLabel('Modifier le commentaire');
     const [editBox,cardBox]=await Promise.all([editField.boundingBox(),card.boundingBox()]);assert(editBox.y-cardBox.y<=11,'editing field starts at the top of the card');
+    assert.equal(await editField.evaluate(el=>getComputedStyle(el).outlineColor),'rgb(253, 198, 69)','comment editing focus stays amber');
     await editField.fill('Une note modifiée sur place.');
     await page.waitForFunction(()=>{
       const cards=[...document.querySelectorAll('.margin-note')].map(el=>el.getBoundingClientRect()).sort((a,b)=>a.top-b.top);
@@ -70,7 +74,9 @@ try {
       return cards.every((r,i)=>r.right<=sheet.left-20 && (!i||r.top>=cards[i-1].bottom+7));
     });
     await page.screenshot({path:`outputs/editor-refinement/comments-${zoom}.png`});
-    await card.getByRole('button',{name:'Enregistrer',exact:true}).click();await card.getByText('Une note modifiée sur place.',{exact:true}).waitFor();
+    await page.mouse.click(1400,800);
+    await card.getByText('Une note modifiée sur place.',{exact:true}).waitFor();assert.equal(await card.evaluate(el=>el.classList.contains('is-active')),false);assert.equal(await editField.count(),0);
+    await card.locator('.margin-note-hitbox').click();await card.getByRole('button',{name:'Supprimer',exact:true}).waitFor();
     await card.getByRole('button',{name:'Supprimer',exact:true}).click();await page.waitForFunction(()=>document.querySelectorAll('.margin-note').length===2);
     const stats=page.locator('.editor-statistics');assert.match(await stats.textContent(),/6 mots.*Temps estimé.*pages.*0 scènes.*0 décors/);
     const before=await stats.boundingBox();await page.locator('.workspace').evaluate(el=>el.scrollTop=el.scrollHeight);assert.deepEqual(await stats.boundingBox(),before);

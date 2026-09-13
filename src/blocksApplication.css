@@ -150,11 +150,11 @@
 
   /* Comment card and highlight from section 16; margin placement preserved. */
   .comment-rail {position:absolute;width:250px;top:0;left:0;}
-  .margin-note {position:absolute;left:0;width:250px;background:var(--surface-3);border:1px solid #344153;border-radius:var(--r-md);box-shadow:var(--shadow-2);padding:0;overflow:hidden;transition:background var(--fast) var(--ease),border-color var(--fast) var(--ease);}
-  .margin-note:has(.margin-note-hitbox:hover) {background:rgba(253,198,69,.12);border-color:rgba(253,198,69,.55);}
+  .margin-note {position:absolute;left:0;width:250px;background:color-mix(in srgb,var(--surface-3) 88%,var(--amber));border:1px solid rgba(253,198,69,.48);border-radius:var(--r-md);box-shadow:var(--shadow-2);padding:0;overflow:hidden;transition:background var(--fast) var(--ease),border-color var(--fast) var(--ease);}
+  .margin-note:is(.is-active,:has(.margin-note-hitbox:hover)) {background:color-mix(in srgb,var(--surface-3) 78%,var(--amber));border-color:rgba(253,198,69,.78);}
   .app-shell.theme-dark .margin-note-hitbox {display:block;width:100%;height:auto;min-height:32px;padding:8px 10px;margin:0;text-align:left;border:0;border-radius:0;background:transparent;font-size:11px;line-height:1.45;font-weight:400;color:var(--text-2);overflow:hidden;}
   .app-shell.theme-dark .margin-note-hitbox:focus-visible {outline:0;}
-  .margin-note:focus-within {border-color:var(--focus);}
+  .margin-note:focus-within {border-color:var(--amber);}
   .margin-note-hitbox>span {display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
   .margin-note.is-active .margin-note-hitbox {padding-top:10px;padding-bottom:10px;overflow:visible;}
   .margin-note.is-active .margin-note-hitbox>span {overflow:visible;text-overflow:clip;white-space:pre-wrap;overflow-wrap:anywhere;}
@@ -163,11 +163,14 @@
   .margin-note small {display:block;font-size:10px;color:var(--text-3);margin-bottom:6px;}
   .margin-note-actions {display:flex;flex-wrap:wrap;gap:6px;margin-top:10px;}
   .app-shell.theme-dark .margin-note-actions button {height:28px;min-height:28px;font-size:11px;padding:0 8px;}
+  .app-shell.theme-dark .margin-note-actions button {background:rgba(253,198,69,.1);border-color:rgba(253,198,69,.42);color:#ffe6a0;}
+  .app-shell.theme-dark .margin-note-actions button:hover:not(:disabled) {background:rgba(253,198,69,.2);border-color:rgba(253,198,69,.72);color:#fff0bf;}
   .margin-note-reply {font-size:11px;line-height:1.45;color:var(--text-2);white-space:pre-wrap;overflow-wrap:anywhere;}
-  .margin-note textarea {margin-top:0;}
+  .margin-note textarea {margin-top:0;background:color-mix(in srgb,var(--surface-1) 92%,var(--amber));border-color:rgba(253,198,69,.5);}
+  .app-shell.theme-dark .margin-note.margin-note textarea.ui-textarea:focus-visible {border-color:var(--amber);box-shadow:0 0 0 3px rgba(253,198,69,.12);outline:2px solid var(--amber);outline-offset:2px;}
   .margin-note [role=alert] {font-size:11px;color:var(--text-2);}
   .app-shell.theme-dark .scenario-comment-anchor {background:rgba(253,198,69,.12);box-shadow:0 0 0 1px rgba(253,198,69,.12);border-radius:3px;}
-  .app-shell.theme-dark .scenario-comment-anchor:is(.is-active,:hover) {background:rgba(253,198,69,.22);}
+  .app-shell.theme-dark .scenario-comment-anchor:is(.is-active,.is-hovered,:hover) {background:rgba(253,198,69,.22);}
   .app-shell.theme-dark .comment-inline-button {width:26px;height:26px;min-height:26px;padding:0;background:var(--surface-3);border:1px solid #344153;border-radius:8px;box-shadow:var(--shadow-2);color:var(--text-2);}
   .app-shell.theme-dark .ai-inline-button {height:32px;min-height:32px;color:var(--amber);background:var(--surface-3);border-color:var(--border);border-radius:6px;}
   .app-shell.theme-dark .ai-paragraph-highlight {background:transparent;}

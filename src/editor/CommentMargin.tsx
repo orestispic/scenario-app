@@ -1,13 +1,14 @@
 import { UiTextarea } from '../ui/UiTextarea';
-import { useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { Editor } from '@tiptap/core';
 import { findCommentAnchorPosition, type CommentThread } from './comments';
 import { placeMarginNotes } from './documentStatistics';
 
 type Draft = { thread: CommentThread; original: string; text: string };
-export function CommentMargin({editor, threads, readOnly, activeId, onActivate, onUpdate, onDelete, zoom}: {
+export function CommentMargin({editor, threads, readOnly, activeId, onActivate, onDeactivate, onUpdate, onDelete, zoom}: {
   editor: Editor; threads: CommentThread[]; readOnly: boolean; activeId: string | null; zoom: number;
   onActivate(thread: CommentThread): void;
+  onDeactivate(): void;
   onUpdate(id: string, update: (thread: CommentThread) => CommentThread): void;
   onDelete(id: string): void;
 }) {
@@ -51,13 +52,35 @@ export function CommentMargin({editor, threads, readOnly, activeId, onActivate, 
     return () => { cancelAnimationFrame(frame); observer.disconnect(); editor.off('transaction', schedule); window.removeEventListener('resize', schedule); stage.style.minHeight = ''; };
   }, [editor, threads, draft, activeId, zoom]);
 
-  function save() {
-    if (!draft || changed || readOnly || !draft.text.trim()) return;
+  function save(): boolean {
+    if (!draft || changed || readOnly || !draft.text.trim()) return false;
     const saved = draft;
     onUpdate(saved.thread.id, thread => thread.messages[0]?.text !== saved.original ? thread : {
       ...thread, messages: [{ ...thread.messages[0], text: saved.text.trim(), editedAt: new Date().toISOString() }, ...thread.messages.slice(1)],
     });
     setDraft(null);
+    onDeactivate();
+    return true;
+  }
+  useEffect(() => {
+    const closeOutside = (event: PointerEvent) => {
+      const target = event.target instanceof Element ? event.target : null;
+      const cardId = target?.closest<HTMLElement>('[data-comment-card-id]')?.dataset.commentCardId;
+      const openId = draft?.thread.id ?? activeId;
+      if (!openId || cardId === openId) return;
+      if (draft) save();
+      else onDeactivate();
+    };
+    document.addEventListener('pointerdown', closeOutside);
+    return () => document.removeEventListener('pointerdown', closeOutside);
+  }, [activeId, changed, draft, onDeactivate, onUpdate, readOnly]);
+  useEffect(() => () => {
+    editor.view.dom.querySelectorAll('.scenario-comment-anchor.is-hovered').forEach(anchor => anchor.classList.remove('is-hovered'));
+  }, [editor]);
+  function highlightAnchor(threadId: string, highlighted: boolean) {
+    editor.view.dom.querySelectorAll<HTMLElement>(`[data-comment-thread-id="${CSS.escape(threadId)}"]`).forEach(anchor => {
+      anchor.classList.toggle('is-hovered', highlighted);
+    });
   }
   return <div className="comment-rail" ref={rail} aria-label="Commentaires dans la marge">
     {shown.map(thread => {
@@ -65,6 +88,7 @@ export function CommentMargin({editor, threads, readOnly, activeId, onActivate, 
       const expanded = activeId === thread.id || editing;
       return <article className={`margin-note ${expanded ? 'is-active' : ''}`} key={thread.id}
         onClick={event=>{if(event.target===event.currentTarget)onActivate(thread);}}
+        onPointerEnter={() => highlightAnchor(thread.id, true)} onPointerLeave={() => highlightAnchor(thread.id, false)}
         data-comment-card-id={thread.id} style={{top: positions[thread.id] ?? 0, visibility: positions[thread.id] === undefined ? 'hidden' : 'visible'}}>
         {!editing && <button className="margin-note-hitbox" type="button" aria-expanded={expanded}
           onClick={() => onActivate(thread)}>
