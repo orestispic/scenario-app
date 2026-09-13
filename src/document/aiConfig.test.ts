@@ -7,11 +7,13 @@ import {
 
 describe("configuration IA", () => {
   it("ne propose que les trois actions simples prévues par défaut", () => {
-    expect(createDefaultAiConfig().prompts.map((prompt) => prompt.id)).toEqual([
+    const prompts = createDefaultAiConfig().prompts;
+    expect(prompts.map((prompt) => prompt.id)).toEqual([
       "correct",
       "translate-en",
       "shorten",
     ]);
+    expect(prompts.every((prompt) => prompt.responseOnly)).toBe(true);
   });
 
   it("ajoute la consigne de réponse uniquement à la toute fin", () => {

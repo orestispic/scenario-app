@@ -104,7 +104,7 @@
   .app-shell.theme-dark :is(.modal-backdrop,.cover-menu) a {color:var(--accent-hover);}
   .app-shell.theme-dark :is(.file-menu,.smart-type,.scenario-context-menu,.ai-popover,.transition-popover,.cover-menu,.studio-member-menu>div) {color:var(--text);background:var(--surface-3);border:1px solid #344153;border-radius:var(--r-md);box-shadow:var(--shadow-2);padding:6px;}
   .app-shell.theme-dark .file-menu {top:36px;left:0;}
-  .app-shell.theme-dark .cover-menu {left:auto;right:0;padding:16px;max-width:calc(100vw - 32px);max-height:calc(100dvh - 100px);overflow:auto;}
+  .app-shell.theme-dark .cover-menu {left:0;right:auto;padding:16px;max-width:calc(100vw - 32px);max-height:calc(100dvh - 100px);overflow:auto;}
   .app-shell.theme-dark :is(.file-menu,.smart-type,.scenario-context-menu,.ai-popover,.transition-popover)>button {height:30px;min-height:30px;display:flex;width:100%;justify-content:flex-start;padding:0 8px;border:0;border-radius:6px;background:transparent;color:var(--text-2);font-size:12px;font-weight:400;text-align:left;}
   .app-shell.theme-dark :is(.file-menu,.smart-type,.scenario-context-menu,.ai-popover,.transition-popover)>button:hover {background:var(--surface-hover);color:var(--text);}
   .app-shell.theme-dark .smart-type button:is(:hover,.is-selected) {background:var(--surface-selected);color:#d9ebff;}

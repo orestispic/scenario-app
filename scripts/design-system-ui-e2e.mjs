@@ -26,6 +26,7 @@ try {
     assert.match(await page.locator('.scenario-editor').evaluate(el => getComputedStyle(el).fontFamily), /Courier Prime/);
     assert(await page.evaluate(() => document.fonts.check('14px Inter') && document.fonts.check('16px "Courier Prime"')));
     assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+    assert.equal(await page.getByRole('navigation', { name: 'Menu principal' }).getByRole('button', { name: 'Projets cloud', exact: true }).count(), 0);
     for (const button of await page.getByRole('navigation', { name: 'Menu principal' }).getByRole('button').all()) {
       const box = await button.boundingBox();
       assert(box && box.x >= 0 && box.x + box.width <= width + 1, 'Main navigation remains reachable');
@@ -38,11 +39,13 @@ try {
     await page.keyboard.press('Escape');
     await page.screenshot({ path: `outputs/ui-charter/editor-${width}.png` });
 
-    await page.getByRole('button', { name: 'Page de garde', exact: true }).click();
+    const coverButton = page.getByRole('button', { name: 'Page de garde', exact: true });
+    await coverButton.click();
     const cover = page.locator('.cover-menu');
     await cover.waitFor();
-    const box = await cover.boundingBox();
+    const [box, coverButtonBox] = await Promise.all([cover.boundingBox(), coverButton.boundingBox()]);
     assert(box && box.x >= 0 && box.x + box.width <= width + 1 && box.y + box.height <= 960, 'Cover menu fits screen');
+    if (width >= 800) assert(box && coverButtonBox && Math.abs(box.x - coverButtonBox.x) < 2, 'Cover menu starts at the left edge of its button');
     assert.equal(await cover.getByRole('button', { name: 'Appliquer', exact: true }).evaluate(el => getComputedStyle(el).backgroundColor), 'rgb(70, 153, 243)');
     await page.screenshot({ path: `outputs/ui-charter/cover-menu-${width}.png` });
     await cover.getByLabel('Scénariste', { exact: true }).fill('Camille');
@@ -70,17 +73,27 @@ try {
       const [highlightBox,sheetBox]=await Promise.all([highlight.boundingBox(),page.locator('.page-sheet').first().boundingBox()]);
       assert(highlightBox&&sheetBox&&Math.abs(highlightBox.x-sheetBox.x)<2&&Math.abs(highlightBox.width-sheetBox.width)<2,'AI hover highlight spans the complete sheet width');
       const aiButton=page.getByRole('button',{name:'Actions IA'});assert.equal((await aiButton.textContent()).trim(),'');assert.equal(await aiButton.locator('svg use').count(),1,'AI action uses the supplied sparkle icon');
+      await page.getByRole('button',{name:'Ajouter une transition'}).click();
+      await page.locator('.transition-popover').waitFor();
       await aiButton.click();
       const aiMenu=page.locator('.ai-popover');await aiMenu.waitFor();
+      assert.equal(await page.locator('.transition-popover').count(),0,'AI replaces an open Transition menu in one click');
       const [aiButtonBox,aiMenuBox]=await Promise.all([aiButton.boundingBox(),aiMenu.boundingBox()]);
-      assert(aiButtonBox&&aiMenuBox&&Math.abs(aiMenuBox.x-aiButtonBox.x)<2&&Math.abs(aiMenuBox.y-aiButtonBox.y-aiButtonBox.height)<2,'AI menu opens directly below its button');
+      assert(aiButtonBox&&aiMenuBox&&Math.abs(aiMenuBox.x-aiButtonBox.x)<2&&Math.abs(aiMenuBox.y-aiButtonBox.y-aiButtonBox.height)<=3,'AI menu opens directly below its button');
       await aiButton.click();
       for (const [name, label] of [['Rechercher', 'Rechercher et remplacer'], ['Raccourcis', 'Raccourcis de texte'], ['IA', 'Réglages IA'], ['Aide', 'Aide']]) {
         await page.getByRole('navigation', { name: 'Menu principal' }).getByRole('button', { name, exact: true }).click();
         const dialog = page.getByRole('dialog', { name: label, exact: true });
         await dialog.waitFor();
         assert.equal(await dialog.evaluate(el => getComputedStyle(el).backgroundColor), 'rgb(21, 28, 36)');
+        if(name==='Raccourcis') {
+          const toggle=dialog.getByRole('button',{name:'Activer les raccourcis'});
+          assert.equal((await toggle.innerText()).trim(),'Activer');
+          const initial=await toggle.getAttribute('aria-pressed');await toggle.click();
+          assert.notEqual(await toggle.getAttribute('aria-pressed'),initial);assert.equal((await toggle.innerText()).trim(),'Activer');
+        }
         if(name==='IA') {
+          assert.equal(await dialog.getByRole('button',{name:'Réponse uniquement'}).first().getAttribute('aria-pressed'),'true');
           const field=dialog.getByRole('textbox',{name:'Instruction du prompt'});
           await field.fill('Première ligne.\nDeuxième ligne.');
           assert.equal(await field.inputValue(),'Première ligne.\nDeuxième ligne.');

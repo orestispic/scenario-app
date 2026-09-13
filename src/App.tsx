@@ -844,7 +844,9 @@ function App() {
       const target = event.target;
       if (
         target instanceof Element &&
-        target.closest(".transition-popover, .transition-inline-button")
+        target.closest(
+          ".transition-popover, .transition-inline-button, .ai-inline-button",
+        )
       ) {
         return;
       }
@@ -2213,7 +2215,6 @@ function App() {
           <span>senario</span>
         </div>
         <nav aria-label="Menu principal">
-          <button className="menu-button" type="button" onClick={() => setCloudProjectsOpen(true)}>Projets cloud</button>
           <div className="file-menu-container">
             <button
               className="menu-button"
@@ -3181,11 +3182,12 @@ function App() {
               <button
                 className={`shortcut-toggle ${textReplacementsEnabled ? "is-enabled" : ""}`}
                 type="button"
+                aria-label="Activer les raccourcis"
                 aria-pressed={textReplacementsEnabled}
                 onClick={() => setTextReplacementsEnabled((enabled) => !enabled)}
               >
+                <span>Activer</span>
                 <span className="shortcut-toggle-track" aria-hidden="true"><span className="shortcut-toggle-thumb" /></span>
-                {textReplacementsEnabled ? "Désactiver" : "Activer"}
               </button>
               <button
                 className="panel-close-button"

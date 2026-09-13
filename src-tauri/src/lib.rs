@@ -63,8 +63,12 @@ struct AiPrompt {
     response_only: bool,
 }
 
+const AI_CONFIG_VERSION: u32 = 1;
+
 #[derive(Clone, Deserialize, Serialize)]
 struct StoredAiConfig {
+    #[serde(default)]
+    version: u32,
     prompts: Vec<AiPrompt>,
 }
 
@@ -227,6 +231,7 @@ fn read_ai_config(app: AppHandle) -> Result<AiConfigView, String> {
 #[tauri::command]
 fn write_ai_config(app: AppHandle, config: AiConfigDraft) -> Result<AiConfigView, String> {
     let stored_config = StoredAiConfig {
+        version: AI_CONFIG_VERSION,
         prompts: normalize_prompts(config.prompts),
     };
     let path = app_storage_path(&app, "ai/config.json")?;
@@ -382,6 +387,7 @@ fn stored_ai_config(app: &AppHandle) -> Result<StoredAiConfig, String> {
         .map_err(|error| format!("Impossible de lire la configuration IA : {error}"))?;
     let mut config: StoredAiConfig = serde_json::from_str(&contents)
         .map_err(|error| format!("Configuration IA invalide : {error}"))?;
+    migrate_ai_config(&mut config);
     config.prompts = normalize_prompts(config.prompts);
     // Phase 5 removes any legacy provider key/model from disk as soon as the
     // configuration is read. Only user-authored prompt presets remain local.
@@ -392,8 +398,21 @@ fn stored_ai_config(app: &AppHandle) -> Result<StoredAiConfig, String> {
     Ok(config)
 }
 
+fn migrate_ai_config(config: &mut StoredAiConfig) {
+    if config.version < AI_CONFIG_VERSION {
+        // Migre une seule fois les configurations créées avant que
+        // « Réponse uniquement » soit activé par défaut. Les changements
+        // explicites de l'utilisateur restent ensuite persistants.
+        for prompt in &mut config.prompts {
+            prompt.response_only = true;
+        }
+        config.version = AI_CONFIG_VERSION;
+    }
+}
+
 fn default_ai_config() -> StoredAiConfig {
     StoredAiConfig {
+        version: AI_CONFIG_VERSION,
         prompts: vec![
             AiPrompt {
                 id: "correct".to_string(),
@@ -550,6 +569,22 @@ mod tests {
         assert_eq!(prompts.len(), 1);
         assert_eq!(prompts[0].id, "correct");
         assert_eq!(default_ai_config().prompts.len(), 3);
+    }
+
+    #[test]
+    fn enables_response_only_once_for_legacy_ai_configs() {
+        let mut config: StoredAiConfig = serde_json::from_str(
+            r#"{"prompts":[{"id":"custom","name":"Test","instruction":"Réécris","responseOnly":false}]}"#,
+        )
+        .expect("legacy config");
+
+        migrate_ai_config(&mut config);
+        assert_eq!(config.version, AI_CONFIG_VERSION);
+        assert!(config.prompts[0].response_only);
+
+        config.prompts[0].response_only = false;
+        migrate_ai_config(&mut config);
+        assert!(!config.prompts[0].response_only);
     }
 
     #[test]
