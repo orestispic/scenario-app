@@ -30,8 +30,17 @@ try {
   await page.locator('.scenario-editor').waitFor();
   assert.equal(await page.getByRole('dialog', { name: 'Compte et licence' }).count(), 0, 'Anonymous editor must not force the account dialog');
   await page.getByRole('button', { name: 'Compte', exact: true }).click();
+  const account = page.getByRole('dialog', { name: 'Compte et licence' });
   await page.getByRole('button', { name: 'studio', exact: true }).waitFor();
   await page.getByRole('button', { name: 'studio', exact: true }).click();
+  await account.getByText('Fonctionnalités de votre offre', { exact: true }).waitFor();
+  await account.getByText('Budget journalier utilisé : 12,34 %', { exact: true }).waitFor();
+  assert.ok(await account.locator('.account-rights-grid li.is-enabled').count(), 'Active rights must be visible');
+  assert.ok(await account.locator('.account-rights-grid li.is-disabled').count(), 'Inactive rights must be visible');
+  assert.equal(await account.getByText(/tokens/i).count(), 0, 'Account UI must not expose token counts');
+  assert.equal(await account.getByText('Vos projets', { exact: true }).count(), 0, 'The projects block must be removed');
+  await mkdir('outputs/phase13', { recursive: true });
+  await account.screenshot({ path: 'outputs/phase13/account-dashboard.png' });
   await page.getByRole('button', { name: 'Fermer', exact: true }).click();
   await page.getByRole('button', { name: 'IA', exact: true }).click();
   const panel = page.getByRole('dialog', { name: 'Réglages IA' });
@@ -43,7 +52,6 @@ try {
   await page.evaluate(() => window.dispatchEvent(new Event('senario:ai-usage-changed')));
   await panel.getByText('Budget journalier utilisé : 100 %', { exact: true }).waitFor();
   await panel.getByText(/Budget IA atteint/).waitFor();
-  await mkdir('outputs/phase13', { recursive: true });
   await page.screenshot({ path: 'outputs/phase13/ai-budget-blocked.png' });
   unavailable = true;
   await page.evaluate(() => window.dispatchEvent(new Event('senario:ai-usage-changed')));

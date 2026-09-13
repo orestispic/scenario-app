@@ -43,19 +43,29 @@ export function AiBudgetUsage() {
       document.removeEventListener('visibilitychange', refresh);
     };
   }, []);
-  return <section className="ai-budget-usage" aria-label="Budgets IA" aria-live="polite">
+  return <section className="ai-budget-usage" aria-label="Utilisation de l’IA" aria-live="polite">
     <h3>Utilisation de l’IA</h3>
     {!budgets ? <p>{error ? 'Budgets indisponibles. Une connexion est nécessaire pour les vérifier.' : 'Vérification des budgets…'}</p> : <>
-      {(['daily', 'monthly'] as const).map(key => {
-        const budget = budgets[key];
-        return <div key={key} className="ai-budget-period">
-          <p>Budget {key === 'daily' ? 'journalier' : 'mensuel'} utilisé : {budget.usedPercent.toLocaleString('fr-FR')} %</p>
-          <small>{budget.usedTokens.toLocaleString('fr-FR')} / {budget.limitTokens.toLocaleString('fr-FR')} tokens
-            {budget.reservedTokens > 0 && ` · ${budget.reservedTokens.toLocaleString('fr-FR')} réservés (en cours ou à vérifier)`}</small>
-        </div>;
-      })}
+      <div className="ai-budget-periods">
+        {(['daily', 'monthly'] as const).map(key => {
+          const budget = budgets[key];
+          const percentage = Math.max(0, Math.min(100, budget.usedPercent));
+          return <div key={key} className="ai-budget-period">
+            <p>Budget {key === 'daily' ? 'journalier' : 'mensuel'} utilisé : <strong>{budget.usedPercent.toLocaleString('fr-FR')} %</strong></p>
+            <div
+              className="ai-budget-progress"
+              role="progressbar"
+              aria-label={`Budget ${key === 'daily' ? 'journalier' : 'mensuel'}`}
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={percentage}
+            >
+              <span style={{ width: `${percentage}%` }} />
+            </div>
+          </div>;
+        })}
+      </div>
       {budgets.blocked && <p role="status">Budget IA atteint ou en attente de vérification. L’écriture reste disponible.</p>}
-      <small>Entrée et sortie incluses. Actualisé après chaque appel et toutes les 15 secondes. Remise à zéro à minuit UTC et le 1er du mois. Un plafond de coût est également appliqué par le serveur.</small>
     </>}
   </section>;
 }

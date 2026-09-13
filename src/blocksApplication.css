@@ -193,10 +193,60 @@
   .app-shell.theme-dark .modal-backdrop footer button.primary-button {background:var(--accent);border-color:#5aa5f6;color:#071019;}
   .app-shell.theme-dark .modal-backdrop footer button:hover:not(:disabled) {background:var(--surface-hover);}
   .app-shell.theme-dark .modal-backdrop footer button.primary-button:hover:not(:disabled) {background:var(--accent-hover);}
+
+  /* Account dashboard: wide, compact and readable without exposing server codes. */
+  .app-shell.theme-dark .account-overview-panel {width:min(1080px,calc(100vw - 32px));gap:14px;padding:20px;}
+  .app-shell.theme-dark .account-overview-panel>header {padding-bottom:2px;}
+  .app-shell.theme-dark .account-overview-panel .account-license-details {display:grid;gap:12px;}
+  .account-overview-grid {display:grid;grid-template-columns:minmax(0,1fr) minmax(390px,.95fr);gap:12px;align-items:stretch;}
+  .app-shell.theme-dark .account-overview-grid>.account-license-section,
+  .app-shell.theme-dark .account-overview-grid>.ai-budget-usage {margin:0;min-width:0;background:var(--surface-1);border:1px solid var(--border);border-radius:var(--r-md);box-shadow:var(--shadow-1);}
+  .account-profile-section {display:grid;align-content:start;gap:14px;}
+  .account-profile-heading {display:grid;grid-template-columns:36px minmax(0,1fr) auto;gap:10px;align-items:center;}
+  .account-profile-heading>div {min-width:0;}
+  .account-profile-heading h3 {margin:0 0 2px;font-size:14px!important;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .account-profile-heading p {white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .account-profile-icon {width:36px;height:36px;display:grid;place-items:center;border:1px solid var(--border);border-radius:8px;background:var(--surface-3);color:var(--text-2);}
+  .account-plan-badge {padding:5px 8px;border:1px solid var(--border);border-radius:999px;background:var(--surface-2);color:var(--text-2);font-size:10px;font-weight:650;white-space:nowrap;}
+  .account-plan-badge.is-active {color:var(--success);border-color:rgba(76,195,138,.38);background:rgba(76,195,138,.1);}
+  .app-shell.theme-dark .account-profile-section dl {display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:0;padding:0;border:0;border-radius:0;background:transparent;box-shadow:none;overflow:visible;}
+  .app-shell.theme-dark .account-profile-section dl>div {display:block;min-width:0;padding:0 10px;border:0;border-left:1px solid var(--divider);background:transparent;}
+  .app-shell.theme-dark .account-profile-section dl>div:first-child {padding-left:0;border-left:0;}
+  .account-profile-section dt {margin-bottom:3px;font-size:10px;font-weight:500!important;}
+  .account-profile-section dd {font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+
+  .account-section-heading {display:flex;align-items:center;justify-content:space-between;gap:12px;}
+  .account-section-heading h3 {margin:0;}
+  .account-section-heading>span {color:var(--text-3);font-size:10px;white-space:nowrap;}
+  .app-shell.theme-dark .account-rights-section {padding:14px;}
+  .account-rights-grid {display:grid!important;grid-template-columns:repeat(4,minmax(0,1fr));gap:7px!important;margin:0!important;padding:0!important;list-style:none;}
+  .app-shell.theme-dark .account-rights-grid li {display:grid;grid-template-columns:26px minmax(0,1fr) auto;gap:8px;align-items:center;min-height:48px;padding:8px 9px;border:1px solid var(--border);border-radius:7px;color:var(--text-2);line-height:1.25;}
+  .app-shell.theme-dark .account-rights-grid li.is-enabled {color:var(--text);background:rgba(76,195,138,.1);border-color:rgba(76,195,138,.38);}
+  .app-shell.theme-dark .account-rights-grid li.is-disabled {color:var(--text-3);background:var(--surface-2);border-color:var(--border);}
+  .account-right-icon {width:26px;height:26px;display:grid;place-items:center;border-radius:6px;background:var(--surface-3);}
+  .is-enabled .account-right-icon {color:var(--success);background:rgba(76,195,138,.14);}
+  .is-disabled .account-right-icon {color:var(--text-disabled);}
+  .account-rights-grid li>span:nth-child(2) {min-width:0;font-size:11px;font-weight:570;}
+  .app-shell.theme-dark .account-rights-grid small {color:inherit;font-size:9px;text-transform:uppercase;letter-spacing:.45px;}
+
+  .account-management-grid {display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px;}
+  .app-shell.theme-dark .account-management-grid>.account-license-section {align-content:start;gap:9px;min-width:0;padding:13px 14px;}
+  .account-device-list,.account-activation-list {display:grid!important;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px!important;margin:0!important;padding:0!important;list-style:none;}
+  .app-shell.theme-dark .account-device-list li {display:flex;align-items:center;justify-content:space-between;gap:8px;padding:7px 8px;border:1px solid var(--divider);border-radius:6px;background:var(--surface-2);}
+  .account-device-list li>span {white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .account-device-list small {color:var(--success)!important;font-size:9px!important;text-transform:uppercase;}
+  .account-device-section>button {justify-self:start;}
+  .account-activation-form {display:grid;gap:5px;}
+  .account-activation-form>label {color:var(--text-2);font-size:10px;}
+  .account-activation-form>div {display:grid;grid-template-columns:minmax(0,1fr) auto;gap:7px;}
+  .account-activation-form input {min-width:0;}
+  .account-activation-list li {font-size:10px!important;}
+  .account-overview-panel .account-license-details>footer {display:flex;justify-content:flex-end;gap:7px;padding-top:0;}
+
   @keyframes ui-modal-in {from{opacity:0;transform:translateY(8px) scale(.985);}to{opacity:1;transform:none;}}
   @media(max-width:1439px){.app-shell.theme-dark .menu-bar{gap:8px;}.app-shell.theme-dark .menu-button{padding:0 8px;}}
-  @media(max-width:1099px){.document-save-status{display:none;}.app-shell.theme-dark .cloud-project-layout{grid-template-columns:1fr;}}
-  @media(max-width:799px){.app-shell.theme-dark .menu-bar{align-items:flex-start;padding:8px;}.app-brand{padding-top:4px;}.app-brand span,.document-title,.document-status>span,.toolbar-divider{display:none;}.app-shell.theme-dark .workspace{padding:16px;}.paragraph-type-control{width:136px;}.editor-statistics{gap:6px 12px;}.app-shell.theme-dark .cover-menu{position:fixed;top:100px;left:16px;right:auto;}.cloud-member,.cloud-member>div,.cloud-version{flex-wrap:wrap;}.app-shell.theme-dark .account-license-details dl>div{grid-template-columns:1fr;gap:4px;}}
+  @media(max-width:1099px){.document-save-status{display:none;}.app-shell.theme-dark .cloud-project-layout{grid-template-columns:1fr;}.account-rights-grid{grid-template-columns:repeat(3,minmax(0,1fr));}}
+  @media(max-width:799px){.app-shell.theme-dark .menu-bar{align-items:flex-start;padding:8px;}.app-brand{padding-top:4px;}.app-brand span,.document-title,.document-status>span,.toolbar-divider{display:none;}.app-shell.theme-dark .workspace{padding:16px;}.paragraph-type-control{width:136px;}.editor-statistics{gap:6px 12px;}.app-shell.theme-dark .cover-menu{position:fixed;top:100px;left:16px;right:auto;}.cloud-member,.cloud-member>div,.cloud-version{flex-wrap:wrap;}.app-shell.theme-dark .account-license-details dl>div{grid-template-columns:1fr;gap:4px;}.account-overview-grid,.account-management-grid{grid-template-columns:1fr;}.account-rights-grid{grid-template-columns:repeat(2,minmax(0,1fr));}.app-shell.theme-dark .account-profile-section dl{grid-template-columns:1fr;gap:8px}.app-shell.theme-dark .account-profile-section dl>div{padding:0;border-left:0}.account-profile-heading{grid-template-columns:36px minmax(0,1fr)}.account-plan-badge{grid-column:2;justify-self:start;}}
   @media(prefers-reduced-motion:reduce){.app-shell *{animation-duration:.001ms!important;transition-duration:.001ms!important;scroll-behavior:auto!important;}}
 }
 @media print {

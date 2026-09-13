@@ -18,6 +18,7 @@ import {
 } from "./runtime";
 import { cloudProjectRuntime } from './cloudProjectRuntime';
 import { AiBudgetUsage } from './AiBudgetUsage';
+import { presentEntitlements } from './entitlementPresentation';
 
 interface AccountLicensePanelProps {
   onClose(): void;
@@ -30,7 +31,6 @@ type AuthScreen = "signin" | "signup" | "recover";
 
 export function AccountLicensePanel({
   onClose,
-  onOpenCloud,
   onAuthenticated,
   onSignedOut,
   required = false,
@@ -240,6 +240,21 @@ export function AccountLicensePanel({
     form.reset();
   }
 
+  const billingStatus = billing
+    ? ({
+        none: 'Gratuit',
+        trialing: 'Essai en cours',
+        active: 'Actif',
+        past_due: 'Paiement à régulariser',
+        paused: 'En pause',
+        canceled: 'Résilié',
+        expired: 'Expiré',
+      } as const)[billing.status]
+    : 'Indisponible';
+  const displayedRights = entitlements
+    ? presentEntitlements(entitlements.snapshot.entitlements)
+    : [];
+
   return (
     <div
       className={`modal-backdrop ${required ? "is-auth-required" : ""}`}
@@ -247,7 +262,7 @@ export function AccountLicensePanel({
       onMouseDown={required ? undefined : onClose}
     >
       <section
-        className={`account-license-panel ${session && me && entitlements ? '' : 'account-signin-panel'}`}
+        className={`account-license-panel ${session && me && entitlements ? 'account-overview-panel' : 'account-signin-panel'}`}
         role="dialog"
         aria-modal="true"
         aria-label="Compte et licence"
@@ -272,97 +287,108 @@ export function AccountLicensePanel({
 
         {session && me && entitlements ? (
           <div className="account-license-details">
-            <AiBudgetUsage />
-            <dl>
-              <div>
-                <dt>Compte</dt>
-                <dd>{me.account.displayName ?? me.account.email}</dd>
-              </div>
-              <div>
-                <dt>Adresse</dt>
-                <dd>{me.account.email}</dd>
-              </div>
-              <div>
-                <dt>Configuration</dt>
-                <dd>{entitlements.snapshot.configurationVersion}</dd>
-              </div>
-              <div>
-                <dt>Cache signé jusqu’au</dt>
-                <dd>{new Date(entitlements.snapshot.offlineValidUntil).toLocaleString("fr-FR")}</dd>
-              </div>
-              <div>
-                <dt>Abonnement</dt>
-                <dd>
-                  {billing?.offerDisplayName ?? "Découverte"} — {billing?.status ?? "indisponible"}
-                </dd>
-              </div>
-              {billing?.currentPeriodEndsAt && (
-                <div>
-                  <dt>Fin de période</dt>
-                  <dd>{new Date(billing.currentPeriodEndsAt).toLocaleDateString("fr-FR")}</dd>
+            <div className="account-overview-grid">
+              <section className="account-license-section account-profile-section">
+                <div className="account-profile-heading">
+                  <span className="account-profile-icon"><UiIcon name="user" /></span>
+                  <div>
+                    <h3>{me.account.displayName ?? 'Mon compte'}</h3>
+                    <p>{me.account.email}</p>
+                  </div>
+                  <span className={`account-plan-badge ${billingStatus === 'Actif' ? 'is-active' : ''}`}>
+                    {billing?.offerDisplayName ?? 'Gratuit'}
+                  </span>
                 </div>
-              )}
-            </dl>
-            <section className="account-license-section">
-              <h3>Clé d’activation</h3>
-              <form
-                className="account-auth-form"
-                onSubmit={(event) =>
-                  void run(() => redeemActivationKey(event), "Clé activée et droits actualisés.")
-                }
-              >
-                <label>
-                  Clé senario
-                  <input name="activationKey" autoComplete="off" spellCheck={false} required />
-                </label>
-                <button type="submit" disabled={busy}>
-                  Activer cette clé
-                </button>
-              </form>
-              {activations.length > 0 && (
-                <ul>
-                  {activations.map((activation) => (
-                    <li key={activation.id}>
-                      •••• {activation.keySuffix} — {activation.status}
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </section>
-            <section className="account-license-section">
-              <h3>Droits reçus</h3>
-              <ul>
-                {entitlements.snapshot.entitlements.map((right) => (
-                  <li key={right.code}>
-                    {right.code} — {right.enabled ? "actif" : "inactif"}
+                <dl>
+                  <div>
+                    <dt>Abonnement</dt>
+                    <dd>{billingStatus}</dd>
+                  </div>
+                  {billing?.currentPeriodEndsAt && (
+                    <div>
+                      <dt>Prochaine échéance</dt>
+                      <dd>{new Date(billing.currentPeriodEndsAt).toLocaleDateString('fr-FR')}</dd>
+                    </div>
+                  )}
+                  <div>
+                    <dt>Accès hors connexion</dt>
+                    <dd>Jusqu’au {new Date(entitlements.snapshot.offlineValidUntil).toLocaleDateString('fr-FR')}</dd>
+                  </div>
+                </dl>
+              </section>
+              <AiBudgetUsage />
+            </div>
+
+            <section className="account-license-section account-rights-section">
+              <div className="account-section-heading">
+                <h3>Fonctionnalités de votre offre</h3>
+                <span>{displayedRights.filter((right) => right.enabled).length} actives</span>
+              </div>
+              <ul className="account-rights-grid">
+                {displayedRights.map((right) => (
+                  <li key={right.id} className={right.enabled ? 'is-enabled' : 'is-disabled'}>
+                    <span className="account-right-icon">
+                      <UiIcon name={right.enabled ? 'check' : 'x'} />
+                    </span>
+                    <span>{right.label}</span>
+                    <small>{right.enabled ? 'Actif' : 'Inactif'}</small>
                   </li>
                 ))}
               </ul>
             </section>
-            <section className="account-license-section">
-              <h3>Appareils</h3>
-              {devices.length ? (
-                <ul>
-                  {devices.map((device) => (
-                    <li key={device.id}>
-                      {device.label ?? "Sans nom"} — {device.status}
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <p>Aucun appareil actif.</p>
-              )}
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() => void run(activateCurrentDevice, "Appareil activé.")}
-              >
-                Activer cet appareil
-              </button>
-            </section>
-            {!offline && (
-              <section className="account-license-section"><h3>Vos projets</h3><p>Retrouvez vos scénarios privés, vos projets partagés et leurs membres dans la fenêtre dédiée.</p><button type="button" onClick={onOpenCloud}>Ouvrir les Projets cloud</button></section>
-            )}
+
+            <div className="account-management-grid">
+              <section className="account-license-section account-device-section">
+                <div className="account-section-heading">
+                  <h3>Appareils</h3>
+                  <span>{devices.filter((device) => device.status === 'active').length} actif(s)</span>
+                </div>
+                {devices.length ? (
+                  <ul className="account-device-list">
+                    {devices.map((device) => (
+                      <li key={device.id}>
+                        <span>{device.label ?? 'Appareil sans nom'}</span>
+                        <small>{device.status === 'active' ? 'Actif' : 'Révoqué'}</small>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p>Aucun appareil actif.</p>
+                )}
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => void run(activateCurrentDevice, 'Appareil activé.')}
+                >
+                  Activer cet appareil
+                </button>
+              </section>
+
+              <section className="account-license-section account-activation-section">
+                <h3>Clé d’activation</h3>
+                <form
+                  className="account-activation-form"
+                  onSubmit={(event) =>
+                    void run(() => redeemActivationKey(event), 'Clé activée et droits actualisés.')
+                  }
+                >
+                  <label htmlFor="account-activation-key">Clé Senario</label>
+                  <div>
+                    <input id="account-activation-key" name="activationKey" autoComplete="off" spellCheck={false} required />
+                    <button type="submit" disabled={busy}>Activer</button>
+                  </div>
+                </form>
+                {activations.length > 0 && (
+                  <ul className="account-activation-list">
+                    {activations.map((activation) => (
+                      <li key={activation.id}>
+                        •••• {activation.keySuffix} — {activation.status === 'active' ? 'Active' : activation.status === 'revoked' ? 'Révoquée' : 'Expirée'}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </section>
+            </div>
             <footer>
               <button
                 type="button"
