@@ -8,12 +8,18 @@ assert(['localhost','127.0.0.1'].includes(new URL(base).hostname));
 await mkdir('outputs/editor-refinement', {recursive:true});
 const browser = await chromium.launch({channel:'msedge',headless:true});
 const errors=[];
+let currentPage;
+async function paragraphType(page,value){
+  const label={ACTION:'Action',SCENE_HEADING:'Titre de scène',CHARACTER:'Personnage',DIALOGUE:'Dialogue',PARENTHETICAL:'Parenthèse',TRANSITION:'Transition'}[value];
+  await page.getByRole('combobox',{name:'Type de paragraphe'}).click();
+  await page.getByRole('option',{name:label,exact:true}).click();
+}
 try {
   for (const zoom of [60,100,160]) {
     const context=await browser.newContext({viewport:{width:1600,height:1000},reducedMotion:'reduce'});
     await context.route('**/*',route=>new URL(route.request().url()).origin===base?route.continue():route.abort());
     await context.addInitScript(value=>localStorage.setItem('scenario-zoom',String(value)),zoom);
-    const page=await context.newPage();page.on('pageerror',error=>{if(!errors.length)console.error(error.stack);errors.push(error.message);});page.on('dialog',dialog=>dialog.accept());
+    const page=await context.newPage();currentPage=page;page.on('pageerror',error=>{if(!errors.length)console.error(error.stack);errors.push(error.message);});page.on('dialog',dialog=>dialog.accept());
     await page.goto(base);const paragraph=page.locator('.scenario-editor p').first();await paragraph.waitFor();
     assert.notEqual(await paragraph.getAttribute('data-placeholder'),'INT. LIEU - JOUR');
     await paragraph.click();await page.keyboard.type('I');await page.locator('.smart-type').waitFor();
@@ -21,19 +27,19 @@ try {
     const selected=await page.locator('.smart-type button.is-selected').evaluate(el=>getComputedStyle(el).backgroundColor);
     await suggestions.last().hover();await page.waitForFunction(color=>getComputedStyle(document.querySelector('.smart-type button:last-child')).backgroundColor===color,selected);
     await page.keyboard.press('Escape');await paragraph.click();await page.keyboard.press('Home');await page.keyboard.press('Shift+End');
-    await page.getByLabel('Type de paragraphe').selectOption('ACTION');
+    await paragraphType(page,'ACTION');
     await page.keyboard.type('Tu as une feuille devant toi.');
     assert.equal(await paragraph.textContent(),'Tu as une feuille devant toi.');
     await page.keyboard.press('Home');await page.keyboard.press('Shift+End');await page.getByRole('button',{name:'Mettre en italique',exact:true}).click();
     assert.equal(await paragraph.locator('em').textContent(),'Tu as une feuille devant toi.');
     for(const type of ['SCENE_HEADING','CHARACTER','DIALOGUE','PARENTHETICAL','TRANSITION','ACTION']) {
-      await page.getByLabel('Type de paragraphe').selectOption(type);
+      await paragraphType(page,type);
       assert.equal(await paragraph.textContent(),'Tu as une feuille devant toi.');
       assert.equal(await paragraph.locator('em').textContent(),'Tu as une feuille devant toi.');
       assert.equal(await paragraph.getAttribute('data-scenario-type'),type);
     }
     for (let i=0;i<3;i++) {
-      await paragraph.click();await page.keyboard.press('Home');await page.keyboard.press('Shift+End');
+      await paragraph.click();await page.keyboard.press('Control+Home');await page.keyboard.press('Shift+End');
       await page.getByRole('button',{name:'Ajouter un commentaire',exact:true}).click();
       await page.getByPlaceholder('Écrire un commentaire…').fill(`Note ${i+1} : vérifier ce passage.`);
       await page.getByRole('button',{name:'Commenter',exact:true}).click();
@@ -44,7 +50,7 @@ try {
     await card.getByRole('button',{name:'Modifier',exact:true}).waitFor();
     assert.equal(await page.evaluate(()=>window.getSelection()?.toString()),'');
     assert.equal(await page.getByRole('dialog',{name:'Commentaires du projet'}).count(),0);
-    assert.match(await page.locator('.scenario-comment-anchor').first().evaluate(el=>getComputedStyle(el).backgroundColor),/229, 179, 62/);
+    assert.match(await page.locator('.scenario-comment-anchor').first().evaluate(el=>getComputedStyle(el).backgroundColor),/253, 198, 69/);
     await card.getByRole('button',{name:'Modifier',exact:true}).click();await card.getByLabel('Modifier le commentaire').fill('Une note modifiée sur place.');
     await page.waitForFunction(()=>{
       const cards=[...document.querySelectorAll('.margin-note')].map(el=>el.getBoundingClientRect()).sort((a,b)=>a.top-b.top);
@@ -57,11 +63,11 @@ try {
     const stats=page.locator('.editor-statistics');assert.match(await stats.textContent(),/6 mots.*Temps estimé.*pages.*0 scènes.*0 décors/);
     const before=await stats.boundingBox();await page.locator('.workspace').evaluate(el=>el.scrollTop=el.scrollHeight);assert.deepEqual(await stats.boundingBox(),before);
     await paragraph.click();await page.keyboard.press('End');await page.keyboard.press('Enter');
-    await page.getByLabel('Type de paragraphe').selectOption('SCENE_HEADING');await page.keyboard.insertText('INT. ATELIER - JOUR');await page.keyboard.press('Enter');
-    await page.getByLabel('Type de paragraphe').selectOption('SCENE_HEADING');await page.keyboard.insertText('INT. ATELIER - NUIT');
+    await paragraphType(page,'SCENE_HEADING');await page.keyboard.insertText('INT. ATELIER - JOUR');await page.keyboard.press('Enter');
+    await paragraphType(page,'SCENE_HEADING');await page.keyboard.insertText('INT. ATELIER - NUIT');
     await page.waitForFunction(()=>/2 scènes.*1 décors/.test(document.querySelector('.editor-statistics').textContent));
     console.log(`PASS: shortcuts, paragraph types/marks, italic, hover, inline notes/hitbox/yellow/non-overlap, fixed stats at ${zoom}%`);
     await context.close();
   }
   assert.deepEqual(errors,[]);
-} finally {await browser.close();}
+} catch(error) {if(currentPage&&!currentPage.isClosed()){await currentPage.screenshot({path:'outputs/editor-refinement/failure.png'});console.log(await currentPage.evaluate(()=>({selection:getSelection()?.toString(),active:document.activeElement?.outerHTML.slice(0,300)})));}throw error;} finally {await browser.close();}

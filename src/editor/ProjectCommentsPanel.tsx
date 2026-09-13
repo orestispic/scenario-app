@@ -1,3 +1,5 @@
+import { UiIcon } from '../ui/UiIcon';
+import { UiTextarea } from '../ui/UiTextarea';
 import { useEffect, useRef, useState } from "react";
 import { createStableId, type CommentThread } from "./comments";
 import "./projectComments.css";
@@ -100,9 +102,7 @@ export function ProjectCommentsPanel({
             onClick={onClose}
             disabled={Boolean(draft)}
             aria-label="Fermer les commentaires"
-          >
-            ×
-          </button>
+          ><UiIcon name="x"/></button>
         </header>
         {readOnly && <p role="status">Lecture seule : vous pouvez consulter les discussions.</p>}
         {!threads.length && (
@@ -191,7 +191,7 @@ export function ProjectCommentsPanel({
           >
             <label>
               {draft.kind === "reply" ? "Votre réponse" : "Modifier le commentaire"}
-              <textarea
+              <UiTextarea
                 autoFocus
                 maxLength={16384}
                 disabled={readOnly}

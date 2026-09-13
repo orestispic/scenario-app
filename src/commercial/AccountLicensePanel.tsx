@@ -1,4 +1,5 @@
 import { useEffect, useState, type FormEvent } from "react";
+import { UiIcon } from '../ui/UiIcon';
 import { CommercialHttpError } from "./authenticatedApi";
 import { type LocalTestAuthAdapter } from "./auth";
 import type { DeviceView, EntitlementsResponse, MeResponse, SessionTokens } from "./contractsV2";
@@ -254,7 +255,7 @@ export function AccountLicensePanel({ onClose, onOpenCloud }: AccountLicensePane
             aria-label="Fermer"
             onClick={onClose}
           >
-            ×
+            <UiIcon name="x"/>
           </button>
         </header>
 
@@ -434,7 +435,7 @@ export function AccountLicensePanel({ onClose, onOpenCloud }: AccountLicensePane
                   : screen === "signup"
                     ? "Créer le compte"
                     : "Envoyer le lien"}
-                <span aria-hidden="true"> →</span>
+                <UiIcon name="chevron"/>
               </button>
             </form>
             <div className="account-auth-switch">

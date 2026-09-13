@@ -1,3 +1,4 @@
+import { UiSelect } from '../ui/UiSelect';
 import { useEffect, useState, type FormEvent } from "react";
 import type { AuthenticatedCommercialApi } from "./authenticatedApi";
 import type { ScenarioEditorBridge } from "./collaborationClient";
@@ -367,7 +368,7 @@ export function StudioSection({
                     <div>
                       <label>
                         Accès
-                        <select
+                        <UiSelect
                           aria-label={`Rôle de ${member.displayName}`}
                           value={member.role}
                           disabled={busy}
@@ -387,7 +388,7 @@ export function StudioSection({
                           <option value="viewer">Lecture seule</option>
                           <option value="editor">Éditeur</option>
                           <option value="owner">Propriétaire</option>
-                        </select>
+                        </UiSelect>
                       </label>
                       <button
                         className="studio-danger-button"
@@ -424,10 +425,10 @@ export function StudioSection({
                 </label>
                 <label>
                   Niveau d’accès
-                  <select name="role" defaultValue="viewer">
+                  <UiSelect aria-label="Rôle demandé" name="role" defaultValue="viewer">
                     <option value="viewer">Lecture seule</option>
                     <option value="editor">Peut modifier</option>
-                  </select>
+                  </UiSelect>
                 </label>
                 <button type="submit" disabled={busy}>
                   Envoyer l’invitation

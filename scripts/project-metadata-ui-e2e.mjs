@@ -74,7 +74,7 @@ try {
   await flush(owner);await flush(editor);await flush(viewer);
   for(const page of pages){await openComments(page);await comments(page).getByText('Commentaire partagé initial',{exact:false}).waitFor();}
   assert.equal(await comments(viewer).getByRole('button',{name:'Modifier',exact:true}).count(),0);
-  assert.equal(await viewer.getByLabel('Type de paragraphe').isDisabled(),true);
+  assert.equal(await viewer.getByRole('combobox',{name:'Type de paragraphe'}).isDisabled(),true);
   await comments(editor).getByRole('button',{name:'Modifier',exact:true}).click();await comments(editor).getByLabel('Modifier le commentaire').fill('Brouillon local');
   await comments(owner).getByRole('button',{name:'Modifier',exact:true}).click();await comments(owner).getByLabel('Modifier le commentaire').fill('Commentaire corrigé');await comments(owner).getByRole('button',{name:'Enregistrer',exact:true}).click();await flush(owner);await flush(editor);
   await comments(editor).getByRole('alert').waitFor();

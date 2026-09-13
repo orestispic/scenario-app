@@ -10,7 +10,7 @@ const browser = await chromium.launch({channel: 'msedge', headless: true});
 const profileId = '10000000-0000-4000-8000-000000000003';
 let testPage;
 try {
-  const context = await browser.newContext({viewport: {width:1280,height:900}});
+  const context = await browser.newContext({viewport: {width:1280,height:900},reducedMotion:'reduce'});
   await context.route('**/*', async (route) => {
     const request = route.request(), url = new URL(request.url());
     if (url.hostname === 'storage.invalid') {
@@ -56,6 +56,11 @@ try {
   await dialog.getByRole('button', {name:/Projet privé synthétique.*Privé/}).click();
   await dialog.getByRole('button', {name:'Gérer le partage'}).click();
   await dialog.getByLabel('Inviter par adresse e-mail').fill('author@example.invalid');
+  const role=dialog.getByRole('combobox',{name:'Autorisation'});
+  await role.click();await page.getByRole('option',{name:'Éditeur · modifier',exact:true}).click();
+  assert.equal(await dialog.locator('.cloud-invite-form').evaluate(form=>new FormData(form).get('role')),'editor');
+  await role.focus();await page.keyboard.press('Enter');await page.keyboard.press('Escape');
+  assert(await dialog.isVisible(),'Escape closes the dropdown, not the cloud window');
   await dialog.getByRole('button', {name:'Créer l’invitation'}).click();
   await dialog.getByText('Invitation disponible dans les Projets cloud du destinataire.').waitFor();
   await dialog.getByRole('button', {name:'Ouvrir le projet',exact:true}).click();
@@ -71,7 +76,7 @@ try {
   const box = await dialog.boundingBox(); assert.ok(box && box.width <= 640 && box.x >= 0 && box.x + box.width <= 640, JSON.stringify(box));
   await page.evaluate(async () => { await window.__phase10Cloud.close(); });
   assert.deepEqual(errors, []);
-  console.log('PASS: isolated browser private creation, autosync, project sharing, automatic realtime, responsive dialog and no sensitive localStorage.');
+  console.log('PASS: isolated browser private creation, autosync, project sharing, dropdown FormData/keyboard, automatic realtime, responsive dialog and no sensitive localStorage.');
   await context.close();
 } catch (error) {
   if (testPage) console.log(await testPage.locator('.cloud-project-panel').innerText().catch(() => 'No project dialog'));

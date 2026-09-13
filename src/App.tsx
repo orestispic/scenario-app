@@ -1,3 +1,5 @@
+import { UiTextarea } from './ui/UiTextarea';
+import { UiSelect } from './ui/UiSelect';
 import {
   useCallback,
   useEffect,
@@ -8,6 +10,7 @@ import {
   type WheelEvent as ReactWheelEvent,
 } from "react";
 import type { Editor, JSONContent } from "@tiptap/core";
+import { UiIcon } from './ui/UiIcon';
 import { ReleaseInfo } from "./commercial/ReleaseInfo";
 import { EditorContent, useEditor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
@@ -735,7 +738,7 @@ function App() {
       const target = event.target;
       if (
         !(target instanceof Element) ||
-        target.closest(".comment-inline-button, .formatting-toolbar") ||
+        target.closest(".comment-inline-button, .formatting-toolbar, .ui-select-panel") ||
         editor?.view.dom.contains(target)
       ) {
         return;
@@ -2439,12 +2442,12 @@ function App() {
           onMouseDown={(event) => event.preventDefault()}
           onClick={toggleBold}
         >
-          <strong>G</strong>
+          <UiIcon name="bold"/>
         </button>
         <button className={editor?.isActive('italic') ? 'is-active' : ''} type="button"
           disabled={cloudReadOnly} aria-label="Mettre en italique" aria-pressed={editor?.isActive('italic') ?? false}
           title="Italique (Ctrl+I)" onMouseDown={event => event.preventDefault()}
-          onClick={() => editor?.chain().focus().toggleItalic().run()}><em>I</em></button>
+          onClick={() => editor?.chain().focus().toggleItalic().run()}><UiIcon name="italic"/></button>
         <button
           className={editor?.isActive("underline") ? "is-active" : ""}
           type="button"
@@ -2453,20 +2456,20 @@ function App() {
           onMouseDown={(event) => event.preventDefault()}
           onClick={toggleUnderline}
         >
-          <u>S</u>
+          <UiIcon name="underline"/>
         </button>
         <span className="toolbar-divider" aria-hidden="true" />
         <span className="document-title" title={documentState.title}>
           {documentState.title}{documentState.isDirty ? " *" : ""}
         </span>
-        <select className="paragraph-type-control" aria-label="Type de paragraphe" value={currentType}
+        <UiSelect className="paragraph-type-control" aria-label="Type de paragraphe" value={currentType}
           disabled={cloudReadOnly} onChange={event => {
             if (editor?.isEditable) {
               editor.commands.setScenarioElementType(toScenarioElementType(event.target.value));
-              editor.commands.focus();
+              editor.view.focus();
               refreshEditorState(editor);
             }
-          }}>{SCENARIO_ELEMENT_TYPES.map(type => <option value={type} key={type}>{getScenarioElementLabel(type)}</option>)}</select>
+          }}>{SCENARIO_ELEMENT_TYPES.map(type => <option value={type} key={type}>{getScenarioElementLabel(type)}</option>)}</UiSelect>
         <div className="document-status">
           <CloudProjectStatus onOpen={() => setCloudProjectsOpen(true)} />
           <span className="document-save-status" title={documentState.status}>{documentState.status}</span>
@@ -2485,7 +2488,7 @@ function App() {
           onMouseDown={(event) => event.preventDefault()}
           onClick={() => void openCommentComposer()}
         >
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true"><path d="M4 4h16v12H9l-5 4V4Z" /></svg>
+          <UiIcon name="message"/>
         </button>
       )}
 
@@ -2664,7 +2667,7 @@ function App() {
               setAiPromptMenuOpen((isOpen) => !isOpen);
             }}
           >
-            IA
+            <UiIcon name="star"/> IA
           </button>
           <button
             className="transition-inline-button"
@@ -2765,7 +2768,7 @@ function App() {
                 <h2>Bien démarrer avec senario</h2>
                 <p>Les gestes essentiels pour écrire ton scénario.</p>
               </div>
-              <button className="panel-close-button" type="button" aria-label="Fermer" onClick={() => setHelpOpen(false)}>×</button>
+              <button className="panel-close-button" type="button" aria-label="Fermer" onClick={() => setHelpOpen(false)}><UiIcon name="x"/></button>
             </header>
 
             <section>
@@ -2828,7 +2831,7 @@ function App() {
           <section className="comment-composer" role="dialog" aria-modal="true" aria-label="Ajouter un commentaire" onMouseDown={(event) => event.stopPropagation()}>
             <h2>Ajouter un commentaire</h2>
             <p>« {commentAnchor?.originalText} »</p>
-            <textarea
+            <UiTextarea
               ref={commentInput}
               placeholder="Écrire un commentaire…"
               maxLength={16384}
@@ -2867,7 +2870,7 @@ function App() {
                 <h2>Rechercher et remplacer</h2>
                 <p>{findQuery ? `${findMatchTotal} occurrence${findMatchTotal > 1 ? "s" : ""}` : "Saisis le texte à rechercher."}</p>
               </div>
-              <button className="panel-close-button" type="button" aria-label="Fermer" onClick={() => setFindReplaceOpen(false)}>×</button>
+              <button className="panel-close-button" type="button" aria-label="Fermer" onClick={() => setFindReplaceOpen(false)}><UiIcon name="x"/></button>
             </header>
             <label>
               Rechercher
@@ -2926,7 +2929,7 @@ function App() {
                 <h2>Exporter en PDF</h2>
                 <p>Choisis ce qui doit apparaître dans le document final.</p>
               </div>
-              <button className="panel-close-button" type="button" aria-label="Fermer" disabled={pdfExportBusy} onClick={() => setPdfExportOpen(false)}>×</button>
+              <button className="panel-close-button" type="button" aria-label="Fermer" disabled={pdfExportBusy} onClick={() => setPdfExportOpen(false)}><UiIcon name="x"/></button>
             </header>
             <fieldset>
               <legend>Contenu du PDF</legend>
@@ -2936,11 +2939,11 @@ function App() {
             </fieldset>
             <label className="pdf-translation-field">
               Traduction du scénario
-              <select value={pdfExportDraft.translationLanguage} onChange={(event) => setPdfExportDraft((draft) => ({ ...draft, translationLanguage: event.target.value }))}>
+              <UiSelect aria-label="Langue de traduction" value={pdfExportDraft.translationLanguage} onChange={(event) => setPdfExportDraft((draft) => ({ ...draft, translationLanguage: event.target.value }))}>
                 <option value="">Aucune traduction</option>
                 {[...PDF_TRANSLATION_LANGUAGES, ...customPdfLanguages].map((language) => <option key={language} value={language}>{displayPdfLanguage(language)}</option>)}
                 <option value="__custom__">Autre langue…</option>
-              </select>
+              </UiSelect>
               {pdfExportDraft.translationLanguage === "__custom__" && (
                 <div className="pdf-custom-language-entry">
                   <input
@@ -2968,7 +2971,7 @@ function App() {
                     {customPdfLanguages.map((language) => (
                       <span className="pdf-language-chip" key={language}>
                         {displayPdfLanguage(language)}
-                        <button type="button" aria-label={`Retirer ${language}`} title={`Retirer ${language}`} onClick={() => removeCustomPdfLanguage(language)}>×</button>
+                        <button type="button" aria-label={`Retirer ${language}`} title={`Retirer ${language}`} onClick={() => removeCustomPdfLanguage(language)}><UiIcon name="x"/></button>
                       </span>
                     ))}
                   </div>
@@ -2994,7 +2997,7 @@ function App() {
                 <h2>Importer un PDF</h2>
                 <p>L’IA convertit ton PDF en scénario structuré.</p>
               </div>
-              <button className="panel-close-button" type="button" aria-label="Fermer" disabled={pdfImportBusy} onClick={() => setPdfImportOpen(false)}>×</button>
+              <button className="panel-close-button" type="button" aria-label="Fermer" disabled={pdfImportBusy} onClick={() => setPdfImportOpen(false)}><UiIcon name="x"/></button>
             </header>
             <div
               className={`pdf-import-dropzone${pdfImportPath ? " has-file" : ""}`}
@@ -3048,9 +3051,7 @@ function App() {
                 type="button"
                 aria-label="Fermer"
                 onClick={() => setAiSettingsOpen(false)}
-              >
-                ×
-              </button>
+              ><UiIcon name="x"/></button>
             </header>
 
             <div className="prompt-editor-heading">
@@ -3095,27 +3096,17 @@ function App() {
                     <div className="prompt-instruction-editor">
                       <label className="prompt-instruction-field">
                         Instruction envoyée à l’IA
-                        <div
+                        <UiTextarea
                           className="prompt-instruction-input"
-                          contentEditable
-                          suppressContentEditableWarning
-                          role="textbox"
                           aria-label="Instruction du prompt"
-                          aria-multiline="true"
-                          onInput={(event) => {
-                            const text = event.currentTarget.querySelector<HTMLElement>("[data-prompt-text]")?.innerText ?? "";
-                            updateAiPrompt(prompt.id, "instruction", text);
-                          }}
-                        >
-                          <span data-prompt-text className="prompt-instruction-text">
-                            {prompt.instruction}
-                          </span>
+                          value={prompt.instruction}
+                          onChange={(event) => updateAiPrompt(prompt.id, "instruction", event.target.value)}
+                        />
                           {prompt.responseOnly && (
-                            <span className="response-only-ghost" contentEditable={false}>
-                              {`\n\n${RESPONSE_ONLY_INSTRUCTION}`}
+                            <span className="response-only-ghost">
+                              {RESPONSE_ONLY_INSTRUCTION}
                             </span>
                           )}
-                        </div>
                       </label>
                       <button
                         className={`response-only-toggle${prompt.responseOnly ? " is-active" : ""}`}
@@ -3125,7 +3116,8 @@ function App() {
                           setAiPromptResponseOnly(prompt.id, !prompt.responseOnly)
                         }
                       >
-                        {prompt.responseOnly ? "✓ Réponse uniquement" : "Réponse uniquement"}
+                        <span className="response-only-toggle-track" aria-hidden="true"><span className="response-only-toggle-thumb" /></span>
+                        Réponse uniquement
                       </button>
                     </div>
                     <button type="button" onClick={() => removeAiPrompt(prompt.id)}>
@@ -3195,6 +3187,7 @@ function App() {
                 aria-pressed={textReplacementsEnabled}
                 onClick={() => setTextReplacementsEnabled((enabled) => !enabled)}
               >
+                <span className="shortcut-toggle-track" aria-hidden="true"><span className="shortcut-toggle-thumb" /></span>
                 {textReplacementsEnabled ? "Désactiver" : "Activer"}
               </button>
               <button
@@ -3202,9 +3195,7 @@ function App() {
                 type="button"
                 aria-label="Fermer"
                 onClick={() => setTextReplacementsOpen(false)}
-              >
-                ×
-              </button>
+              ><UiIcon name="x"/></button>
             </header>
             <div className="text-replacement-toolbar">
               <input
@@ -3247,9 +3238,7 @@ function App() {
                         value={item.replacement}
                         onChange={(event) => updateTextReplacement(item.id, "replacement", event.target.value)}
                       />
-                      <button type="button" aria-label={`Supprimer ${item.shortcut || "ce raccourci"}`} title="Supprimer" onClick={() => removeTextReplacement(item.id)}>
-                        ×
-                      </button>
+                      <button type="button" aria-label={`Supprimer ${item.shortcut || "ce raccourci"}`} title="Supprimer" onClick={() => removeTextReplacement(item.id)}><UiIcon name="x"/></button>
                     </article>
                   ))}
                 </>
