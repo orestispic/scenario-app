@@ -172,7 +172,18 @@
   .margin-note [role=alert] {font-size:11px;color:var(--text-2);}
   .app-shell.theme-dark .scenario-comment-anchor {background:rgba(253,198,69,.12);box-shadow:0 0 0 1px rgba(253,198,69,.12);border-radius:3px;}
   .app-shell.theme-dark .scenario-comment-anchor:is(.is-active,.is-hovered,:hover) {background:rgba(253,198,69,.22);}
-  .app-shell.theme-dark .comment-inline-button {width:26px;height:26px;min-height:26px;padding:0;background:var(--surface-3);border:1px solid #344153;border-radius:8px;box-shadow:var(--shadow-2);color:var(--text-2);}
+  .app-shell.theme-dark button.comment-inline-button.comment-inline-button {width:26px;height:26px;min-height:26px;padding:0;background:color-mix(in srgb,var(--surface-3) 82%,var(--amber));border:1px solid rgba(253,198,69,.68);border-radius:8px;box-shadow:var(--shadow-2);color:var(--amber);}
+  .app-shell.theme-dark button.comment-inline-button.comment-inline-button:hover:not(:disabled) {background:color-mix(in srgb,var(--surface-3) 68%,var(--amber));border-color:var(--amber);color:#fff0bf;}
+  .app-shell.theme-dark button.comment-inline-button.comment-inline-button:focus-visible {outline:2px solid var(--amber);outline-offset:2px;}
+  .app-shell.theme-dark .comment-composer.comment-composer {background:color-mix(in srgb,var(--surface-2) 88%,var(--amber));border-color:rgba(253,198,69,.62);}
+  .app-shell.theme-dark .comment-composer.comment-composer :is(h2,p) {color:#ffe6a0;}
+  .app-shell.theme-dark .comment-composer.comment-composer textarea.ui-textarea {background:color-mix(in srgb,var(--surface-1) 91%,var(--amber));border-color:rgba(253,198,69,.55);}
+  .app-shell.theme-dark .comment-composer.comment-composer textarea.ui-textarea:focus-visible {border-color:var(--amber);box-shadow:0 0 0 3px rgba(253,198,69,.12);outline:2px solid var(--amber);outline-offset:2px;}
+  .app-shell.theme-dark .comment-composer.comment-composer footer button {background:rgba(253,198,69,.1);border-color:rgba(253,198,69,.45);color:#ffe6a0;}
+  .app-shell.theme-dark .comment-composer.comment-composer footer button:hover:not(:disabled) {background:rgba(253,198,69,.2);border-color:rgba(253,198,69,.75);color:#fff0bf;}
+  .app-shell.theme-dark .comment-composer.comment-composer footer button.primary-button {background:var(--amber);border-color:var(--amber);color:#171205;}
+  .app-shell.theme-dark .comment-composer.comment-composer footer button.primary-button:hover:not(:disabled) {background:#ffd466;border-color:#ffd466;color:#171205;}
+  .comment-composer ::selection {background:rgba(253,198,69,.38);color:var(--text);}
   .app-shell.theme-dark .ai-inline-button {height:32px;min-height:32px;color:var(--amber);background:var(--surface-3);border-color:var(--border);border-radius:6px;}
   .app-shell.theme-dark .ai-paragraph-highlight {background:transparent;}
   .app-shell.theme-dark .response-only-ghost {color:var(--text-3);}

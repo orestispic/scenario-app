@@ -40,8 +40,12 @@ try {
     }
     for (let i=0;i<3;i++) {
       await page.locator('.scenario-editor').focus();await page.keyboard.press('Control+Home');await page.keyboard.press('Shift+End');
-      await page.getByRole('button',{name:'Ajouter un commentaire',exact:true}).click();
-      await page.getByPlaceholder('Écrire un commentaire…').fill(i===0 ? 'Note 1 : vérifier ce passage en entier.\nLa deuxième ligne doit rester cachée au repos puis apparaître une fois le commentaire ouvert.' : `Note ${i+1} : vérifier ce passage.`);
+      const addComment=page.getByRole('button',{name:'Ajouter un commentaire',exact:true});
+      if(i===0){assert.equal(await addComment.evaluate(el=>getComputedStyle(el).color),'rgb(253, 198, 69)');await addComment.hover();assert.notEqual(await addComment.evaluate(el=>getComputedStyle(el).backgroundColor),'rgb(32, 42, 54)');}
+      await addComment.click();
+      const composer=page.getByRole('dialog',{name:'Ajouter un commentaire'}),composerField=page.getByPlaceholder('Écrire un commentaire…');
+      if(i===0){assert.match(await composer.evaluate(el=>getComputedStyle(el).borderColor),/253, 198, 69/);await composerField.focus();assert.equal(await composerField.evaluate(el=>getComputedStyle(el).outlineColor),'rgb(253, 198, 69)');assert.equal(await composer.getByRole('button',{name:'Commenter'}).evaluate(el=>getComputedStyle(el).backgroundColor),'rgb(253, 198, 69)');}
+      await composerField.fill(i===0 ? 'Note 1 : vérifier ce passage en entier.\nLa deuxième ligne doit rester cachée au repos puis apparaître une fois le commentaire ouvert.' : `Note ${i+1} : vérifier ce passage.`);
       await page.getByRole('button',{name:'Commenter',exact:true}).click();
     }
     await page.waitForFunction(()=>document.querySelectorAll('.margin-note').length===3);
