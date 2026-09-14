@@ -10,20 +10,44 @@
 - Une récupération plus récente que le fichier est restaurée. Un abandon explicite à la fermeture conserve une copie de secours puis retire la récupération automatique.
 - La dernière version ne peut pas être supprimée. Les suppressions sont des marqueurs récupérables et ne purgent aucun contenu.
 
-## Limite explicite : cloud non livré
+## Versions cloud — préproduction validée
 
-Le serveur déployé accepte seulement le format 1, et la collaboration utilise un canal unique par projet. Les versions nommées sont donc **désactivées dans tous les projets cloud**. L’envoi d’un fichier local à versions vers ce serveur est refusé avant la requête, sans conversion destructive. Les fichiers cloud existants continuent de fonctionner comme auparavant.
+Le même menu propose les versions du projet cloud ouvert. Chaque version utilise
+son propre scénario de stockage, ses métadonnées et son canal temps réel. Les
+droits restent ceux du projet parent. Le lecteur change de version ; l’éditeur
+peut dupliquer/créer/renommer ; le propriétaire peut aussi supprimer/restaurer.
 
-Il reste à implémenter et autoriser la migration serveur : identité de version dans les autorisations, métadonnées, opérations temps réel, séquences et sauvegardes ; séparation des canaux ; compatibilité des anciens clients ; conflits de création/suppression et clients hors ligne. Ne pas simplement autoriser le format 2 dans l’ancien canal : les versions partageraient alors le même contenu collaboratif.
+Avant de changer, la version sortante doit être synchronisée et une copie locale
+est conservée. Une erreur réseau, un conflit ou des écritures en attente bloquent
+la transition. Les copies sont isolées par compte et scénario de version. Une
+réponse arrivée après fermeture/déconnexion ne rouvre pas l’ancien projet.
 
-Aucune migration Supabase ni aucun déploiement du Worker n’a été effectué pour ces changements. Aucun nouvel installateur Windows n’a été publié.
+Les migrations 20260927000000, 20260927100000 (contrat de téléchargement),
+20260927200000 (ordre des verrous) et 20260927300000 (administration du projet)
+sont appliquées au Supabase autorisé
+`zblnsdyaoljnezxdidtx`. Le Worker de préproduction expose le contrat v14.
+L’ancien historique de sauvegardes reste distinct des versions nommées.
+
+Limite explicite : l’import dans le cloud d’un fichier local qui contient déjà
+plusieurs versions reste refusé, sans suppression ni aplatissement. Les versions
+peuvent être créées directement dans un projet cloud. Le téléchargement de la
+copie courante exporte uniquement cette version, pas tout le projet cloud.
+Aucun nouvel installateur Windows n’a été publié dans cette étape.
 
 ## Vérifications exécutées
 
-- 167 tests Vitest : format historique, copies indépendantes, choix de la source, version vierge, capture de la version sortante, suppression/restauration, noms ambigus, fichiers incohérents, ordre des écritures, échecs d’écriture, refus du serveur cloud historique, autres régressions.
+- 173 tests Vitest : versions locales, isolation cloud A/B, refus de changement hors ligne, suppression distante, répétition idempotente et fermeture pendant une requête.
 - `scripts/project-versions-e2e.mjs` : parcours réel dans Edge headless, commentaires/couverture, Annuler entre versions, autosave après plusieurs modifications, réouverture face à un ancien fichier disque, panne de sauvegarde simulée, édition et raccourcis bloqués durant la transition, enregistrement du fichier complet.
 - `scripts/phase14-account-e2e.mjs` : ordre Gratuite → Auteur → Studio, absence de slider, comptes fictifs, activation, limite d’appareils, déconnexion et écriture hors ligne.
 - `scripts/phase13-ai-ui-e2e.mjs` : pourcentages transmis par le serveur de test, sans jauge mensuelle ni réglage local de quota, actualisation et indisponibilité réseau.
 - Compilation TypeScript/Vite réussie (avertissement préexistant sur la taille des bundles).
 
-Les tests navigateur utilisent des profils isolés et des doubles de persistance/API : ils ne touchent ni les projets, ni les comptes, ni le coffre d’identifiants réels. Ils ne remplacent pas une recette de l’installateur Windows ni une validation cloud multi-utilisateur, qui restent à effectuer après l’implémentation serveur.
+`scripts/cloud-versions-ui-e2e.mjs` vérifie aussi l’interface cloud réelle avec
+un serveur fictif : ouverture, duplication, sauvegarde sortante, A/B, vierge et
+suppression. Ces tests navigateur n’utilisent pas les fichiers ou identifiants réels.
+
+La validation hébergée distincte du serveur utilise les comptes synthétiques
+Owner/Editor/Viewer : canaux indépendants, duplication du texte en direct,
+commentaires/premières pages, concurrence, suppression/restauration et révocation.
+Les projets de test sont ensuite placés dans la corbeille et leurs sessions fermées.
+La recette d’un nouvel installateur Windows reste à effectuer après sa génération.

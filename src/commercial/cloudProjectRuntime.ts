@@ -8,6 +8,7 @@ import { loadCloudProjectFile } from './studioBase';
 import { cloudProjectStore, type CloudProjectStore } from './cloudProjectStore';
 import { metadataFromRegisters, type ProjectMetadata } from './contractsV10';
 import { ProjectMetadataClient } from './projectMetadataClient';
+import type { CloudProjectVersion, VersionCommand } from './contractsV14';
 
 export interface CloudProjectEditor extends ScenarioEditorBridge {
   readFile(): ScenarioFile;
@@ -18,13 +19,16 @@ export interface OpenProjectState {
   project: CloudProject | null;
   status: 'closed' | 'loading' | 'synced' | 'pending' | 'offline' | 'conflict' | 'read_only' | 'realtime' | 'error';
   message: string;
+  rootProjectId?: string;
+  branches?: CloudProjectVersion[];
+  activeBranchId?: string;
 }
 export function fileIdentity(file: ScenarioFile): string {
   const { savedAt: _savedAt, characters: _characters, locations: _locations, times: _times, ...value } = file;
   return JSON.stringify(value);
 }
 export async function cloudSyncRequest(file: ScenarioFile, scenarioId: string, parentVersionId: string | null): Promise<CloudSyncRequest> {
-  if (file.formatVersion !== 1) throw new Error('Les versions nommées nécessitent une mise à jour du serveur cloud. Conservez ce projet en fichier local : toutes ses versions sont préservées.');
+  if (file.formatVersion !== 1) throw new Error('L’import dans le cloud d’un fichier contenant plusieurs versions n’est pas encore disponible. Conservez ce fichier local : toutes ses versions sont préservées. Vous pouvez créer des versions directement dans un projet cloud.');
   const content = JSON.stringify(file);
   const bytes = new TextEncoder().encode(content);
   const checksum = [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))].map((v) => v.toString(16).padStart(2, '0')).join('');
@@ -50,6 +54,8 @@ export class CloudProjectRuntime {
   private saving: Promise<void> = Promise.resolve();
   private metadata:ProjectMetadataClient|null=null;
   private textPending=false;
+  private branchBusy=false;
+  private branchAttempt: { signature: string; command: VersionCommand } | null = null;
   constructor(private readonly store: CloudProjectStore = cloudProjectStore, private readonly live: CollaborationRuntime = collaborationRuntime, private readonly load = loadCloudProjectFile) {}
   subscribe(listener: (state: OpenProjectState) => void) {
     this.listeners.add(listener); listener(structuredClone(this.state));
@@ -70,14 +76,15 @@ export class CloudProjectRuntime {
     this.unsubscribeLive?.(); this.unsubscribeLive = null;
     this.metadata?.stop();this.metadata=null;
     this.pendingRequest = null;
+    this.branchAttempt = null;
     this.api = null; this.editor = null;
-    this.state.project = null;
+    this.state = { project: null, status: 'closed', message: '' };
     this.update('closed');
     await this.live.disconnect();
     editor?.setReadOnly(false);
     await saving;
   }
-  async open(api: AuthenticatedCommercialApi, accountId: string, projectId: string, editor: CloudProjectEditor, useRemote = false): Promise<void> {
+  async open(api: AuthenticatedCommercialApi, accountId: string, projectId: string, editor: CloudProjectEditor, useRemote = false, branchId?: string): Promise<void> {
     const previousAccount = this.accountId;
     await this.close();
     const generation = this.generation;
@@ -87,8 +94,17 @@ export class CloudProjectRuntime {
     const before = editor.readFile();
     try {
       await this.store.backup(previousAccount || accountId, before);
-      const project = (await api.listCloudProjects()).projects.find((p) => p.id === projectId && !p.deletedAt);
-      if (!project) throw Object.assign(new Error('Ce projet n’est plus accessible.'), { status: 403 });
+      const root = (await api.listCloudProjects()).projects.find((p) => p.id === projectId && !p.deletedAt);
+      if (generation !== this.generation) return;
+      if (!root) throw Object.assign(new Error('Ce projet n’est plus accessible.'), { status: 403 });
+      // Older test/local servers may not expose v14 yet. Never flatten a bundle
+      // or silently choose another branch when a requested branch is unavailable.
+      const branches = api.listProjectVersions ? await api.listProjectVersions(projectId) : [];
+      if (generation !== this.generation) return;
+      const selected = branchId ? branches.find(b => b.id === branchId && !b.deletedAt) : branches.find(b => b.id === projectId && !b.deletedAt) ?? branches.find(b => !b.deletedAt);
+      if (branchId && !selected) throw new Error('Cette version n’est plus accessible. Votre copie est conservée.');
+      const project = selected?.project ?? root;
+      this.state = { ...this.state, rootProjectId: projectId, branches, activeBranchId: selected?.id };
       const versions = (await api.listCloudVersions(project.id)).versions;
       const version = versions.find((v) => v.id === project.currentVersionId);
       if (!version) throw new Error('Version du projet indisponible.');
@@ -146,6 +162,60 @@ export class CloudProjectRuntime {
       this.update('pending'); this.schedule(1500);
     }
   }
+  /** Flush before leaving, then freeze the source until the new channel is open.
+   * Pending/uncertain live writes are never dropped to make a switch succeed. */
+  async changeVersion(action: string, name = '', sourceId = ''): Promise<void> {
+    if (this.branchBusy || !this.api || !this.editor || !this.state.rootProjectId || !this.state.branches?.length) throw new Error('Versions cloud indisponibles.');
+    const api = this.api, editor = this.editor, account = this.accountId, root = this.state.rootProjectId;
+    const generation = this.generation;
+    const assertCurrent = () => {
+      if (generation !== this.generation || this.api !== api || this.editor !== editor) throw new Error('Le projet a été fermé. Aucune version n’a été ouverte.');
+    };
+    const active = this.state.branches.find(b => b.id === this.state.activeBranchId)!;
+    this.branchBusy = true; editor.setReadOnly(true);
+    try {
+      await this.flush();
+      assertCurrent();
+      if (this.running || ['conflict','error','offline'].includes(this.state.status) || this.pendingRequest ||
+        (this.state.project?.realtimeStudioId ? this.textPending || this.metadata?.hasPending() : fileIdentity(editor.readFile()) !== this.confirmed))
+        throw new Error('La version actuelle n’est pas encore synchronisée. Attendez la fin de la synchronisation avant de changer de version.');
+      await this.store.backup(account, editor.readFile());
+      assertCurrent();
+      let target = action;
+      if (['duplicate','blank','rename','delete','restore'].includes(action)) {
+        if (active.project.role === 'viewer') throw new Error('Un lecteur ne peut pas modifier les versions.');
+        const version = action === 'restore' ? this.state.branches.find(b => b.id === sourceId) : active;
+        if (!version) throw new Error('Version introuvable.');
+        const signature = JSON.stringify([root,active.id,action,name,sourceId]);
+        if (this.branchAttempt && this.branchAttempt.signature !== signature) throw new Error('Réessayez d’abord la demande précédente pour vérifier son résultat.');
+        const command: VersionCommand = this.branchAttempt?.command ?? {
+          action: action as VersionCommand['action'], operationId: crypto.randomUUID(),
+          ...(['duplicate','blank','rename'].includes(action) ? { name } : {}),
+          ...(action === 'duplicate' ? { sourceVersionId: sourceId || active.id } : {}),
+          ...(!['duplicate','blank'].includes(action) ? { versionId: version.id, expectedRevision: version.revision } : {}),
+        };
+        this.branchAttempt = { signature, command };
+        try { await api.changeProjectVersion(root, command); assertCurrent(); }
+        catch (error) {
+          const status = (error as {status?:number}).status;
+          if (status && status >= 400 && status < 500) this.branchAttempt = null;
+          throw error;
+        }
+        const branches = await api.listProjectVersions(root);
+        assertCurrent();
+        this.branchAttempt = null;
+        this.state.branches = branches;
+        target = ['duplicate','blank'].includes(action) ? branches.find(b => b.name === name.trim() && !b.deletedAt)!.id
+          : action === 'restore' ? sourceId : action === 'delete' ? branches.find(b => !b.deletedAt)!.id : active.id;
+        this.update(this.state.status);
+        if (action === 'rename') return;
+      }
+      await this.open(api, account, root, editor, false, target);
+    } finally {
+      this.branchBusy = false;
+      if (this.editor === editor) editor.setReadOnly(this.state.project?.role === 'viewer' || ['conflict','error','read_only'].includes(this.state.status));
+    }
+  }
   metadataChanged() {
     if(!this.state.project||!this.editor)return;
     if(!this.state.project.realtimeStudioId){this.changed();return;}
@@ -174,6 +244,14 @@ export class CloudProjectRuntime {
     let delay = project.realtimeStudioId ? 4_000 : 10_000;
     try {
       await this.saveCopy();
+      const rootId = this.state.rootProjectId ?? project.id;
+      const branches = this.state.activeBranchId && api.listProjectVersions ? await api.listProjectVersions(rootId) : null;
+      if (generation !== this.generation) return;
+      if (branches) {
+        this.state.branches = branches;
+        if (!branches.some(b => b.id === this.state.activeBranchId && !b.deletedAt)) throw Object.assign(new Error('Version supprimée.'), {status:404});
+        this.update(this.state.status);
+      }
       if (project.realtimeStudioId) {
         await this.metadata?.sync();
         if(generation!==this.generation)return;
@@ -188,14 +266,14 @@ export class CloudProjectRuntime {
         if (generation !== this.generation) return;
         this.parent = saved.version.id; this.confirmed = pending.identity; this.pendingRequest = null;
       }
-      const latest = (await api.listCloudProjects()).projects.find((p) => p.id === project.id && !p.deletedAt);
+      const latest = branches ? branches.find(b => b.id === this.state.activeBranchId && !b.deletedAt)?.project : (await api.listCloudProjects()).projects.find((p) => p.id === project.id && !p.deletedAt);
       if (generation !== this.generation) return;
       if (!latest) throw Object.assign(new Error('Accès au projet retiré.'), { status: 403 });
       if (latest.role === 'viewer') { editor.setReadOnly(true); this.update('read_only'); return; }
       const dirty = fileIdentity(editor.readFile()) !== this.confirmed;
       if (latest.realtimeStudioId || latest.currentVersionId !== this.parent) {
         if (dirty) { this.update('conflict', 'Le projet a changé ailleurs. Votre copie locale est conservée ; choisissez la version à ouvrir.'); editor.setReadOnly(true); return; }
-        await this.open(api, this.accountId, project.id, editor);
+        await this.open(api, this.accountId, rootId, editor, false, this.state.activeBranchId);
         return;
       }
       if (dirty) {

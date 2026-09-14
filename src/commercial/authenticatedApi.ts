@@ -80,9 +80,12 @@ export class CommercialHttpError extends Error {
 }
 
 import { parseCloudProjects, parseProjectSharing, parseProjectInvitationResponse, type CloudProjectListResponse, type CloudProjectSharingResponse } from './contractsV9';
+import { parseProjectVersions, type CloudProjectVersion, type VersionCommand } from './contractsV14';
 
 export interface AuthenticatedCommercialApi {
   listCloudProjects(): Promise<CloudProjectListResponse>;
+  listProjectVersions(projectId: string): Promise<CloudProjectVersion[]>;
+  changeProjectVersion(projectId: string, command: VersionCommand): Promise<void>;
   getProjectMetadata(scenarioId:string, signal?:AbortSignal):Promise<MetadataResponse>;
   writeProjectMetadata(scenarioId:string, write:MetadataWrite, signal?:AbortSignal):Promise<MetadataResponse>;
   ensureProjectSharing(scenarioId: string, idempotencyKey: string): Promise<CloudProjectSharingResponse>;
@@ -440,6 +443,8 @@ export function createAuthenticatedCommercialApi(options: {
       return response.download;
     },
     listCloudProjects: async () => parseCloudProjects(await request('/v9/projects', { headers: cloudHeaders() })),
+    listProjectVersions: async (id) => parseProjectVersions(await request(`/v14/projects/${encodeURIComponent(id)}/versions`, { headers: cloudHeaders() }), id),
+    changeProjectVersion: async (id, command) => { await request(`/v14/projects/${encodeURIComponent(id)}/versions`, { method: 'POST', headers: { ...cloudHeaders(), 'Idempotency-Key': command.operationId }, body: JSON.stringify(command) }); },
     getProjectMetadata: async (id,signal) => parseMetadataResponse(await request(`/v10/projects/${id}/metadata`,{headers:cloudHeaders(),signal})),
     writeProjectMetadata: async (id,write,signal) => parseMetadataResponse(await request(`/v10/projects/${id}/metadata`,{method:'POST',headers:cloudHeaders(write.operationId),body:JSON.stringify(write),signal})),
     ensureProjectSharing: async (scenarioId, key) => parseProjectSharing(await request(`/v9/projects/${scenarioId}/sharing`, { method: 'POST', headers: cloudHeaders(key), body: '{}' })),

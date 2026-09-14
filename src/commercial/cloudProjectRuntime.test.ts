@@ -13,9 +13,9 @@ const projectId = '80000000-0000-4000-8000-000000000001';
 const project: CloudProject = { id: projectId, title: 'Privé', role: 'owner', sharing: 'private', memberCount: 1, canShare: true, realtimeStudioId: null, realtimeBaseVersionId: null, currentVersionId: 'v1', deletedAt: null, createdAt: '', updatedAt: '' };
 const file = (text: string): ScenarioFile => ({ formatVersion: 1, title: 'Privé', content: { type: 'doc', content: [{ type: 'paragraph', attrs: {blockId: 'one'}, content: [{type: 'text', text}] }] }, characters: [], locations: [], times: [], coverPage: createEmptyCoverPage(), coverPageHidden: false, comments: [], savedAt: '' });
 const active: CloudProjectRuntime[] = [];
-it('refuse l’envoi de versions nommées à un serveur cloud qui ne les isole pas encore', async () => {
+it('refuse explicitement l’aplatissement d’un fichier multiversion lors de son import cloud', async () => {
   const bundle = ensureVersionedProject(file('Version locale'));
-  await expect(cloudSyncRequest(bundle, projectId, null)).rejects.toThrow('mise à jour du serveur');
+  await expect(cloudSyncRequest(bundle, projectId, null)).rejects.toThrow('plusieurs versions');
   expect(bundle.versions[0].document.content).toEqual(file('Version locale').content);
 });
 afterEach(async () => { for (const r of active.splice(0)) await r.close(); vi.restoreAllMocks(); });

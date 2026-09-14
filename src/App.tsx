@@ -124,7 +124,7 @@ import { CloudProjectsPanel, CloudProjectStatus } from './commercial/CloudProjec
 import { resolveProjectCommentAnchors } from './commercial/projectMetadataClient';
 import { CommentMargin } from './editor/CommentMargin';
 import { getDocumentStatistics } from './editor/documentStatistics';
-import { cloudProjectRuntime, type CloudProjectEditor } from './commercial/cloudProjectRuntime';
+import { cloudProjectRuntime, type CloudProjectEditor, type OpenProjectState } from './commercial/cloudProjectRuntime';
 import { collaborationTransaction } from './editor/collaborationTransaction';
 import {
   authenticatedOperations,
@@ -488,7 +488,10 @@ function AuthenticatedApp() {
   const [versionName, setVersionName] = useState('');
   const [versionSource, setVersionSource] = useState('');
   const [versionError, setVersionError] = useState('');
-  const [cloudVersionLocked, setCloudVersionLocked] = useState(false);
+  const [versionCloudState, setVersionCloudState] = useState<OpenProjectState>({project:null,status:'closed',message:''});
+  const cloudVersionLocked = versionCloudState.status === 'loading' || Boolean(versionCloudState.project && !versionCloudState.branches?.length);
+  const listedProjectVersions = versionCloudState.project ? versionCloudState.branches ?? [] : projectVersions?.versions ?? [];
+  const listedActiveVersionId = versionCloudState.project ? versionCloudState.activeBranchId : projectVersions?.activeVersionId;
   const paginationFrame = useRef<number | null>(null);
   const isReplacingDocument = useRef(false);
   const recoveryWasChecked = useRef(false);
@@ -511,7 +514,7 @@ function AuthenticatedApp() {
   const commentInput = useRef<HTMLTextAreaElement | null>(null);
   const appShellRef = useRef<HTMLDivElement | null>(null);
   const collaborationListeners = useRef(new Set<(document: JSONContent) => void>());
-  useEffect(() => cloudProjectRuntime.subscribe(state => setCloudVersionLocked(Boolean(state.project || state.status === 'loading'))), []);
+  useEffect(() => cloudProjectRuntime.subscribe(setVersionCloudState), []);
 
   useEffect(() => {
     if (!pdfImportOpen) return;
@@ -1030,7 +1033,7 @@ function AuthenticatedApp() {
 
   const replaceDocument = useCallback(
     (document: ScenarioFile, filePath: string | null, fromCloud = false) => {
-      if (!editor || versionTransition.current) {
+      if (!editor || (versionTransition.current && !fromCloud)) {
         return;
       }
       // A channel is bound to one scenario. Never send a newly opened local
@@ -1159,7 +1162,7 @@ function AuthenticatedApp() {
   );
 
   async function changeProjectVersion(action: string, name = '', sourceId = ''): Promise<void> {
-    if (!editor || closeInProgress.current || versionTransition.current || documentSavePending.current || documentLoadPending.current || cloudVersionLocked || cloudReadOnly
+    if (!editor || closeInProgress.current || versionTransition.current || documentSavePending.current || documentLoadPending.current || cloudVersionLocked || (cloudReadOnly && (!versionCloudState.project || ['duplicate','blank','rename','delete','restore'].includes(action)))
       || aiBusy || pdfImportBusy || pdfExportBusy) return;
     // A conflicted/empty comment draft must not be unmounted and silently lost.
     if (document.querySelector('.margin-note textarea')) {
@@ -1169,6 +1172,11 @@ function AuthenticatedApp() {
     versionTransition.current = true; setVersionBusy(true); setVersionError('');
     editor.setEditable(false);
     try {
+      if (versionCloudState.project) {
+        await cloudProjectRuntime.changeVersion(action, name, sourceId);
+        setVersionDialog(null);
+        return;
+      }
       const live = createDocument(editor, currentDocumentState.current.title);
       const before = ensureVersionedProject(live);
       const after = action === 'duplicate' ? addProjectVersion(before, name, sourceId || before.activeVersionId)
@@ -1200,15 +1208,20 @@ function AuthenticatedApp() {
       setVersionError(error instanceof Error ? error.message : 'Changement impossible. La version actuelle est conservée.');
     } finally {
       isReplacingDocument.current = false; versionTransition.current = false; setVersionBusy(false);
-      editor.setEditable(!cloudReadOnly);
+      if (!versionCloudState.project) editor.setEditable(!cloudReadOnly);
     }
   }
 
   function chooseVersion(value: string) {
-    if (value === 'initial' || value === projectVersionsRef.current?.activeVersionId) return;
+    if (value === 'initial' || value === listedActiveVersionId) return;
     if (!value.startsWith('action:')) { void changeProjectVersion(value); return; }
     const action = value.slice(7) as NonNullable<typeof versionDialog>;
     const current = projectVersionsRef.current;
+    if (versionCloudState.project) {
+      let n = 1; while (listedProjectVersions.some(v => !v.deletedAt && v.name.toLowerCase() === `version ${n}`)) n++;
+      setVersionName(action === 'rename' ? listedProjectVersions.find(v => v.id === listedActiveVersionId)?.name ?? '' : `Version ${n}`);
+      setVersionSource(action === 'restore' ? '' : listedActiveVersionId ?? ''); setVersionError(''); setVersionDialog(action); return;
+    }
     setVersionName(action === 'rename' ? current?.versions.find(v => v.id === current.activeVersionId)?.name ?? 'Version 1'
       : current ? nextVersionName(current) : 'Version 2');
     setVersionSource(action === 'restore' ? '' : current?.activeVersionId ?? ''); setVersionError(''); setVersionDialog(action);
@@ -2668,17 +2681,17 @@ function AuthenticatedApp() {
               refreshEditorState(editor);
             }
           }}>{SCENARIO_ELEMENT_TYPES.map(type => <option value={type} key={type}>{getScenarioElementLabel(type)}</option>)}</UiSelect>
-        <UiSelect className="project-version-control" aria-label="Version" value={projectVersions?.activeVersionId ?? 'initial'}
-          title={cloudVersionLocked ? 'Versions locales uniquement : une mise à jour du serveur est nécessaire pour les projets cloud.' : 'Choisir ou créer une version de ce projet'}
-          disabled={versionBusy || cloudReadOnly || cloudVersionLocked || aiBusy || pdfExportBusy || pdfImportBusy || commentComposerOpen}
+        <UiSelect className="project-version-control" aria-label="Version" value={listedActiveVersionId ?? 'initial'}
+          title={cloudVersionLocked ? 'Chargement des versions cloud…' : 'Choisir ou créer une version de ce projet'}
+          disabled={versionBusy || (cloudReadOnly && !versionCloudState.project) || cloudVersionLocked || aiBusy || pdfExportBusy || pdfImportBusy || commentComposerOpen}
           onChange={event => chooseVersion(event.target.value)}>
-          {projectVersions ? projectVersions.versions.filter(v => !v.deletedAt).map(v => <option key={v.id} value={v.id}>Version : {v.name}</option>)
+          {listedProjectVersions.length ? listedProjectVersions.filter(v => !v.deletedAt).map(v => <option key={v.id} value={v.id}>Version : {v.name}</option>)
             : <option value="initial">Version : Version 1</option>}
-          <option value="action:duplicate">Dupliquer une version…</option>
-          <option value="action:blank">Créer une version vierge…</option>
-          <option value="action:rename">Renommer cette version…</option>
-          <option value="action:delete" disabled={!projectVersions || projectVersions.versions.filter(v => !v.deletedAt).length < 2}>Supprimer cette version…</option>
-          <option value="action:restore" disabled={!projectVersions?.versions.some(v => v.deletedAt)}>Restaurer une version…</option>
+          <option value="action:duplicate" disabled={cloudReadOnly}>Dupliquer une version…</option>
+          <option value="action:blank" disabled={cloudReadOnly}>Créer une version vierge…</option>
+          <option value="action:rename" disabled={cloudReadOnly}>Renommer cette version…</option>
+          <option value="action:delete" disabled={cloudReadOnly || (versionCloudState.project && versionCloudState.project.role !== 'owner') || listedProjectVersions.filter(v => !v.deletedAt).length < 2}>Supprimer cette version…</option>
+          <option value="action:restore" disabled={cloudReadOnly || (versionCloudState.project && versionCloudState.project.role !== 'owner') || !listedProjectVersions.some(v => v.deletedAt)}>Restaurer une version…</option>
         </UiSelect>
         <div className="document-status">
           <CloudProjectStatus onOpen={() => setCloudProjectsOpen(true)} />
@@ -2713,20 +2726,20 @@ function AuthenticatedApp() {
             </label>}
             {versionDialog === 'duplicate' && <label>Version à dupliquer
               <UiSelect aria-label="Version à dupliquer" value={versionSource} onChange={event => setVersionSource(event.target.value)} disabled={versionBusy}>
-                {projectVersions ? projectVersions.versions.filter(v => !v.deletedAt).map(v => <option key={v.id} value={v.id}>{v.name}</option>) : <option value="">Version 1</option>}
+                {listedProjectVersions.length ? listedProjectVersions.filter(v => !v.deletedAt).map(v => <option key={v.id} value={v.id}>{v.name}</option>) : <option value="">Version 1</option>}
               </UiSelect>
             </label>}
             {versionDialog === 'blank' && <p>La nouvelle version sera vide, sans commentaires ni page de garde. Les autres versions seront conservées.</p>}
-            {versionDialog === 'delete' && <p>« {projectVersions?.versions.find(v => v.id === projectVersions.activeVersionId)?.name} » sera retirée du menu. Son contenu restera récupérable dans ce projet.</p>}
+            {versionDialog === 'delete' && <p>« {listedProjectVersions.find(v => v.id === listedActiveVersionId)?.name} » sera retirée du menu. Son contenu restera récupérable dans ce projet.</p>}
             {versionDialog === 'restore' && <label>Version supprimée
               <UiSelect aria-label="Version supprimée" value={versionSource} required onChange={event => setVersionSource(event.target.value)}>
                 <option value="">Choisir une version</option>
-                {projectVersions?.versions.filter(v => v.deletedAt).map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
+                {listedProjectVersions.filter(v => v.deletedAt).map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
               </UiSelect>
             </label>}
             {versionError && <p role="alert">{versionError}</p>}
             <div className="panel-actions"><button type="button" disabled={versionBusy} onClick={() => { setVersionDialog(null); setVersionError(''); }}>Annuler</button>
-              <button type="submit" disabled={versionBusy || (versionDialog === 'restore' && !projectVersions?.versions.some(v => v.deletedAt && v.id === versionSource))}>{versionBusy ? 'Enregistrement…' : versionDialog === 'delete' ? 'Supprimer la version' : versionDialog === 'restore' ? 'Restaurer' : 'Enregistrer'}</button></div>
+              <button type="submit" disabled={versionBusy || (versionDialog === 'restore' && !listedProjectVersions.some(v => v.deletedAt && v.id === versionSource))}>{versionBusy ? 'Enregistrement…' : versionDialog === 'delete' ? 'Supprimer la version' : versionDialog === 'restore' ? 'Restaurer' : 'Enregistrer'}</button></div>
           </form>
         </section>
       </div>}
