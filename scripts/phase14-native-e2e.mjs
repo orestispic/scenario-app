@@ -12,20 +12,24 @@ const statePath = join(root, 'native-state.json');
 const scope = 'https://scenario-commercial-api-preproduction.ore-picard.workers.dev|https://zblnsdyaoljnezxdidtx.supabase.co';
 const profile = join(root, mode === 'reinstalled' ? 'fresh-webview' : 'webview');
 const child = spawn(join(process.env.LOCALAPPDATA, 'senario Beta', 'scenario-app.exe'), [], {
-  windowsHide: true, stdio: 'ignore',
+  windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'],
   env: { ...process.env, WEBVIEW2_USER_DATA_FOLDER: profile,
-    WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: '--remote-debugging-port=19314 --remote-debugging-address=127.0.0.1' },
+    WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: '--remote-debugging-port=19314 --remote-debugging-address=127.0.0.1 --no-sandbox' },
 });
+child.stdout.on('data', chunk => process.stdout.write(chunk));
+child.stderr.on('data', chunk => process.stderr.write(chunk));
+child.on('error', error => console.error('Native process launch:', error.message));
+child.on('exit', (code, signal) => console.log('Native process exit:', code, signal));
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 let socket;
 try {
   let target;
-  for (let i = 0; i < 100; i++) {
+  for (let i = 0; i < 300; i++) {
     try { target = (await (await fetch('http://127.0.0.1:19314/json/list')).json()).find(t => t.type === 'page' && t.webSocketDebuggerUrl); } catch {}
     if (target) break;
     await delay(300);
   }
-  assert.ok(target, 'Packaged application must expose its WebView');
+  assert.ok(target, `Packaged application must expose its WebView (process exit ${child.exitCode})`);
   socket = new WebSocket(target.webSocketDebuggerUrl);
   await new Promise((resolve, reject) => { socket.onopen = resolve; socket.onerror = reject; });
   let id = 0;

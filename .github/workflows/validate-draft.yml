@@ -1,0 +1,45 @@
+name: Valider le brouillon Windows existant
+on:
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  windows:
+    runs-on: windows-latest
+    env:
+      VITE_SCENARIO_API_BASE_URL: https://scenario-commercial-api-preproduction.ore-picard.workers.dev
+      VITE_SUPABASE_URL: https://zblnsdyaoljnezxdidtx.supabase.co
+      VITE_SUPABASE_ANON_KEY: sb_publishable_tAI1UPbu2UnelkOeuI1WNg_hPegJP4Y
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - run: npm ci
+      - run: npm run build -- --mode phase9
+      - name: Télécharger le candidat signé sans le reconstruire
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: pwsh
+        run: |
+          gh release download v0.1.12 --pattern 'Scenario-Setup.exe*' --dir candidate
+          if ($LASTEXITCODE -ne 0) { throw 'Draft download failed' }
+          New-Item -ItemType Directory -Path 'src-tauri/target/release/bundle/nsis' -Force | Out-Null
+          Copy-Item candidate/Scenario-Setup.exe 'src-tauri/target/release/bundle/nsis/senario Beta_0.1.12_x64-setup.exe'
+          Copy-Item candidate/Scenario-Setup.exe.sig 'src-tauri/target/release/bundle/nsis/senario Beta_0.1.12_x64-setup.exe.sig'
+          node scripts/verify-updater-release.mjs
+      - name: Vérifier installation, mise à jour et réinstallation
+        shell: pwsh
+        run: ./scripts/phase14-windows-lifecycle.ps1 -Installer candidate/Scenario-Setup.exe
+      - name: Diagnostics en cas d'échec
+        if: failure()
+        shell: pwsh
+        run: |
+          Get-CimInstance Win32_Process | Where-Object { $_.Name -match 'scenario|msedgewebview' } | Select-Object Name,ProcessId,CommandLine | Format-List
+          Get-ChildItem 'C:/Program Files (x86)/Microsoft/EdgeWebView/Application' -ErrorAction SilentlyContinue
+      - name: Publier après tous les contrôles
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release edit v0.1.12 --draft=false --latest
