@@ -6,6 +6,12 @@ fn entry(scope: &str) -> Result<keyring::Entry, String> {
     scoped_entry("com.scenario.commercial.session.v1", scope)
 }
 
+fn device_entry(scope: &str) -> Result<keyring::Entry, String> {
+    // Keep the historical service name stable across product renames and app
+    // reinstalls: changing it would make an existing PC look like a new device.
+    scoped_entry("com.scenario.commercial.device-identity.v1", scope)
+}
+
 fn scoped_entry(service: &str, scope: &str) -> Result<keyring::Entry, String> {
     if !cfg!(any(target_os = "windows", target_os = "macos")) {
         return Err("System vault unsupported on this platform".into());
@@ -76,8 +82,96 @@ pub fn clear_refresh_token(scope: String) -> Result<(), String> {
     }
 }
 
+#[tauri::command]
+pub fn read_device_identity(scope: String) -> Result<Option<String>, String> {
+    let _guard = VAULT_LOCK.lock().map_err(|_| "System vault unavailable")?;
+    match device_entry(&scope)?.get_password() {
+        Ok(value) => Ok(Some(value)),
+        Err(keyring::Error::NoEntry) => Ok(None),
+        Err(_) => Err("System vault unavailable".into()),
+    }
+}
+
+#[tauri::command]
+pub fn write_device_identity(scope: String, value: String) -> Result<(), String> {
+    let _guard = VAULT_LOCK.lock().map_err(|_| "System vault unavailable")?;
+    if value.len() < 32 || value.len() > 512 || value.chars().any(char::is_control) {
+        return Err("Invalid device identity".into());
+    }
+    device_entry(&scope)?
+        .set_password(&value)
+        .map_err(|_| "System vault unavailable".into())
+}
+
+#[tauri::command]
+pub fn get_or_create_device_identity(scope: String, candidate: String) -> Result<String, String> {
+    let _guard = VAULT_LOCK.lock().map_err(|_| "System vault unavailable")?;
+    let credential = device_entry(&scope)?;
+    match credential.get_password() {
+        Ok(value)
+            if value.len() >= 32 && value.len() <= 512 && !value.chars().any(char::is_control) =>
+        {
+            Ok(value)
+        }
+        Ok(_) => Err("Invalid stored device identity".into()),
+        Err(keyring::Error::NoEntry) => {
+            if candidate.len() < 32
+                || candidate.len() > 512
+                || candidate.chars().any(char::is_control)
+            {
+                return Err("Invalid device identity".into());
+            }
+            credential
+                .set_password(&candidate)
+                .map_err(|_| "System vault unavailable")?;
+            Ok(candidate)
+        }
+        Err(_) => Err("System vault unavailable".into()),
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    // Used only by the isolated Windows CI installer test. No production command
+    // exposes the test scopes or permits clearing a durable device identity.
+    #[test]
+    #[ignore = "Explicit isolated Windows installer lifecycle test"]
+    fn native_device_lifecycle() {
+        let scope = std::env::var("SENARIO_TEST_VAULT_SCOPE").expect("isolated scope");
+        assert!(scope.starts_with("phase14-test-"));
+        let mode = std::env::var("SENARIO_TEST_VAULT_MODE").expect("mode");
+        let identity = "phase14-synthetic-device-identity-000000000001";
+        if mode == "cleanup" {
+            let _ = super::device_entry(&scope).unwrap().delete_credential();
+            super::clear_refresh_token(scope).unwrap();
+        } else if mode == "seed" {
+            assert_eq!(
+                super::get_or_create_device_identity(scope.clone(), identity.into()).unwrap(),
+                identity
+            );
+            super::write_refresh_token(
+                scope,
+                "phase14-synthetic-refresh-not-a-real-session".into(),
+            )
+            .unwrap();
+        } else {
+            assert_eq!(mode, "verify");
+            // A new process with a different proposed identity must recover the old one.
+            assert_eq!(
+                super::get_or_create_device_identity(
+                    scope.clone(),
+                    "phase14-different-candidate-00000000000002".into()
+                )
+                .unwrap(),
+                identity
+            );
+            assert_eq!(
+                super::read_refresh_token(scope).unwrap().as_deref(),
+                Some("phase14-synthetic-refresh-not-a-real-session")
+            );
+        }
+    }
+
     #[test]
     #[ignore = "Explicit local OS vault smoke test; creates and removes one synthetic credential"]
     fn native_vault_roundtrip() {

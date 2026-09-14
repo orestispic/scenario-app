@@ -235,7 +235,8 @@
   .app-shell.theme-dark .account-device-list li {display:flex;align-items:center;justify-content:space-between;gap:8px;padding:7px 8px;border:1px solid var(--divider);border-radius:6px;background:var(--surface-2);}
   .account-device-list li>span {white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
   .account-device-list small {color:var(--success)!important;font-size:9px!important;text-transform:uppercase;}
-  .account-device-section>button {justify-self:start;}
+  .account-device-list button {min-height:26px;padding:0 8px;font-size:10px;}
+  .app-shell.theme-dark .account-device-help {margin:0;color:var(--text-3);font-size:10px;}
   .account-activation-form {display:grid;gap:5px;}
   .account-activation-form>label {color:var(--text-2);font-size:10px;}
   .account-activation-form>div {display:grid;grid-template-columns:minmax(0,1fr) auto;gap:7px;}

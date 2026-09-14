@@ -7,6 +7,8 @@ import { CloudSyncQueue, createBrowserSyncQueueStorage } from "./syncQueue";
 import { readScenario } from "../document/persistence";
 import { OfflineLicense } from './offlineLicense';
 import { version as clientVersion } from '../../package.json';
+import { getDeviceFingerprint, initializeDeviceIdentity } from './deviceIdentity';
+import { DeviceActivation } from './deviceActivation';
 
 export const localTestMode =
   import.meta.env.DEV && import.meta.env.VITE_SCENARIO_AUTH_MODE === "local-test";
@@ -34,12 +36,13 @@ function createRuntimeAuthAdapter(): AuthAdapter {
 }
 
 export const auth = createRuntimeAuthAdapter();
+const commercialScope = `${apiBaseUrl}|${import.meta.env.VITE_SUPABASE_URL ?? "local"}`;
 export const offlineTrust = createOfflineTrustStore(
-  `${apiBaseUrl}|${import.meta.env.VITE_SUPABASE_URL ?? "local"}`,
+  commercialScope,
 );
 export const sessions = new SessionManager(
   auth,
-  createRuntimeTokenVault(`${apiBaseUrl}|${import.meta.env.VITE_SUPABASE_URL ?? "local"}`),
+  createRuntimeTokenVault(commercialScope),
   async (accessToken) =>
     createAuthenticatedCommercialApi({ baseUrl: apiBaseUrl, accessToken }).logout(),
 );
@@ -51,24 +54,29 @@ export function browserStorage() {
   };
 }
 
-export function getDeviceFingerprint(): string {
-  const key = "scenario-local-device-fingerprint";
-  const existing = window.localStorage.getItem(key);
-  if (existing) return existing;
-  const fingerprint = crypto.randomUUID() + crypto.randomUUID();
-  window.localStorage.setItem(key, fingerprint);
-  return fingerprint;
+export { getDeviceFingerprint };
+
+export function initializeRuntimeDeviceIdentity(): Promise<void> {
+  return initializeDeviceIdentity(commercialScope);
 }
 
 export function getClientPlatform(): "windows" | "macos" {
   return /mac/i.test(navigator.userAgent) ? "macos" : "windows";
 }
 
+export const deviceActivation = new DeviceActivation(async () => {
+  const api = createAuthenticatedCommercialApi({ baseUrl: apiBaseUrl,
+    accessToken: () => sessions.getAccessToken(), signal: authenticatedOperations.signal });
+  return api.activateDevice({ fingerprint: getDeviceFingerprint(), label: "Cet appareil", platform: getClientPlatform() });
+});
+sessions.subscribe(authenticated => { if (!authenticated) deviceActivation.reset(); });
+
 export function createRuntimeCommercialApi(onUnauthorized?: () => Promise<void>) {
   return createAuthenticatedCommercialApi({
     baseUrl: apiBaseUrl,
     accessToken: () => sessions.getAccessToken(),
     onUnauthorized,
+    beforeDeviceRequest: () => deviceActivation.ensure(),
     signal: authenticatedOperations.signal,
     clientContext: {
       // The published artifact must report its own version even without a local .env.
@@ -86,4 +94,8 @@ export const cloudSyncQueue = new CloudSyncQueue(
 );
 
 export const offlineLicense = new OfflineLicense(offlineTrust, browserStorage(), getDeviceFingerprint,
-  () => createRuntimeCommercialApi(), () => sessions.getAccessToken());
+  () => createRuntimeCommercialApi(), async () => {
+    const token = await sessions.getAccessToken();
+    if (token) { authenticatedOperations.reset(); await deviceActivation.ensure(); }
+    return token;
+  });

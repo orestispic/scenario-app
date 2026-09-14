@@ -15,6 +15,7 @@ import {
   sessions,
   cloudSyncQueue,
   authenticatedOperations,
+  deviceActivation,
 } from "./runtime";
 import { cloudProjectRuntime } from './cloudProjectRuntime';
 import { AiBudgetUsage } from './AiBudgetUsage';
@@ -40,6 +41,7 @@ export function AccountLicensePanel({
   const [me, setMe] = useState<MeResponse | null>(null);
   const [entitlements, setEntitlements] = useState<EntitlementsResponse | null>(null);
   const [devices, setDevices] = useState<DeviceView[]>([]);
+  const [currentDeviceId, setCurrentDeviceId] = useState<string | null>(null);
   const [billing, setBilling] = useState<BillingState | null>(null);
   const [activations, setActivations] = useState<ActivationRedemptionView[]>([]);
   const [busy, setBusy] = useState(false);
@@ -107,14 +109,26 @@ export function AccountLicensePanel({
     }
   }
 
-  async function loadAuthenticatedAccount(nextSession?: SessionTokens) {
+  async function loadAuthenticatedAccount(nextSession?: SessionTokens): Promise<string | undefined> {
     if (nextSession) {
       await cloudProjectRuntime.close();
       authenticatedOperations.reset();
       await offlineLicense.clear();
+      deviceActivation.reset();
       await sessions.accept(nextSession);
     }
     const api = accountApi();
+    let activationWarning: string | undefined;
+    try {
+      const currentDevice = await deviceActivation.ensure();
+      setCurrentDeviceId(currentDevice.id);
+    } catch (error) {
+      if (!(error instanceof CommercialHttpError && error.code === "device_limit_reached")) {
+        throw error;
+      }
+      setCurrentDeviceId(null);
+      activationWarning = "Limite d’appareils atteinte. Retirez un ancien appareil pour autoriser automatiquement celui-ci.";
+    }
     const [nextMe, nextEntitlements, nextDevices, nextBilling, nextActivations] =
       await Promise.all([
         api.getMe(),
@@ -134,14 +148,16 @@ export function AccountLicensePanel({
     setBilling(nextBilling.billing);
     setActivations(nextActivations.activations);
     onAuthenticated?.();
+    if (activationWarning) setMessage(activationWarning);
+    return activationWarning;
   }
 
-  async function run(action: () => Promise<void>, success: string) {
+  async function run(action: () => Promise<void | string>, success: string) {
     setBusy(true);
     setMessage("");
     try {
-      await action();
-      setMessage(success);
+      const result = await action();
+      setMessage(result ?? success);
     } catch (error) {
       if (!(await restoreOffline(error)))
         setMessage(error instanceof Error ? error.message : "Demande impossible.");
@@ -173,14 +189,13 @@ export function AccountLicensePanel({
     }
   }
 
-  async function activateCurrentDevice() {
-    if (!session) return;
+  async function removeRegisteredDevice(deviceId: string) {
+    if (!session || deviceId === currentDeviceId) return;
     const api = accountApi();
-    await api.activateDevice({
-      fingerprint: getDeviceFingerprint(),
-      label: "Cet appareil",
-      platform: getClientPlatform(),
-    });
+    await api.deactivateDevice(deviceId);
+    deviceActivation.reset();
+    const currentDevice = await deviceActivation.ensure();
+    setCurrentDeviceId(currentDevice.id);
     setDevices(await api.getDevices());
     await offlineLicense.refresh();
   }
@@ -200,6 +215,7 @@ export function AccountLicensePanel({
         window.localStorage.removeItem("scenario-commercial-signed-entitlements-v2");
         window.localStorage.removeItem(BOUND_CACHE_KEY);
         setSession(false);
+        setCurrentDeviceId(null);
         setMe(null);
         setEntitlements(null);
         setDevices([]);
@@ -254,6 +270,7 @@ export function AccountLicensePanel({
   const displayedRights = entitlements
     ? presentEntitlements(entitlements.snapshot.entitlements)
     : [];
+  const activeDevices = devices.filter((device) => device.status === 'active');
 
   return (
     <div
@@ -341,27 +358,34 @@ export function AccountLicensePanel({
               <section className="account-license-section account-device-section">
                 <div className="account-section-heading">
                   <h3>Appareils</h3>
-                  <span>{devices.filter((device) => device.status === 'active').length} actif(s)</span>
+                  <span>{activeDevices.length} actif(s)</span>
                 </div>
-                {devices.length ? (
+                <p className="account-device-help">Cet appareil est autorisé automatiquement après votre connexion.</p>
+                {activeDevices.length ? (
                   <ul className="account-device-list">
-                    {devices.map((device) => (
+                    {activeDevices.map((device) => (
                       <li key={device.id}>
-                        <span>{device.label ?? 'Appareil sans nom'}</span>
-                        <small>{device.status === 'active' ? 'Actif' : 'Révoqué'}</small>
+                        <span>{device.id === currentDeviceId ? 'Cet appareil' : device.label ?? 'Appareil autorisé'}</span>
+                        {device.id === currentDeviceId ? (
+                          <small>Actuel</small>
+                        ) : (
+                          <button
+                            type="button"
+                            disabled={busy}
+                            onClick={() => void run(
+                              () => removeRegisteredDevice(device.id),
+                              'Ancien appareil retiré. Cet appareil est maintenant autorisé.',
+                            )}
+                          >
+                            Retirer
+                          </button>
+                        )}
                       </li>
                     ))}
                   </ul>
                 ) : (
                   <p>Aucun appareil actif.</p>
                 )}
-                <button
-                  type="button"
-                  disabled={busy}
-                  onClick={() => void run(activateCurrentDevice, 'Appareil activé.')}
-                >
-                  Activer cet appareil
-                </button>
               </section>
 
               <section className="account-license-section account-activation-section">

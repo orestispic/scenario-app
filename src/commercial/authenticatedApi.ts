@@ -171,6 +171,7 @@ export function createAuthenticatedCommercialApi(options: {
   baseUrl: string;
   accessToken: string | (() => Promise<string | null>);
   onUnauthorized?: () => Promise<void>;
+  beforeDeviceRequest?: () => Promise<unknown>;
   fetcher?: typeof fetch;
   signal?: () => AbortSignal;
   clientContext?: {
@@ -222,6 +223,9 @@ export function createAuthenticatedCommercialApi(options: {
     const accessToken =
       typeof options.accessToken === "function" ? await options.accessToken() : options.accessToken;
     if (!accessToken) throw new CommercialHttpError(401, 'session_expired', "Reconnectez-vous pour continuer.");
+    if (new Headers(init.headers).has('X-Scenario-Device-Fingerprint') && !path.startsWith('/v3/entitlements')) {
+      await options.beforeDeviceRequest?.();
+    }
     if (init.signal?.aborted) throw new DOMException('Aborted', 'AbortError');
     const response = await fetcher(`${baseUrl}${path}`, {
       ...init,

@@ -27,7 +27,8 @@ jobs:
         run: npm ci
       - name: Vérifier l’application
         run: npm test -- --run
-      - name: Construire et publier la version signée
+      - name: Construire la version signée en brouillon
+        id: build
         uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -39,10 +40,19 @@ jobs:
           releaseBody: |
             Version bêta de Senario pour Windows 10 et 11 (64 bits).
             Téléchargez Scenario-Setup.exe puis suivez les étapes de l’installateur.
-          releaseDraft: false
+          releaseDraft: true
           prerelease: false
           args: --config src-tauri/tauri.preproduction.conf.json --bundles nsis
           updaterJsonPreferNsis: true
           uploadUpdaterJson: true
           uploadUpdaterSignatures: true
           releaseAssetNamePattern: Scenario-Setup[ext]
+      - name: Vérifier la signature de l’installateur
+        run: node scripts/verify-updater-release.mjs
+      - name: Vérifier installation, mise à jour et réinstallation Windows
+        shell: pwsh
+        run: ./scripts/phase14-windows-lifecycle.ps1 -Installer 'src-tauri/target/release/bundle/nsis/senario Beta_0.1.12_x64-setup.exe'
+      - name: Publier uniquement après les tests Windows
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release edit ${{ github.ref_name }} --draft=false --latest
