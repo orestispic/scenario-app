@@ -123,7 +123,15 @@ import { OfflineLicenseStatus } from './commercial/OfflineLicenseStatus';
 import { CloudProjectsPanel, CloudProjectStatus } from './commercial/CloudProjectsPanel';
 import { resolveProjectCommentAnchors } from './commercial/projectMetadataClient';
 import { CommentMargin } from './editor/CommentMargin';
+import { SceneTimeline } from './editor/SceneTimeline';
 import { getDocumentStatistics } from './editor/documentStatistics';
+import {
+  deleteScenarioScene,
+  getScenarioSceneAtPosition,
+  getScenarioScenes,
+  moveScenarioScene,
+  type ScenarioScene,
+} from './editor/sceneTimelineModel';
 import { cloudProjectRuntime, type CloudProjectEditor, type OpenProjectState } from './commercial/cloudProjectRuntime';
 import { collaborationTransaction } from './editor/collaborationTransaction';
 import {
@@ -482,6 +490,7 @@ function AuthenticatedApp() {
   const versionTransition = useRef(false);
   const documentLoadPending = useRef(false);
   const [documentRevision, setDocumentRevision] = useState(0);
+  const [activeSceneId, setActiveSceneId] = useState<string | null>(null);
   const documentSavePending = useRef(false);
   const [versionBusy, setVersionBusy] = useState(false);
   const [versionDialog, setVersionDialog] = useState<'duplicate' | 'blank' | 'rename' | 'delete' | 'restore' | null>(null);
@@ -647,6 +656,10 @@ function AuthenticatedApp() {
 
   const refreshCurrentType = useCallback((editor: Editor) => {
     setCurrentType(getCurrentScenarioElementType(editor));
+    setActiveSceneId(getScenarioSceneAtPosition(
+      editor.state.doc,
+      editor.state.selection.from,
+    )?.id ?? null);
   }, []);
 
   const refreshEditorState = useCallback(
@@ -2345,6 +2358,67 @@ function AuthenticatedApp() {
     editor?.chain().focus().toggleUnderline().run();
   }, [editor]);
 
+  const navigateToScene = useCallback((sceneId: string) => {
+    if (!editor || editor.isDestroyed) return;
+    const scene = getScenarioScenes(editor.state.doc).find(item => item.id === sceneId);
+    if (!scene) return;
+    const heading = editor.view.nodeDOM(scene.from);
+    editor.view.focus();
+    editor.view.dispatch(
+      editor.state.tr.setSelection(TextSelection.create(editor.state.doc, scene.from + 1)),
+    );
+    setActiveSceneId(scene.id);
+    requestAnimationFrame(() => {
+      if (heading instanceof Element) {
+        heading.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
+      }
+    });
+  }, [editor]);
+
+  const moveSceneFromTimeline = useCallback((sceneId: string, destinationBoundary: number) => {
+    if (!editor?.isEditable || versionTransition.current) return;
+    if (moveScenarioScene(editor, sceneId, destinationBoundary)) {
+      setActiveSceneId(sceneId);
+      setDocumentState(previous => ({
+        ...previous,
+        isDirty: true,
+        status: 'Scène déplacée',
+      }));
+    }
+  }, [editor]);
+
+  const deleteSceneFromTimeline = useCallback(async (scene: ScenarioScene) => {
+    if (!editor?.isEditable || versionTransition.current) return;
+    const shouldDelete = isTauri() ? await confirm(
+      `Supprimer la scène ${scene.index + 1} « ${scene.title} » et tout son contenu ?`,
+      {
+        title: 'Supprimer une scène',
+        kind: 'warning',
+        okLabel: 'Supprimer',
+        cancelLabel: 'Annuler',
+      },
+    ) : window.confirm(`Supprimer la scène ${scene.index + 1} « ${scene.title} » et tout son contenu ?`);
+    if (!shouldDelete || !editor?.isEditable) return;
+
+    const deletedBlockIds = new Set(scene.blockIds);
+    const previousComments = commentsRef.current;
+    const remainingComments = previousComments.filter(thread => !deletedBlockIds.has(thread.anchor.blockId));
+    // onTransaction must reconcile only surviving comments against the new
+    // document; comments inside the deleted scene disappear with that scene.
+    commentsRef.current = remainingComments;
+    if (!deleteScenarioScene(editor, scene.id)) {
+      commentsRef.current = previousComments;
+      return;
+    }
+    setComments(remainingComments);
+    setActiveCommentId(current => current && remainingComments.some(thread => thread.id === current) ? current : null);
+    setDocumentState(previous => ({
+      ...previous,
+      isDirty: true,
+      status: 'Scène supprimée',
+    }));
+  }, [editor]);
+
   const cloudEditor: CloudProjectEditor = {
     read: () => editor?.getJSON() ?? initialContent,
     readFile: () => {
@@ -2387,6 +2461,7 @@ function AuthenticatedApp() {
 
   const coverPagePresent = hasCoverPageContent(coverPage);
   const statistics = getDocumentStatistics(editor?.getJSON() ?? initialContent);
+  const timelineScenes = editor ? getScenarioScenes(editor.state.doc) : [];
   const coverPageVisible = coverPagePresent && !coverPageHidden;
   const documentSheetCount = pageCount + (coverPageVisible ? 1 : 0);
   // Feuille purement visuelle, toujours après le scénario : elle apporte de
@@ -2760,7 +2835,7 @@ function AuthenticatedApp() {
 
 
       <main
-        className="workspace"
+        className="workspace has-scene-timeline"
         aria-label="Editeur de scenario"
         onMouseDown={(event) => {
           setCommentActionTarget(null);
@@ -2803,6 +2878,14 @@ function AuthenticatedApp() {
         onWheel={handleWorkspaceWheel}
         onContextMenu={openScenarioContextMenu}
       >
+        <SceneTimeline
+          scenes={timelineScenes}
+          activeSceneId={activeSceneId}
+          readOnly={!editor?.isEditable || versionBusy || versionTransition.current}
+          onNavigate={navigateToScene}
+          onMove={moveSceneFromTimeline}
+          onDelete={scene => void deleteSceneFromTimeline(scene)}
+        />
         <div className={`editor-stage ${comments.length ? 'has-comment-margin' : ''}`}>
         {editor && <CommentMargin editor={editor} threads={comments} readOnly={cloudReadOnly}
           activeId={activeCommentId} onActivate={(thread) => navigateToComment(thread, true)} onDeactivate={() => setActiveCommentId(null)} zoom={zoom}
