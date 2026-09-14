@@ -12,6 +12,8 @@ jobs:
       VITE_SUPABASE_ANON_KEY: sb_publishable_tAI1UPbu2UnelkOeuI1WNg_hPegJP4Y
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -24,6 +26,10 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: pwsh
         run: |
+          git diff --exit-code v0.1.12 -- src src-tauri package.json package-lock.json
+          if ($LASTEXITCODE -ne 0) { throw 'Application sources differ from the signed candidate' }
+          $taskDraft = gh release view v0.1.12 --json isDraft --jq .isDraft
+          if ($taskDraft -ne 'true') { throw 'This recovery workflow only accepts the unpublished 0.1.12 draft' }
           gh release download v0.1.12 --pattern 'Scenario-Setup.exe*' --dir candidate
           if ($LASTEXITCODE -ne 0) { throw 'Draft download failed' }
           New-Item -ItemType Directory -Path 'src-tauri/target/release/bundle/nsis' -Force | Out-Null

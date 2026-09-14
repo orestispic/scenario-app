@@ -10,6 +10,7 @@ $taskUninstaller = Join-Path $taskInstall 'uninstall.exe'
 if (Test-Path -LiteralPath $taskExe) { throw 'The runner already has Senario installed.' }
 $env:SENARIO_TEST_VAULT_SCOPE = 'phase14-test-' + [guid]::NewGuid().ToString()
 $taskVaultSeeded = $false
+$taskExpectedVersion = (Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json).version
 function Test-Vault([string]$Mode) {
   $env:SENARIO_TEST_VAULT_MODE = $Mode
   cargo test --manifest-path src-tauri/Cargo.toml native_device_lifecycle -- --ignored --nocapture
@@ -38,7 +39,7 @@ try {
   [IO.File]::WriteAllText($taskDocument, '{"formatVersion":1,"title":"Phase 14","content":{"type":"doc","content":[]}}')
   $taskBefore = (Get-FileHash -LiteralPath $taskDocument -Algorithm SHA256).Hash
   Install-Senario (Resolve-Path -LiteralPath $Installer).Path
-  Verify-Version '0.1.12'
+  Verify-Version $taskExpectedVersion
   node scripts/phase14-native-e2e.mjs verify
   if ($LASTEXITCODE -ne 0) { throw 'Updated native app test failed' }
   Test-Vault 'verify'
@@ -50,10 +51,10 @@ try {
   if (Test-Path -LiteralPath $taskExe) { throw 'Uninstall did not remove the binary' }
   Test-Vault 'verify'
   Install-Senario (Resolve-Path -LiteralPath $Installer).Path
-  Verify-Version '0.1.12'
+  Verify-Version $taskExpectedVersion
   node scripts/phase14-native-e2e.mjs reinstalled
   if ($LASTEXITCODE -ne 0) { throw 'Reinstalled native app test failed' }
   Test-Vault 'verify'
   if ((Get-FileHash -LiteralPath $taskDocument -Algorithm SHA256).Hash -ne $taskBefore) { throw 'Document changed during reinstall' }
-  Write-Output 'PASS: clean 0.1.11 installation, upgrade to 0.1.12, uninstall, reinstall, system-vault identity and refresh token preserved, document unchanged.'
+  Write-Output "PASS: clean 0.1.11 installation, upgrade to $taskExpectedVersion, uninstall, reinstall, system-vault identity and refresh token preserved, document unchanged."
 } finally { if ($taskVaultSeeded) { Test-Vault 'cleanup' } }

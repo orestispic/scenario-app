@@ -51,7 +51,9 @@ jobs:
         run: node scripts/verify-updater-release.mjs
       - name: Vérifier installation, mise à jour et réinstallation Windows
         shell: pwsh
-        run: ./scripts/phase14-windows-lifecycle.ps1 -Installer 'src-tauri/target/release/bundle/nsis/senario Beta_0.1.12_x64-setup.exe'
+        run: |
+          $taskVersion = (Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json).version
+          ./scripts/phase14-windows-lifecycle.ps1 -Installer "src-tauri/target/release/bundle/nsis/senario Beta_${taskVersion}_x64-setup.exe"
       - name: Publier uniquement après les tests Windows
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
