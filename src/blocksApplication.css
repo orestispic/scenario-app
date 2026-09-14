@@ -255,3 +255,13 @@
   .editor-stage {padding-left:0;min-height:0!important;}
   .theme-dark .cover-page {color:#111;}
 }
+
+/* Named versions reuse the supplied select, dialog, input and action buttons. */
+.project-version-control { width: 192px; min-width: 128px; }
+.project-version-control .ui-select-trigger>span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.app-shell .project-version-dialog { width: min(460px, calc(100vw - 32px)); }
+.project-version-dialog form { display: grid; gap: 16px; }
+.project-version-dialog label { display: grid; gap: 8px; }
+.project-version-dialog .ui-select { width: 100%; }
+.version-availability { margin: 0; padding: 6px 16px; color: var(--text-2); font-size: 11px; }
+.account-rights-section h4 { margin: 8px 0; color: var(--text-2); font-size: 11px; }

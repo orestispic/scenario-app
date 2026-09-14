@@ -24,6 +24,7 @@ export function fileIdentity(file: ScenarioFile): string {
   return JSON.stringify(value);
 }
 export async function cloudSyncRequest(file: ScenarioFile, scenarioId: string, parentVersionId: string | null): Promise<CloudSyncRequest> {
+  if (file.formatVersion !== 1) throw new Error('Les versions nommées nécessitent une mise à jour du serveur cloud. Conservez ce projet en fichier local : toutes ses versions sont préservées.');
   const content = JSON.stringify(file);
   const bytes = new TextEncoder().encode(content);
   const checksum = [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))].map((v) => v.toString(16).padStart(2, '0')).join('');

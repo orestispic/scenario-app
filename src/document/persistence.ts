@@ -2,6 +2,13 @@ import { invoke } from "@tauri-apps/api/core";
 import { open, save } from "@tauri-apps/plugin-dialog";
 
 const SCENARIO_FILTER = [{ name: "Scénario", extensions: ["scenario"] }];
+// Serialize writes so a delayed autosave cannot overtake a version transition.
+let writes: Promise<unknown> = Promise.resolve();
+function persist(command: string, args: Record<string, unknown>): Promise<void> {
+  const pending = writes.catch(() => undefined).then(() => invoke<void>(command, args));
+  writes = pending;
+  return pending;
+}
 const PDF_FILTER = [{ name: "Document PDF", extensions: ["pdf"] }];
 
 export interface RecentScenario {
@@ -74,7 +81,7 @@ export async function readPdf(path: string): Promise<number[]> {
 }
 
 export async function writeScenario(path: string, contents: string): Promise<void> {
-  await invoke("write_scenario", { path, contents });
+  await persist("write_scenario", { path, contents });
 }
 
 export async function readRecentScenarios(): Promise<RecentScenario[]> {
@@ -90,11 +97,11 @@ export async function writePdf(path: string, contents: Uint8Array): Promise<void
 }
 
 export async function writeAutosave(contents: string): Promise<void> {
-  await invoke("write_autosave", { contents });
+  await persist("write_autosave", { contents });
 }
 
 export async function writeBackup(contents: string): Promise<void> {
-  await invoke("write_backup", { contents });
+  await persist("write_backup", { contents });
 }
 
 export async function readRecovery(): Promise<string | null> {
@@ -102,5 +109,5 @@ export async function readRecovery(): Promise<string | null> {
 }
 
 export async function clearRecovery(): Promise<void> {
-  await invoke("clear_recovery");
+  await persist("clear_recovery", {});
 }

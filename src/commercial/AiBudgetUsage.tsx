@@ -52,7 +52,7 @@ export function AiBudgetUsage() {
           const percentage = Math.max(0, Math.min(100, budget.usedPercent));
           return <div key={key} className="ai-budget-period">
             <p>Budget {key === 'daily' ? 'journalier' : 'mensuel'} utilisé : <strong>{budget.usedPercent.toLocaleString('fr-FR')} %</strong></p>
-            <div
+            {key === 'daily' && <div
               className="ai-budget-progress"
               role="progressbar"
               aria-label={`Budget ${key === 'daily' ? 'journalier' : 'mensuel'}`}
@@ -61,7 +61,7 @@ export function AiBudgetUsage() {
               aria-valuenow={percentage}
             >
               <span style={{ width: `${percentage}%` }} />
-            </div>
+            </div>}
           </div>;
         })}
       </div>

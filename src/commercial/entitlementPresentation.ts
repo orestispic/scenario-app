@@ -4,6 +4,7 @@ export interface PresentedEntitlement {
   id: string;
   label: string;
   enabled: boolean;
+  offer?: 'Gratuite' | 'Auteur' | 'Studio';
 }
 
 const DISPLAYED_ENTITLEMENTS: Array<{
@@ -42,6 +43,9 @@ export function presentEntitlements(entitlements: Entitlement[]): PresentedEntit
     id: entitlement.id,
     label: entitlement.label,
     enabled: entitlement.codes.some((code) => activeCodes.has(code)),
+    // Earliest offer in the server catalogue, independent of the user's grants.
+    offer: (entitlement.id === 'local-writing' ? 'Gratuite'
+      : ['ai-writing', 'ai-pdf-import'].includes(entitlement.id) ? 'Auteur' : 'Studio') as PresentedEntitlement['offer'],
   }));
   const unknown = entitlements
     .filter((entitlement) => !knownCodes.has(entitlement.code))

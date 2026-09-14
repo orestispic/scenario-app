@@ -2,6 +2,13 @@ import { describe, expect, it } from 'vitest';
 import { presentEntitlements } from './entitlementPresentation';
 
 describe('présentation des droits du compte', () => {
+  it('classe les fonctionnalités par leur première offre et non par leur activation', () => {
+    const rights = presentEntitlements([{ code: 'studio_collaboration', enabled: true, value: null }]);
+    const ranks = rights.map(right => ({ Gratuite: 0, Auteur: 1, Studio: 2 })[right.offer!]);
+    expect(ranks).toEqual([...ranks].sort((a, b) => a - b));
+    expect(rights.find(r => r.id === 'ai-writing')?.offer).toBe('Auteur');
+    expect(rights.find(r => r.id === 'live-collaboration')?.offer).toBe('Studio');
+  });
   it('regroupe les alias techniques et affiche aussi les fonctions inactives', () => {
     const rights = presentEntitlements([
       { code: 'local.edit', enabled: true, value: null },

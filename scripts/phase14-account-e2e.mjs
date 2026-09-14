@@ -30,6 +30,8 @@ try {
     await page.getByRole('button', { name: profile, exact: true }).click();
     const account = page.getByRole('dialog', { name: 'Compte et licence' });
     await account.getByText('Fonctionnalités de votre offre', { exact: true }).waitFor();
+    assert.deepEqual(await account.locator('.account-rights-section h4').allTextContents(), ['Offre Gratuite', 'Offre Auteur', 'Offre Studio']);
+    assert.equal(await account.getByRole('slider').count(), 0);
     assert.equal(await page.getByRole('button', { name: 'Activer cet appareil', exact: true }).count(), 0);
     if (limited) {
       await account.getByText(/Limite d’appareils atteinte/).waitFor();

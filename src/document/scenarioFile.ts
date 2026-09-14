@@ -1,5 +1,6 @@
 import type { Editor, JSONContent } from "@tiptap/core";
 import type { CommentThread } from "../editor/comments";
+import { parseVersionedProject, type ProjectVersion } from './projectVersions';
 
 export const SCENARIO_FORMAT_VERSION = 1;
 
@@ -29,6 +30,9 @@ export interface ScenarioFile {
   coverPageHidden: boolean;
   comments: CommentThread[];
   savedAt: string;
+  projectId?: string;
+  activeVersionId?: string;
+  versions?: ProjectVersion[];
 }
 
 export interface RecoveryFile {
@@ -123,6 +127,10 @@ export function createScenarioFile(
 
 export function parseScenarioFile(rawContent: string): ScenarioFile {
   const file = JSON.parse(rawContent) as Partial<ScenarioFile>;
+  if (file.formatVersion === 2) return parseVersionedProject(file);
+  if (file.versions !== undefined || file.activeVersionId !== undefined) {
+    throw new Error('Ce projet contient des versions mais son format est incohérent. Le fichier reste inchangé.');
+  }
   if (
     file.formatVersion !== SCENARIO_FORMAT_VERSION ||
     !file.content ||

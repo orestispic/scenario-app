@@ -1,6 +1,8 @@
 import { UiTextarea } from './ui/UiTextarea';
 import { AiBudgetUsage } from './commercial/AiBudgetUsage';
 import { UiSelect } from './ui/UiSelect';
+import { ensureVersionedProject, captureVersion, selectProjectVersion, addProjectVersion, deleteProjectVersion,
+  renameProjectVersion, restoreProjectVersion, nextVersionName, type VersionedProject } from './document/projectVersions';
 import {
   useCallback,
   useEffect,
@@ -475,6 +477,18 @@ function AuthenticatedApp() {
     status: "Prêt",
   });
   const [initialRecoveryFinished, setInitialRecoveryFinished] = useState(false);
+  const projectVersionsRef = useRef<VersionedProject | null>(null);
+  const [projectVersions, setProjectVersions] = useState<VersionedProject | null>(null);
+  const versionTransition = useRef(false);
+  const documentLoadPending = useRef(false);
+  const [documentRevision, setDocumentRevision] = useState(0);
+  const documentSavePending = useRef(false);
+  const [versionBusy, setVersionBusy] = useState(false);
+  const [versionDialog, setVersionDialog] = useState<'duplicate' | 'blank' | 'rename' | 'delete' | 'restore' | null>(null);
+  const [versionName, setVersionName] = useState('');
+  const [versionSource, setVersionSource] = useState('');
+  const [versionError, setVersionError] = useState('');
+  const [cloudVersionLocked, setCloudVersionLocked] = useState(false);
   const paginationFrame = useRef<number | null>(null);
   const isReplacingDocument = useRef(false);
   const recoveryWasChecked = useRef(false);
@@ -497,6 +511,7 @@ function AuthenticatedApp() {
   const commentInput = useRef<HTMLTextAreaElement | null>(null);
   const appShellRef = useRef<HTMLDivElement | null>(null);
   const collaborationListeners = useRef(new Set<(document: JSONContent) => void>());
+  useEffect(() => cloudProjectRuntime.subscribe(state => setCloudVersionLocked(Boolean(state.project || state.status === 'loading'))), []);
 
   useEffect(() => {
     if (!pdfImportOpen) return;
@@ -645,6 +660,7 @@ function AuthenticatedApp() {
       return;
     }
 
+    setDocumentRevision(revision => revision + 1);
     setDocumentState((previous) => ({
       ...previous,
       isDirty: true,
@@ -978,14 +994,19 @@ function AuthenticatedApp() {
   }, [editor, refreshAiTarget, zoom]);
 
   const createDocument = useCallback(
-    (activeEditor: Editor, title: string): ScenarioFile =>
-      createScenarioFile(
+    (activeEditor: Editor, title: string): ScenarioFile => {
+      const current = createScenarioFile(
         activeEditor,
         title,
         coverPageRef.current,
         commentsRef.current,
         coverPageHiddenRef.current,
-      ),
+      );
+      if (!projectVersionsRef.current) return current;
+      const project = captureVersion(projectVersionsRef.current, current);
+      projectVersionsRef.current = project;
+      return project;
+    },
     [],
   );
 
@@ -1009,16 +1030,18 @@ function AuthenticatedApp() {
 
   const replaceDocument = useCallback(
     (document: ScenarioFile, filePath: string | null, fromCloud = false) => {
-      if (!editor) {
+      if (!editor || versionTransition.current) {
         return;
       }
-
       // A channel is bound to one scenario. Never send a newly opened local
       // file to the previous Studio through the existing editor subscription.
       if (!fromCloud) {
         void cloudProjectRuntime.close();
         editor.setEditable(true);
       }
+
+      projectVersionsRef.current = document.formatVersion === 2 ? ensureVersionedProject(document) : null;
+      setProjectVersions(projectVersionsRef.current);
 
       isReplacingDocument.current = true;
       smartTypeInteractionStarted.current = false;
@@ -1084,10 +1107,11 @@ function AuthenticatedApp() {
 
   const saveDocument = useCallback(
     async (saveAs = false): Promise<string | null> => {
-      if (!editor) {
+      if (!editor || versionTransition.current || documentSavePending.current || documentLoadPending.current) {
         return null;
       }
-
+      documentSavePending.current = true;
+      try {
       let path = documentState.filePath;
       if (saveAs || !path) {
         path = await chooseScenarioToSave(documentState.title);
@@ -1121,6 +1145,7 @@ function AuthenticatedApp() {
         await showError(error);
         return null;
       }
+      } finally { documentSavePending.current = false; }
     },
     [
       createDocument,
@@ -1132,6 +1157,62 @@ function AuthenticatedApp() {
       showError,
     ],
   );
+
+  async function changeProjectVersion(action: string, name = '', sourceId = ''): Promise<void> {
+    if (!editor || closeInProgress.current || versionTransition.current || documentSavePending.current || documentLoadPending.current || cloudVersionLocked || cloudReadOnly
+      || aiBusy || pdfImportBusy || pdfExportBusy) return;
+    // A conflicted/empty comment draft must not be unmounted and silently lost.
+    if (document.querySelector('.margin-note textarea')) {
+      setVersionError('Enregistrez ou annulez le commentaire en cours avant de changer de version.');
+      return;
+    }
+    versionTransition.current = true; setVersionBusy(true); setVersionError('');
+    editor.setEditable(false);
+    try {
+      const live = createDocument(editor, currentDocumentState.current.title);
+      const before = ensureVersionedProject(live);
+      const after = action === 'duplicate' ? addProjectVersion(before, name, sourceId || before.activeVersionId)
+        : action === 'blank' ? addProjectVersion(before, name, null)
+        : action === 'rename' ? renameProjectVersion(before, before.activeVersionId, name)
+        : action === 'delete' ? deleteProjectVersion(before, before.activeVersionId)
+        : action === 'restore' ? restoreProjectVersion(before, sourceId)
+        : selectProjectVersion(before, action);
+      after.savedAt = new Date().toISOString();
+      // Never switch the editor until both outgoing backup and complete new bundle are durable.
+      await writeBackup(JSON.stringify(before, null, 2));
+      await writeAutosave(serializeRecoveryFile(after, currentDocumentState.current.filePath));
+      isReplacingDocument.current = true;
+      projectVersionsRef.current = after; setProjectVersions(after);
+      replaceEditorDocumentWithoutHistory(editor, after.content);
+      ensureScenarioBlockIds(editor);
+      coverPageRef.current = after.coverPage; setCoverPage(after.coverPage); setCoverDraft(after.coverPage);
+      coverPageHiddenRef.current = after.coverPageHidden; setCoverPageHidden(after.coverPageHidden);
+      commentsRef.current = after.comments; setComments(after.comments); setActiveCommentId(null);
+      syncProjectCommentMarks(editor, after.comments);
+      setSmartType(null); setAiTarget(null); setAiPromptMenuOpen(false); setTransitionMenuOpen(false);
+      setCommentComposerOpen(false); setCoverMenuOpen(false);
+      const nextState = { ...currentDocumentState.current, isDirty: true, status: `Version « ${after.versions.find(v => v.id === after.activeVersionId)!.name} » — copie de récupération enregistrée` };
+      currentDocumentState.current = nextState; setDocumentState(nextState);
+      refreshEditorState(editor);
+      setVersionDialog(null);
+      cloudProjectRuntime.metadataChanged();
+    } catch (error) {
+      setVersionError(error instanceof Error ? error.message : 'Changement impossible. La version actuelle est conservée.');
+    } finally {
+      isReplacingDocument.current = false; versionTransition.current = false; setVersionBusy(false);
+      editor.setEditable(!cloudReadOnly);
+    }
+  }
+
+  function chooseVersion(value: string) {
+    if (value === 'initial' || value === projectVersionsRef.current?.activeVersionId) return;
+    if (!value.startsWith('action:')) { void changeProjectVersion(value); return; }
+    const action = value.slice(7) as NonNullable<typeof versionDialog>;
+    const current = projectVersionsRef.current;
+    setVersionName(action === 'rename' ? current?.versions.find(v => v.id === current.activeVersionId)?.name ?? 'Version 1'
+      : current ? nextVersionName(current) : 'Version 2');
+    setVersionSource(action === 'restore' ? '' : current?.activeVersionId ?? ''); setVersionError(''); setVersionDialog(action);
+  }
 
   const rememberCustomPdfLanguage = useCallback((value: string): string => {
     const language = normalizePdfLanguage(value);
@@ -1721,11 +1802,14 @@ function AuthenticatedApp() {
   );
 
   const createNewDocument = useCallback(async () => {
-    if (!editor || !(await askToDiscardChanges())) {
+    if (!editor || versionTransition.current || documentSavePending.current || documentLoadPending.current) {
       return;
     }
-
+    documentLoadPending.current = true;
+    try {
+    if (!(await askToDiscardChanges())) return;
     await cloudProjectRuntime.close();
+    projectVersionsRef.current = null; setProjectVersions(null);
     editor.setEditable(true);
 
     isReplacingDocument.current = true;
@@ -1759,14 +1843,16 @@ function AuthenticatedApp() {
     } catch {
       setDocumentState((previous) => ({ ...previous, status: "Autosave indisponible" }));
     }
+    } finally { documentLoadPending.current = false; }
   }, [askToDiscardChanges, createDocument, editor, refreshEditorState]);
 
   const openDocumentAtPath = useCallback(async (path: string) => {
-    if (!editor || !(await askToDiscardChanges())) {
+    if (!editor || versionTransition.current || documentSavePending.current || documentLoadPending.current) {
       return;
     }
-
+    documentLoadPending.current = true;
     try {
+      if (!(await askToDiscardChanges())) return;
       const document = parseScenarioFile(await readScenario(path));
       replaceDocument(document, path);
       await rememberRecentScenario(path);
@@ -1780,7 +1866,7 @@ function AuthenticatedApp() {
       }
     } catch (error) {
       await showError(error);
-    }
+    } finally { documentLoadPending.current = false; }
   }, [askToDiscardChanges, editor, persistRecovery, rememberRecentScenario, replaceDocument, showError]);
 
   const openDocument = useCallback(async () => {
@@ -1842,12 +1928,17 @@ function AuthenticatedApp() {
         const recovery = parseRecoveryFile(contents);
         let documentToRestore = recovery.document;
 
-        // Un projet connu doit toujours être rouvert depuis son vrai fichier
-        // .scenario. La récupération ne sert que si ce fichier a disparu ou
-        // pour un nouveau document qui n'a encore jamais été enregistré.
+        // Never silently replace a newer recovery (including newly created
+        // versions) with an older manual save. Preserve both when identities differ.
         if (recovery.filePath) {
           try {
-            documentToRestore = parseScenarioFile(await readScenario(recovery.filePath));
+            const disk = parseScenarioFile(await readScenario(recovery.filePath));
+            const sameProject = recovery.document.projectId && disk.projectId
+              ? recovery.document.projectId === disk.projectId : recovery.document.title === disk.title;
+            if (!sameProject || !(Date.parse(recovery.document.savedAt) > Date.parse(disk.savedAt))) {
+              await writeBackup(JSON.stringify(recovery.document, null, 2));
+              documentToRestore = disk;
+            }
           } catch {
             // Le fichier peut avoir été déplacé ou supprimé : l'autosave reste
             // alors le meilleur moyen de restaurer le travail de l'auteur.
@@ -1855,6 +1946,9 @@ function AuthenticatedApp() {
         }
 
         replaceDocument(documentToRestore, recovery.filePath);
+        if (documentToRestore === recovery.document && recovery.filePath) {
+          setDocumentState(previous => ({ ...previous, isDirty: true, status: 'Récupération restaurée — enregistrez le projet' }));
+        }
       })
       .catch(() => {
         setDocumentState((previous) => ({
@@ -1906,6 +2000,7 @@ function AuthenticatedApp() {
     }
 
     const timeout = window.setTimeout(() => {
+      if (versionTransition.current) return;
       void persistRecovery(editor, documentState.title, documentState.filePath)
         .then(() => {
           setDocumentState((previous) => ({
@@ -1928,6 +2023,12 @@ function AuthenticatedApp() {
     documentState.title,
     editor,
     persistRecovery,
+    versionBusy,
+    projectVersions,
+    documentRevision,
+    comments,
+    coverPage,
+    coverPageHidden,
   ]);
 
   useEffect(() => {
@@ -1994,7 +2095,7 @@ function AuthenticatedApp() {
 
     let unlisten: (() => void) | undefined;
     void listen("scenario-close-requested", async () => {
-          if (closeInProgress.current) {
+          if (closeInProgress.current || versionTransition.current || documentSavePending.current || documentLoadPending.current) {
             return;
           }
 
@@ -2051,10 +2152,11 @@ function AuthenticatedApp() {
               closeInProgress.current = false;
               return;
             }
-          } else if (currentDocumentState.current.filePath === null) {
-            // « Non, quitter » doit réellement abandonner un brouillon sans
-            // fichier, au lieu de le restaurer silencieusement au prochain lancement.
+          } else {
+            // An explicit discard must not be restored as a newer autosave.
+            // Keep a recoverable backup of all branches before clearing it.
             try {
+              await writeBackup(JSON.stringify(createDocument(editor, currentDocumentState.current.title), null, 2));
               await clearRecovery();
             } catch (error) {
               await showError(error);
@@ -2081,6 +2183,8 @@ function AuthenticatedApp() {
 
   useEffect(() => {
     const handleShortcut = (event: KeyboardEvent) => {
+      if (versionTransition.current) { event.preventDefault(); return; }
+      if (document.querySelector('[aria-label="Versions du projet"]')) return;
       if (event.ctrlKey && event.altKey && event.key.toLocaleLowerCase("fr-FR") === "m") {
         event.preventDefault();
         void openCommentComposer();
@@ -2288,6 +2392,7 @@ function AuthenticatedApp() {
     <div
       ref={appShellRef}
       className="app-shell theme-dark"
+      onKeyDownCapture={event => { if (versionTransition.current) { event.preventDefault(); event.stopPropagation(); } }}
       onMouseMove={(event) => {
         aiPointerPosition.current = {
           clientX: event.clientX,
@@ -2563,6 +2668,18 @@ function AuthenticatedApp() {
               refreshEditorState(editor);
             }
           }}>{SCENARIO_ELEMENT_TYPES.map(type => <option value={type} key={type}>{getScenarioElementLabel(type)}</option>)}</UiSelect>
+        <UiSelect className="project-version-control" aria-label="Version" value={projectVersions?.activeVersionId ?? 'initial'}
+          title={cloudVersionLocked ? 'Versions locales uniquement : une mise à jour du serveur est nécessaire pour les projets cloud.' : 'Choisir ou créer une version de ce projet'}
+          disabled={versionBusy || cloudReadOnly || cloudVersionLocked || aiBusy || pdfExportBusy || pdfImportBusy || commentComposerOpen}
+          onChange={event => chooseVersion(event.target.value)}>
+          {projectVersions ? projectVersions.versions.filter(v => !v.deletedAt).map(v => <option key={v.id} value={v.id}>Version : {v.name}</option>)
+            : <option value="initial">Version : Version 1</option>}
+          <option value="action:duplicate">Dupliquer une version…</option>
+          <option value="action:blank">Créer une version vierge…</option>
+          <option value="action:rename">Renommer cette version…</option>
+          <option value="action:delete" disabled={!projectVersions || projectVersions.versions.filter(v => !v.deletedAt).length < 2}>Supprimer cette version…</option>
+          <option value="action:restore" disabled={!projectVersions?.versions.some(v => v.deletedAt)}>Restaurer une version…</option>
+        </UiSelect>
         <div className="document-status">
           <CloudProjectStatus onOpen={() => setCloudProjectsOpen(true)} />
           <span className="document-save-status" title={documentState.status}>{documentState.status}</span>
@@ -2570,6 +2687,49 @@ function AuthenticatedApp() {
           <button className="zoom-reset" type="button" onClick={resetZoom} title="Taille réelle (Ctrl+0)" aria-label={`Zoom ${zoom} %, rétablir la taille réelle`}>{zoom} %</button>
         </div>
       </div>
+
+      {versionError && !versionDialog && <div className="modal-backdrop"><section className="pdf-export-panel" role="alertdialog" aria-modal="true" aria-label="Version inchangée">
+        <h2>Version inchangée</h2><p role="alert">{versionError}</p>
+        <div className="panel-actions"><button autoFocus type="button" onClick={() => setVersionError('')}>Fermer</button></div>
+      </section></div>}
+      {versionBusy && !versionDialog && <div className="modal-backdrop"><section className="pdf-export-panel" role="status">Enregistrement de la version en cours…</section></div>}
+      {versionDialog && <div className="modal-backdrop">
+        <section className="pdf-export-panel project-version-dialog" role="dialog" aria-modal="true" aria-label="Versions du projet"
+          onKeyDown={event => {
+            event.stopPropagation();
+            if (event.key === 'Escape' && !versionBusy) { setVersionDialog(null); setVersionError(''); }
+            if (event.key === 'Tab') {
+              const controls = Array.from(event.currentTarget.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled)')).filter(el => el.tabIndex >= 0);
+              const first = controls[0], last = controls[controls.length - 1];
+              if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
+              if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
+            }
+          }}>
+          <header className="panel-header"><h2>{versionDialog === 'delete' ? 'Supprimer cette version ?' : versionDialog === 'restore' ? 'Restaurer une version' : versionDialog === 'rename' ? 'Renommer la version' : 'Créer une version'}</h2></header>
+          <p>Projet : {documentState.title}</p>
+          <form onSubmit={event => { event.preventDefault(); void changeProjectVersion(versionDialog, versionName, versionSource); }}>
+            {['duplicate', 'blank', 'rename'].includes(versionDialog) && <label>Nom de la version
+              <input autoFocus value={versionName} maxLength={80} required disabled={versionBusy} onChange={event => setVersionName(event.target.value)} />
+            </label>}
+            {versionDialog === 'duplicate' && <label>Version à dupliquer
+              <UiSelect aria-label="Version à dupliquer" value={versionSource} onChange={event => setVersionSource(event.target.value)} disabled={versionBusy}>
+                {projectVersions ? projectVersions.versions.filter(v => !v.deletedAt).map(v => <option key={v.id} value={v.id}>{v.name}</option>) : <option value="">Version 1</option>}
+              </UiSelect>
+            </label>}
+            {versionDialog === 'blank' && <p>La nouvelle version sera vide, sans commentaires ni page de garde. Les autres versions seront conservées.</p>}
+            {versionDialog === 'delete' && <p>« {projectVersions?.versions.find(v => v.id === projectVersions.activeVersionId)?.name} » sera retirée du menu. Son contenu restera récupérable dans ce projet.</p>}
+            {versionDialog === 'restore' && <label>Version supprimée
+              <UiSelect aria-label="Version supprimée" value={versionSource} required onChange={event => setVersionSource(event.target.value)}>
+                <option value="">Choisir une version</option>
+                {projectVersions?.versions.filter(v => v.deletedAt).map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
+              </UiSelect>
+            </label>}
+            {versionError && <p role="alert">{versionError}</p>}
+            <div className="panel-actions"><button type="button" disabled={versionBusy} onClick={() => { setVersionDialog(null); setVersionError(''); }}>Annuler</button>
+              <button type="submit" disabled={versionBusy || (versionDialog === 'restore' && !projectVersions?.versions.some(v => v.deletedAt && v.id === versionSource))}>{versionBusy ? 'Enregistrement…' : versionDialog === 'delete' ? 'Supprimer la version' : versionDialog === 'restore' ? 'Restaurer' : 'Enregistrer'}</button></div>
+          </form>
+        </section>
+      </div>}
 
       {commentActionTarget && !commentComposerOpen && !cloudReadOnly && (
         <button

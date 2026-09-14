@@ -341,8 +341,12 @@ export function AccountLicensePanel({
                 <h3>Fonctionnalités de votre offre</h3>
                 <span>{displayedRights.filter((right) => right.enabled).length} actives</span>
               </div>
-              <ul className="account-rights-grid">
-                {displayedRights.map((right) => (
+              {(['Gratuite', 'Auteur', 'Studio', undefined] as const).map(offer => {
+                const rights = displayedRights.filter(right => right.offer === offer);
+                return rights.length > 0 && <div key={offer ?? 'additional'}>
+                <h4>{offer ? `Offre ${offer}` : 'Fonctionnalités supplémentaires'}</h4>
+                <ul className="account-rights-grid">
+                {rights.map((right) => (
                   <li key={right.id} className={right.enabled ? 'is-enabled' : 'is-disabled'}>
                     <span className="account-right-icon">
                       <UiIcon name={right.enabled ? 'check' : 'x'} />
@@ -352,6 +356,8 @@ export function AccountLicensePanel({
                   </li>
                 ))}
               </ul>
+              </div>;
+              })}
             </section>
 
             <div className="account-management-grid">
