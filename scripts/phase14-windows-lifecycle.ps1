@@ -9,6 +9,7 @@ $taskExe = Join-Path $taskInstall 'scenario-app.exe'
 $taskUninstaller = Join-Path $taskInstall 'uninstall.exe'
 if (Test-Path -LiteralPath $taskExe) { throw 'The runner already has Senario installed.' }
 $env:SENARIO_TEST_VAULT_SCOPE = 'phase14-test-' + [guid]::NewGuid().ToString()
+$taskVaultSeeded = $false
 function Test-Vault([string]$Mode) {
   $env:SENARIO_TEST_VAULT_MODE = $Mode
   cargo test --manifest-path src-tauri/Cargo.toml native_device_lifecycle -- --ignored --nocapture
@@ -30,6 +31,7 @@ try {
   Verify-Version '0.1.11'
   node scripts/phase14-native-e2e.mjs seed
   if ($LASTEXITCODE -ne 0) { throw 'Legacy native app test failed' }
+  $taskVaultSeeded = $true
   Test-Vault 'seed'
   # User documents live outside the installation; use a synthetic sentinel only.
   $taskDocument = Join-Path $taskRoot 'preserved.scenario'
@@ -54,4 +56,4 @@ try {
   Test-Vault 'verify'
   if ((Get-FileHash -LiteralPath $taskDocument -Algorithm SHA256).Hash -ne $taskBefore) { throw 'Document changed during reinstall' }
   Write-Output 'PASS: clean 0.1.11 installation, upgrade to 0.1.12, uninstall, reinstall, system-vault identity and refresh token preserved, document unchanged.'
-} finally { Test-Vault 'cleanup' }
+} finally { if ($taskVaultSeeded) { Test-Vault 'cleanup' } }

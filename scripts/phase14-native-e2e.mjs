@@ -1,6 +1,6 @@
 // Real packaged WebView2 + Rust commands on an ephemeral Windows CI runner.
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
+import { spawn, execFileSync } from 'node:child_process';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 assert.equal(process.env.GITHUB_ACTIONS, 'true', 'Use an isolated CI runner');
@@ -11,10 +11,15 @@ await mkdir(root, { recursive: true });
 const statePath = join(root, 'native-state.json');
 const scope = 'https://scenario-commercial-api-preproduction.ore-picard.workers.dev|https://zblnsdyaoljnezxdidtx.supabase.co';
 const profile = join(root, mode === 'reinstalled' ? 'fresh-webview' : 'webview');
+// WebView2 150+ ignores environment overrides for elevated hosts (CI runners).
+// These policies affect only our executable on the disposable runner, never users.
+const policy = 'HKLM\\SOFTWARE\\Policies\\Microsoft\\Edge\\WebView2\\';
+for (const [name, value] of [['AdditionalBrowserArguments', '--remote-debugging-port=19314 --remote-debugging-address=127.0.0.1'], ['UserDataFolder', profile]]) {
+  execFileSync('reg.exe', ['add', policy + name, '/v', 'scenario-app.exe', '/t', 'REG_SZ', '/d', value, '/f', '/reg:64'], { windowsHide: true });
+}
 const child = spawn(join(process.env.LOCALAPPDATA, 'senario Beta', 'scenario-app.exe'), [], {
   windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'],
-  env: { ...process.env, WEBVIEW2_USER_DATA_FOLDER: profile,
-    WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: '--remote-debugging-port=19314 --remote-debugging-address=127.0.0.1 --no-sandbox' },
+  env: { ...process.env },
 });
 child.stdout.on('data', chunk => process.stdout.write(chunk));
 child.stderr.on('data', chunk => process.stderr.write(chunk));
@@ -23,13 +28,13 @@ child.on('exit', (code, signal) => console.log('Native process exit:', code, sig
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 let socket;
 try {
-  let target;
+  let target, diagnostic;
   for (let i = 0; i < 300; i++) {
-    try { target = (await (await fetch('http://127.0.0.1:19314/json/list')).json()).find(t => t.type === 'page' && t.webSocketDebuggerUrl); } catch {}
+    try { const targets = await (await fetch('http://127.0.0.1:19314/json/list')).json(); diagnostic = JSON.stringify(targets); target = targets.find(t => t.type === 'page' && t.webSocketDebuggerUrl); } catch (error) { diagnostic = error.message; }
     if (target) break;
     await delay(300);
   }
-  assert.ok(target, `Packaged application must expose its WebView (process exit ${child.exitCode})`);
+  assert.ok(target, `Packaged application must expose its WebView (process exit ${child.exitCode}, ${diagnostic})`);
   socket = new WebSocket(target.webSocketDebuggerUrl);
   await new Promise((resolve, reject) => { socket.onopen = resolve; socket.onerror = reject; });
   let id = 0;
@@ -66,4 +71,7 @@ try {
   socket?.close();
   child.kill();
   await delay(1500);
+  for (const name of ['AdditionalBrowserArguments', 'UserDataFolder']) {
+    execFileSync('reg.exe', ['delete', policy + name, '/v', 'scenario-app.exe', '/f', '/reg:64'], { windowsHide: true });
+  }
 }
