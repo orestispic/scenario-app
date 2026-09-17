@@ -2,10 +2,12 @@ import { UiTextarea } from './ui/UiTextarea';
 import { AiBudgetUsage } from './commercial/AiBudgetUsage';
 import { UiSelect } from './ui/UiSelect';
 import { ensureVersionedProject, captureVersion, selectProjectVersion, addProjectVersion, deleteProjectVersion,
-  renameProjectVersion, restoreProjectVersion, nextVersionName, type VersionedProject } from './document/projectVersions';
+  renameProjectVersion, nextVersionName, type VersionedProject } from './document/projectVersions';
+import { ProjectVersionControl } from './document/ProjectVersionControl';
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   type CSSProperties,
@@ -51,7 +53,6 @@ import {
   reconcileCommentAnchors,
   removeCommentMark,
   syncProjectCommentMarks,
-  type CommentAnchor,
   type CommentThread,
 } from "./editor/comments";
 import {
@@ -75,7 +76,10 @@ import {
 import { clientPointToOverlay, clientRectToOverlay } from "./editor/overlayCoordinates";
 import {
   choosePdfToSave,
+  chooseWorkspacePdfToSave,
   choosePdfToOpen,
+  registerBrowserPdf,
+  chooseInterchangeToOpen,
   chooseScenarioToOpen,
   chooseScenarioToSave,
   clearRecovery,
@@ -86,9 +90,16 @@ import {
   writeAutosave,
   writeBackup,
   writePdf,
+  saveInterchangeFile,
   writeScenario,
   type RecentScenario,
 } from "./document/persistence";
+import {
+  INTERCHANGE_FORMATS,
+  exportInterchange,
+  importInterchange,
+  type InterchangeFormat,
+} from './document/interchange';
 import {
   createScenarioFile,
   createEmptyCoverPage,
@@ -119,18 +130,43 @@ import {
 import { AccountLicensePanel } from "./commercial/AccountLicensePanel";
 import { CommercialHttpError } from "./commercial/authenticatedApi";
 import { AuthSessionError } from "./commercial/auth";
+import { hasActiveEntitlement } from './commercial/offlineLicense';
 import { OfflineLicenseStatus } from './commercial/OfflineLicenseStatus';
 import { CloudProjectsPanel, CloudProjectStatus } from './commercial/CloudProjectsPanel';
 import { resolveProjectCommentAnchors } from './commercial/projectMetadataClient';
 import { CommentMargin } from './editor/CommentMargin';
 import { SceneTimeline } from './editor/SceneTimeline';
+import { SceneWhiteboard } from './editor/SceneWhiteboard';
+import { SceneBreakdown } from './editor/SceneBreakdown';
+import { getProjectBreakdowns, updateScenarioBreakdown, updateScenarioBreakdowns, type SceneBreakdown as SceneBreakdownData } from './editor/breakdownModel';
+import { TechnicalBreakdown } from './editor/TechnicalBreakdown';
+import { WorkspacePdfExportDialog, type WorkspacePdfExportRequest } from './editor/WorkspacePdfExportDialog';
+import {
+  getScenarioCharacters,
+  getTechnicalBreakdown,
+  updateTechnicalBreakdown,
+  type TechnicalBreakdown as TechnicalBreakdownData,
+} from './editor/technicalBreakdownModel';
 import { getDocumentStatistics } from './editor/documentStatistics';
 import {
+  addScenarioAct,
+  addScenarioScene,
+  deleteScenarioAct,
   deleteScenarioScene,
+  duplicateScenarioScene,
+  ensureScenarioSceneActs,
+  getScenarioActDescriptions,
   getScenarioSceneAtPosition,
+  getScenarioActCount,
   getScenarioScenes,
+  MAX_SCENARIO_ACT_COUNT,
   moveScenarioScene,
+  moveScenarioSceneGroup,
+  updateScenarioActDescription,
+  updateScenarioScene,
+  type ScenarioAct,
   type ScenarioScene,
+  type SceneWhiteboardMetadata,
 } from './editor/sceneTimelineModel';
 import { cloudProjectRuntime, type CloudProjectEditor, type OpenProjectState } from './commercial/cloudProjectRuntime';
 import { collaborationTransaction } from './editor/collaborationTransaction';
@@ -153,6 +189,9 @@ const TEXT_REPLACEMENTS_STORAGE_KEY = "scenario-text-replacements";
 const TEXT_REPLACEMENTS_SEEDED_KEY = "scenario-text-replacements-seeded-v4";
 const TEXT_REPLACEMENTS_ENABLED_KEY = "scenario-text-replacements-enabled";
 const PDF_CUSTOM_LANGUAGES_STORAGE_KEY = "scenario-pdf-custom-languages";
+// Bêta locale : toutes les fonctions sont ouvertes pour pouvoir tester les
+// parcours complets sans modifier l'offre réellement attribuée à un compte.
+// Remettre à false lors du retour des limites commerciales.
 
 function readLocalSetting(key: string): string | null {
   try {
@@ -238,6 +277,9 @@ interface PdfExportDraft {
   translationLanguage: string;
   customTranslationLanguage: string;
 }
+
+type ExportFormat = "pdf" | InterchangeFormat;
+type FileSubmenu = "import" | "export" | null;
 
 const PDF_TRANSLATION_LANGUAGES = [
   "anglais",
@@ -387,6 +429,7 @@ function App() {
 }
 
 function AuthenticatedApp() {
+  const [licenseState, setLicenseState] = useState(() => offlineLicense.state);
   const [currentType, setCurrentType] = useState<ScenarioElementType>(
     DEFAULT_SCENARIO_ELEMENT_TYPE,
   );
@@ -394,11 +437,10 @@ function AuthenticatedApp() {
   const [pageCount, setPageCount] = useState(1);
   const [currentPage, setCurrentPage] = useState(1);
   const [fileMenuOpen, setFileMenuOpen] = useState(false);
+  const [fileSubmenu, setFileSubmenu] = useState<FileSubmenu>(null);
   const [viewMenuOpen, setViewMenuOpen] = useState(false);
-  const [commentComposerOpen, setCommentComposerOpen] = useState(false);
   const [commentActionTarget, setCommentActionTarget] = useState<CommentActionTarget | null>(null);
-  const [commentAnchor, setCommentAnchor] = useState<CommentAnchor | null>(null);
-  const [commentDraft, setCommentDraft] = useState("");
+  const [commentEditingRequestId, setCommentEditingRequestId] = useState<string | null>(null);
   const [activeCommentId, setActiveCommentId] = useState<string | null>(null);
   const [comments, setComments] = useState<CommentThread[]>([]);
   const [cloudReadOnly, setCloudReadOnly] = useState(false);
@@ -406,6 +448,9 @@ function AuthenticatedApp() {
   const [findReplaceOpen, setFindReplaceOpen] = useState(false);
   const [pdfExportOpen, setPdfExportOpen] = useState(false);
   const [pdfExportBusy, setPdfExportBusy] = useState(false);
+  const [workspacePdfExportKind, setWorkspacePdfExportKind] = useState<'breakdown' | 'technical' | null>(null);
+  const [workspacePdfExportBusy, setWorkspacePdfExportBusy] = useState(false);
+  const [exportFormat, setExportFormat] = useState<ExportFormat>("pdf");
   const [pdfImportOpen, setPdfImportOpen] = useState(false);
   const [pdfImportPath, setPdfImportPath] = useState<string | null>(null);
   const [pdfImportBusy, setPdfImportBusy] = useState(false);
@@ -470,6 +515,9 @@ function AuthenticatedApp() {
   const [aiBusy, setAiBusy] = useState(false);
   const [accountPanelOpen, setAccountPanelOpen] = useState(false);
   const [cloudProjectsOpen, setCloudProjectsOpen] = useState(false);
+  const [whiteboardOpen, setWhiteboardOpen] = useState(false);
+  const [breakdownOpen, setBreakdownOpen] = useState(false);
+  const [technicalBreakdownOpen, setTechnicalBreakdownOpen] = useState(false);
   const [scenarioContextMenu, setScenarioContextMenu] =
     useState<ScenarioContextMenuState | null>(null);
   const [zoom, setZoom] = useState(() => {
@@ -493,15 +541,18 @@ function AuthenticatedApp() {
   const [activeSceneId, setActiveSceneId] = useState<string | null>(null);
   const documentSavePending = useRef(false);
   const [versionBusy, setVersionBusy] = useState(false);
-  const [versionDialog, setVersionDialog] = useState<'duplicate' | 'blank' | 'rename' | 'delete' | 'restore' | null>(null);
-  const [versionName, setVersionName] = useState('');
-  const [versionSource, setVersionSource] = useState('');
   const [versionError, setVersionError] = useState('');
   const [versionCloudState, setVersionCloudState] = useState<OpenProjectState>({project:null,status:'closed',message:''});
+  const canUseProfessionalFormats = hasActiveEntitlement(licenseState, 'pro_formats');
+  const canUseProjectVersions = hasActiveEntitlement(licenseState, 'scenario_versions');
+  const canUseSceneTimeline = hasActiveEntitlement(licenseState, 'scene_cards');
   const cloudVersionLocked = versionCloudState.status === 'loading' || Boolean(versionCloudState.project && !versionCloudState.branches?.length);
   const listedProjectVersions = versionCloudState.project ? versionCloudState.branches ?? [] : projectVersions?.versions ?? [];
   const listedActiveVersionId = versionCloudState.project ? versionCloudState.activeBranchId : projectVersions?.activeVersionId;
   const paginationFrame = useRef<number | null>(null);
+  const scenarioWorkspaceVisibleRef = useRef(false);
+  scenarioWorkspaceVisibleRef.current = initialRecoveryFinished
+    && !cloudProjectsOpen && !whiteboardOpen && !breakdownOpen && !technicalBreakdownOpen;
   const isReplacingDocument = useRef(false);
   const recoveryWasChecked = useRef(false);
   const launchedScenarioWasChecked = useRef(false);
@@ -520,10 +571,17 @@ function AuthenticatedApp() {
   const textReplacementsRef = useRef(textReplacements);
   const textReplacementsEnabledRef = useRef(textReplacementsEnabled);
   const commentsRef = useRef(comments);
-  const commentInput = useRef<HTMLTextAreaElement | null>(null);
   const appShellRef = useRef<HTMLDivElement | null>(null);
   const collaborationListeners = useRef(new Set<(document: JSONContent) => void>());
+  useEffect(() => offlineLicense.subscribe(() => setLicenseState(offlineLicense.state)), []);
   useEffect(() => cloudProjectRuntime.subscribe(setVersionCloudState), []);
+  useEffect(() => {
+    let wasAuthenticated = false;
+    return sessions.subscribe(authenticated => {
+      if (wasAuthenticated && !authenticated) setCloudProjectsOpen(false);
+      wasAuthenticated = authenticated;
+    });
+  }, []);
 
   useEffect(() => {
     if (!pdfImportOpen) return;
@@ -601,13 +659,14 @@ function AuthenticatedApp() {
   }, []);
 
   const refreshPagination = useCallback((editor: Editor) => {
+    if (!scenarioWorkspaceVisibleRef.current) return;
     if (paginationFrame.current !== null) {
       cancelAnimationFrame(paginationFrame.current);
     }
 
     paginationFrame.current = requestAnimationFrame(() => {
       paginationFrame.current = null;
-      if (editor.isDestroyed) {
+      if (editor.isDestroyed || !scenarioWorkspaceVisibleRef.current) {
         return;
       }
       const selectionDom = editor.view.domAtPos(editor.state.selection.from);
@@ -780,6 +839,11 @@ function AuthenticatedApp() {
       }
     },
   });
+
+  useEffect(() => {
+    if (!whiteboardOpen || !editor || editor.isDestroyed || !editor.isEditable) return;
+    ensureScenarioSceneActs(editor);
+  }, [documentRevision, editor, whiteboardOpen]);
 
   // Les suggestions sont affichées en position fixe. Elles doivent donc être
   // recalculées quand la feuille défile, même si le curseur reste immobile.
@@ -1174,70 +1238,96 @@ function AuthenticatedApp() {
     ],
   );
 
-  async function changeProjectVersion(action: string, name = '', sourceId = ''): Promise<void> {
+  useEffect(() => {
+    if (!editor || isTauri()) return;
+    const saveRecovery = () => {
+      const state = currentDocumentState.current;
+      if (!state.isDirty || versionTransition.current) return;
+      void persistRecovery(editor, state.title, state.filePath).catch(() => {
+        setDocumentState(previous => ({...previous,status:'Copie locale indisponible — téléchargez votre projet avant de fermer.'}));
+      });
+    };
+    const beforeUnload = (event: BeforeUnloadEvent) => {
+      const pending = versionCloudState.project ? cloudProjectRuntime.hasUnsyncedChanges() : currentDocumentState.current.isDirty;
+      if (!pending) return;
+      saveRecovery();
+      event.preventDefault();
+      event.returnValue = '';
+    };
+    const visibility = () => { if (document.visibilityState === 'hidden') saveRecovery(); };
+    window.addEventListener('beforeunload', beforeUnload);
+    document.addEventListener('visibilitychange', visibility);
+    return () => {
+      window.removeEventListener('beforeunload', beforeUnload);
+      document.removeEventListener('visibilitychange', visibility);
+    };
+  }, [editor, persistRecovery, versionCloudState.project]);
+
+  async function changeProjectVersion(action: string, name = '', sourceId = ''): Promise<boolean> {
+    if (!canUseProjectVersions && (!versionCloudState.project || ['duplicate','blank','rename','delete','restore'].includes(action))) {
+      setVersionError('La gestion des versions est disponible avec l’offre Studio.');
+      return false;
+    }
     if (!editor || closeInProgress.current || versionTransition.current || documentSavePending.current || documentLoadPending.current || cloudVersionLocked || (cloudReadOnly && (!versionCloudState.project || ['duplicate','blank','rename','delete','restore'].includes(action)))
-      || aiBusy || pdfImportBusy || pdfExportBusy) return;
+      || aiBusy || pdfImportBusy || pdfExportBusy) return false;
     // A conflicted/empty comment draft must not be unmounted and silently lost.
     if (document.querySelector('.margin-note textarea')) {
       setVersionError('Enregistrez ou annulez le commentaire en cours avant de changer de version.');
-      return;
+      return false;
     }
     versionTransition.current = true; setVersionBusy(true); setVersionError('');
     editor.setEditable(false);
     try {
       if (versionCloudState.project) {
         await cloudProjectRuntime.changeVersion(action, name, sourceId);
-        setVersionDialog(null);
-        return;
+        return true;
       }
       const live = createDocument(editor, currentDocumentState.current.title);
       const before = ensureVersionedProject(live);
+      const targetId = sourceId && sourceId !== 'initial' ? sourceId : before.activeVersionId;
       const after = action === 'duplicate' ? addProjectVersion(before, name, sourceId || before.activeVersionId)
         : action === 'blank' ? addProjectVersion(before, name, null)
-        : action === 'rename' ? renameProjectVersion(before, before.activeVersionId, name)
-        : action === 'delete' ? deleteProjectVersion(before, before.activeVersionId)
-        : action === 'restore' ? restoreProjectVersion(before, sourceId)
+        : action === 'rename' ? renameProjectVersion(before, targetId, name)
+        : action === 'delete' ? deleteProjectVersion(before, targetId)
         : selectProjectVersion(before, action);
       after.savedAt = new Date().toISOString();
       // Never switch the editor until both outgoing backup and complete new bundle are durable.
       await writeBackup(JSON.stringify(before, null, 2));
       await writeAutosave(serializeRecoveryFile(after, currentDocumentState.current.filePath));
-      isReplacingDocument.current = true;
+      const activeDocumentChanged = before.activeVersionId !== after.activeVersionId;
+      isReplacingDocument.current = activeDocumentChanged;
       projectVersionsRef.current = after; setProjectVersions(after);
-      replaceEditorDocumentWithoutHistory(editor, after.content);
-      ensureScenarioBlockIds(editor);
-      coverPageRef.current = after.coverPage; setCoverPage(after.coverPage); setCoverDraft(after.coverPage);
-      coverPageHiddenRef.current = after.coverPageHidden; setCoverPageHidden(after.coverPageHidden);
-      commentsRef.current = after.comments; setComments(after.comments); setActiveCommentId(null);
-      syncProjectCommentMarks(editor, after.comments);
-      setSmartType(null); setAiTarget(null); setAiPromptMenuOpen(false); setTransitionMenuOpen(false);
-      setCommentComposerOpen(false); setCoverMenuOpen(false);
+      if (activeDocumentChanged) {
+        replaceEditorDocumentWithoutHistory(editor, after.content);
+        ensureScenarioBlockIds(editor);
+        coverPageRef.current = after.coverPage; setCoverPage(after.coverPage); setCoverDraft(after.coverPage);
+        coverPageHiddenRef.current = after.coverPageHidden; setCoverPageHidden(after.coverPageHidden);
+        commentsRef.current = after.comments; setComments(after.comments); setActiveCommentId(null);
+        syncProjectCommentMarks(editor, after.comments);
+        setSmartType(null); setAiTarget(null); setAiPromptMenuOpen(false); setTransitionMenuOpen(false);
+        setCommentEditingRequestId(null); setCoverMenuOpen(false);
+      }
       const nextState = { ...currentDocumentState.current, isDirty: true, status: `Version « ${after.versions.find(v => v.id === after.activeVersionId)!.name} » — copie de récupération enregistrée` };
       currentDocumentState.current = nextState; setDocumentState(nextState);
       refreshEditorState(editor);
-      setVersionDialog(null);
       cloudProjectRuntime.metadataChanged();
+      return true;
     } catch (error) {
       setVersionError(error instanceof Error ? error.message : 'Changement impossible. La version actuelle est conservée.');
+      return false;
     } finally {
       isReplacingDocument.current = false; versionTransition.current = false; setVersionBusy(false);
       if (!versionCloudState.project) editor.setEditable(!cloudReadOnly);
     }
   }
 
-  function chooseVersion(value: string) {
-    if (value === 'initial' || value === listedActiveVersionId) return;
-    if (!value.startsWith('action:')) { void changeProjectVersion(value); return; }
-    const action = value.slice(7) as NonNullable<typeof versionDialog>;
+  function nextAvailableVersionName(): string {
     const current = projectVersionsRef.current;
     if (versionCloudState.project) {
       let n = 1; while (listedProjectVersions.some(v => !v.deletedAt && v.name.toLowerCase() === `version ${n}`)) n++;
-      setVersionName(action === 'rename' ? listedProjectVersions.find(v => v.id === listedActiveVersionId)?.name ?? '' : `Version ${n}`);
-      setVersionSource(action === 'restore' ? '' : listedActiveVersionId ?? ''); setVersionError(''); setVersionDialog(action); return;
+      return `Version ${n}`;
     }
-    setVersionName(action === 'rename' ? current?.versions.find(v => v.id === current.activeVersionId)?.name ?? 'Version 1'
-      : current ? nextVersionName(current) : 'Version 2');
-    setVersionSource(action === 'restore' ? '' : current?.activeVersionId ?? ''); setVersionError(''); setVersionDialog(action);
+    return current ? nextVersionName(current) : 'Version 2';
   }
 
   const rememberCustomPdfLanguage = useCallback((value: string): string => {
@@ -1282,10 +1372,22 @@ function AuthenticatedApp() {
     );
   }, []);
 
-  const openPdfExport = useCallback(() => {
+  const openExportDialog = useCallback((format: ExportFormat) => {
+    if (format !== "pdf" && !canUseProfessionalFormats) {
+      setFileMenuOpen(false);
+      setFileSubmenu(null);
+      setAccountPanelOpen(true);
+      setDocumentState(previous => ({
+        ...previous,
+        status: "Les exports professionnels sont disponibles avec l’offre Studio",
+      }));
+      return;
+    }
     setFileMenuOpen(false);
+    setFileSubmenu(null);
     setViewMenuOpen(false);
     setCoverMenuOpen(false);
+    setExportFormat(format);
     setPdfExportDraft({
       includeCoverPage: hasCoverPageContent(coverPage),
       includeSceneNumbers: true,
@@ -1294,14 +1396,44 @@ function AuthenticatedApp() {
       customTranslationLanguage: "",
     });
     setPdfExportOpen(true);
-  }, [coverPage]);
+  }, [canUseProfessionalFormats, coverPage]);
 
-  const exportPdf = useCallback(async () => {
+  const openPdfExport = useCallback(() => {
+    openExportDialog("pdf");
+  }, [openExportDialog]);
+
+  const openWorkspacePdfExport = useCallback((kind: 'breakdown' | 'technical') => {
+    setFileMenuOpen(false);
+    setFileSubmenu(null);
+    setViewMenuOpen(false);
+    setCoverMenuOpen(false);
+    setWorkspacePdfExportKind(kind);
+  }, []);
+
+  const openCurrentPdfExport = useCallback(() => {
+    if (technicalBreakdownOpen) openWorkspacePdfExport('technical');
+    else if (breakdownOpen) openWorkspacePdfExport('breakdown');
+    else if (!cloudProjectsOpen && !whiteboardOpen) openPdfExport();
+  }, [breakdownOpen, cloudProjectsOpen, openPdfExport, openWorkspacePdfExport, technicalBreakdownOpen, whiteboardOpen]);
+
+  const exportCurrentFormat = useCallback(async () => {
     if (!editor) {
       return;
     }
 
     try {
+      if (versionTransition.current || documentSavePending.current || documentLoadPending.current) {
+        return;
+      }
+      if (exportFormat !== "pdf" && !canUseProfessionalFormats) {
+        setPdfExportOpen(false);
+        setAccountPanelOpen(true);
+        setDocumentState(previous => ({
+          ...previous,
+          status: "Les exports professionnels sont disponibles avec l’offre Studio",
+        }));
+        return;
+      }
       const selectedTranslationLanguage = pdfExportDraft.translationLanguage;
       const translationLanguage = selectedTranslationLanguage === "__custom__"
         ? pdfExportDraft.customTranslationLanguage.trim()
@@ -1313,13 +1445,16 @@ function AuthenticatedApp() {
         rememberCustomPdfLanguage(translationLanguage);
       }
 
-      const path = await choosePdfToSave(documentState.title);
-      if (!path) {
-        return;
+      let pdfPath: string | null = null;
+      if (exportFormat === "pdf") {
+        pdfPath = await choosePdfToSave(documentState.title);
+        if (!pdfPath) return;
       }
+
+      documentSavePending.current = true;
+      setPdfExportBusy(true);
       let document = createDocument(editor, documentState.title);
       if (translationLanguage) {
-        setPdfExportBusy(true);
         const translation = createPdfTranslationSegments(document.content);
         const translatedTexts = await translateScenario(
           translationLanguage,
@@ -1330,19 +1465,32 @@ function AuthenticatedApp() {
           content: applyPdfTranslations(document.content, translation.positions, translatedTexts),
         };
       }
-      const { createScenarioPdf } = await import("./document/pdfExport");
-      await writePdf(path, await createScenarioPdf(document, pdfExportDraft));
+
+      if (exportFormat === "pdf") {
+        const { createScenarioPdf } = await import("./document/pdfExport");
+        await writePdf(pdfPath!, await createScenarioPdf(document, pdfExportDraft));
+      } else {
+        const preparedDocument = applyPortableExportOptions(document, pdfExportDraft);
+        const contents = await exportInterchange(exportFormat, preparedDocument);
+        const path = await saveInterchangeFile(exportFormat, documentState.title, contents);
+        if (!path) return;
+      }
+
+      const formatLabel = getExportFormatLabel(exportFormat);
       setPdfExportOpen(false);
       setDocumentState((previous) => ({
         ...previous,
-        status: translationLanguage ? "PDF traduit et exporté" : "PDF exporté",
+        status: translationLanguage
+          ? `${formatLabel} traduit et exporté`
+          : `${formatLabel} exporté`,
       }));
     } catch (error) {
       await showError(error);
     } finally {
       setPdfExportBusy(false);
+      documentSavePending.current = false;
     }
-  }, [createDocument, documentState.title, editor, pdfExportDraft, rememberCustomPdfLanguage, showError]);
+  }, [canUseProfessionalFormats, createDocument, documentState.title, editor, exportFormat, pdfExportDraft, rememberCustomPdfLanguage, showError]);
 
   const openFindReplace = useCallback(() => {
     setFileMenuOpen(false);
@@ -1447,34 +1595,22 @@ function AuthenticatedApp() {
       });
       return;
     }
-    setCommentAnchor(anchor);
-    setCommentDraft("");
-    setCommentComposerOpen(true);
-    requestAnimationFrame(() => commentInput.current?.focus());
-  }, [editor]);
-
-  const saveNewComment = useCallback(() => {
-    if (!editor?.isEditable || !commentAnchor || !commentDraft.trim()) {
-      return;
-    }
     const createdAt = new Date().toISOString();
     const thread: CommentThread = {
       id: createStableId("thread"),
       status: "open",
       createdAt,
       resolvedAt: null,
-      anchor: commentAnchor,
-      messages: [{ id: createStableId("message"), text: commentDraft.trim(), createdAt, editedAt: null }],
+      anchor,
+      messages: [{ id: createStableId("message"), text: "", createdAt, editedAt: null }],
     };
-    if (editor) {
-      addCommentMark(editor, thread.id, thread.anchor);
-    }
+    addCommentMark(editor, thread.id, thread.anchor);
     setComments((previous) => [...previous, thread]);
-    setActiveCommentId(null);
-    setCommentComposerOpen(false);
-    setCommentAnchor(null);
-    setDocumentState((previous) => ({ ...previous, isDirty: true, status: "Commentaire ajouté" }));
-  }, [commentAnchor, commentDraft, editor]);
+    setActiveCommentId(thread.id);
+    setCommentEditingRequestId(thread.id);
+    setCommentActionTarget(null);
+    setDocumentState((previous) => ({ ...previous, isDirty: true, status: "Commentaire créé" }));
+  }, [editor]);
 
   const updateCommentThread = useCallback((threadId: string, update: (thread: CommentThread) => CommentThread) => {
     if (!editor?.isEditable) return;
@@ -1552,17 +1688,20 @@ function AuthenticatedApp() {
   const toggleFileMenu = useCallback(() => {
     setViewMenuOpen(false);
     setCoverMenuOpen(false);
+    setFileSubmenu(null);
     setFileMenuOpen((isOpen) => !isOpen);
   }, []);
 
   const toggleViewMenu = useCallback(() => {
     setFileMenuOpen(false);
+    setFileSubmenu(null);
     setCoverMenuOpen(false);
     setViewMenuOpen((isOpen) => !isOpen);
   }, []);
 
   const closeTopMenus = useCallback(() => {
     setFileMenuOpen(false);
+    setFileSubmenu(null);
     setViewMenuOpen(false);
     setCoverMenuOpen(false);
   }, []);
@@ -1902,15 +2041,46 @@ function AuthenticatedApp() {
     }
   }, [openDocumentAtPath]);
 
+  const importPortableDocument = useCallback(async (format: InterchangeFormat) => {
+    if (!editor || versionTransition.current || documentSavePending.current || documentLoadPending.current) return;
+    documentLoadPending.current = true;
+    try {
+      const selected = await chooseInterchangeToOpen(format);
+      if (!selected) return;
+      const imported = await importInterchange(format, selected.bytes, selected.name);
+      if (!(await askToDiscardChanges())) return;
+      replaceDocument(imported, null);
+      setDocumentState(previous => ({
+        ...previous,
+        title: imported.title,
+        filePath: null,
+        isDirty: true,
+        status: `${INTERCHANGE_FORMATS[format].label} importé — enregistre le projet en .scenario`,
+      }));
+      try {
+        await writeAutosave(serializeRecoveryFile(imported, null));
+      } catch {
+        setDocumentState(previous => ({ ...previous, status: `${INTERCHANGE_FORMATS[format].label} importé (autosave indisponible)` }));
+      }
+    } catch (error) {
+      await showError(error);
+    } finally {
+      documentLoadPending.current = false;
+    }
+  }, [askToDiscardChanges, editor, replaceDocument, showError]);
+
   const openPdfDocument = useCallback(async () => {
     setFileMenuOpen(false);
+    setFileSubmenu(null);
     setPdfImportError("");
     setPdfImportOpen(true);
   }, []);
 
   const selectPdfForImport = useCallback(async () => {
-    const path = await choosePdfToOpen();
-    if (path) setPdfImportPath(path);
+    try {
+      const path = await choosePdfToOpen();
+      if (path) { setPdfImportPath(path); setPdfImportError(''); }
+    } catch (error) { setPdfImportError(error instanceof Error ? error.message : 'PDF indisponible.'); }
   }, []);
 
   const importSelectedPdf = useCallback(async () => {
@@ -2082,6 +2252,14 @@ function AuthenticatedApp() {
     }
   }, [editor, refreshPagination, zoom]);
 
+  useLayoutEffect(() => {
+    if (!editor || !initialRecoveryFinished || cloudProjectsOpen || whiteboardOpen || breakdownOpen || technicalBreakdownOpen) return;
+    // Les workspaces secondaires retirent l'éditeur du layout. Dès que le
+    // scénario redevient visible, mesurer au prochain frame évite de conserver
+    // les dimensions du workspace précédent dans le compteur de pages.
+    refreshPagination(editor);
+  }, [breakdownOpen, cloudProjectsOpen, editor, initialRecoveryFinished, refreshPagination, technicalBreakdownOpen, whiteboardOpen]);
+
   useEffect(() => {
     if (!editor) {
       return;
@@ -2239,7 +2417,7 @@ function AuthenticatedApp() {
       }
       if (key === "e" && event.shiftKey) {
         event.preventDefault();
-        openPdfExport();
+        openCurrentPdfExport();
       }
       if (key === "+" || key === "=") {
         event.preventDefault();
@@ -2260,7 +2438,7 @@ function AuthenticatedApp() {
   }, [
     changeZoom,
     createNewDocument,
-    openPdfExport,
+    openCurrentPdfExport,
     openFindReplace,
     openDocument,
     openCommentComposer,
@@ -2290,6 +2468,7 @@ function AuthenticatedApp() {
 
   const runFileAction = useCallback((action: () => Promise<void>) => {
     setFileMenuOpen(false);
+    setFileSubmenu(null);
     void action();
   }, []);
 
@@ -2359,7 +2538,7 @@ function AuthenticatedApp() {
   }, [editor]);
 
   const navigateToScene = useCallback((sceneId: string) => {
-    if (!editor || editor.isDestroyed) return;
+    if (!canUseSceneTimeline || !editor || editor.isDestroyed) return;
     const scene = getScenarioScenes(editor.state.doc).find(item => item.id === sceneId);
     if (!scene) return;
     const heading = editor.view.nodeDOM(scene.from);
@@ -2373,10 +2552,10 @@ function AuthenticatedApp() {
         heading.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
       }
     });
-  }, [editor]);
+  }, [canUseSceneTimeline, editor]);
 
   const moveSceneFromTimeline = useCallback((sceneId: string, destinationBoundary: number) => {
-    if (!editor?.isEditable || versionTransition.current) return;
+    if (!canUseSceneTimeline || !editor?.isEditable || versionTransition.current) return;
     if (moveScenarioScene(editor, sceneId, destinationBoundary)) {
       setActiveSceneId(sceneId);
       setDocumentState(previous => ({
@@ -2385,10 +2564,10 @@ function AuthenticatedApp() {
         status: 'Scène déplacée',
       }));
     }
-  }, [editor]);
+  }, [canUseSceneTimeline, editor]);
 
   const deleteSceneFromTimeline = useCallback(async (scene: ScenarioScene) => {
-    if (!editor?.isEditable || versionTransition.current) return;
+    if (!canUseSceneTimeline || !editor?.isEditable || versionTransition.current) return;
     const shouldDelete = isTauri() ? await confirm(
       `Supprimer la scène ${scene.index + 1} « ${scene.title} » et tout son contenu ?`,
       {
@@ -2417,7 +2596,213 @@ function AuthenticatedApp() {
       isDirty: true,
       status: 'Scène supprimée',
     }));
+  }, [canUseSceneTimeline, editor]);
+
+  const openWhiteboardView = useCallback(() => {
+    setViewMenuOpen(false);
+    if (!canUseSceneTimeline) {
+      setAccountPanelOpen(true);
+      setDocumentState(previous => ({
+        ...previous,
+        status: 'Le Whiteboard est disponible avec l’offre Studio',
+      }));
+      return;
+    }
+    setFileMenuOpen(false);
+    setCoverMenuOpen(false);
+    setAiPromptMenuOpen(false);
+    setTransitionMenuOpen(false);
+    setScenarioContextMenu(null);
+    setCommentActionTarget(null);
+    setCloudProjectsOpen(false);
+    setBreakdownOpen(false);
+    setTechnicalBreakdownOpen(false);
+    setWhiteboardOpen(true);
+  }, [canUseSceneTimeline]);
+
+  const openBreakdownView = useCallback(() => {
+    setViewMenuOpen(false);
+    setFileMenuOpen(false);
+    setCoverMenuOpen(false);
+    setAiPromptMenuOpen(false);
+    setTransitionMenuOpen(false);
+    setScenarioContextMenu(null);
+    setCommentActionTarget(null);
+    setCloudProjectsOpen(false);
+    setWhiteboardOpen(false);
+    setTechnicalBreakdownOpen(false);
+    setBreakdownOpen(true);
+  }, []);
+
+  const openTechnicalBreakdownView = useCallback(() => {
+    setViewMenuOpen(false);
+    setFileMenuOpen(false);
+    setCoverMenuOpen(false);
+    setAiPromptMenuOpen(false);
+    setTransitionMenuOpen(false);
+    setScenarioContextMenu(null);
+    setCommentActionTarget(null);
+    setCloudProjectsOpen(false);
+    setWhiteboardOpen(false);
+    setBreakdownOpen(false);
+    setTechnicalBreakdownOpen(true);
+  }, []);
+
+  const openCloudView = useCallback(() => {
+    setViewMenuOpen(false);
+    setFileMenuOpen(false);
+    setCoverMenuOpen(false);
+    setAiPromptMenuOpen(false);
+    setTransitionMenuOpen(false);
+    setScenarioContextMenu(null);
+    setCommentActionTarget(null);
+    setWhiteboardOpen(false);
+    setBreakdownOpen(false);
+    setTechnicalBreakdownOpen(false);
+    setCloudProjectsOpen(true);
+  }, []);
+
+  const updateSceneBreakdown = useCallback((sceneId: string, breakdown: SceneBreakdownData) => {
+    if (!editor?.isEditable || versionTransition.current) return;
+    if (updateScenarioBreakdown(editor, sceneId, breakdown)) {
+      setDocumentState(previous => ({ ...previous, isDirty: true, status: 'Dépouillement mis à jour' }));
+    }
   }, [editor]);
+
+  const updateSceneBreakdowns = useCallback((breakdowns: Record<string, SceneBreakdownData>) => {
+    if (!editor?.isEditable || versionTransition.current) return;
+    if (updateScenarioBreakdowns(editor, breakdowns)) {
+      setDocumentState(previous => ({ ...previous, isDirty: true, status: 'Dépouillement mis à jour' }));
+    }
+  }, [editor]);
+
+  const updateProjectTechnicalBreakdown = useCallback((value: TechnicalBreakdownData) => {
+    if (!editor?.isEditable || versionTransition.current) return;
+    if (updateTechnicalBreakdown(editor, value)) {
+      setDocumentState(previous => ({ ...previous, isDirty: true, status: 'Découpage technique mis à jour' }));
+    }
+  }, [editor]);
+
+  useEffect(() => {
+    if ((!breakdownOpen && !technicalBreakdownOpen) || !editor) return;
+    const handleBreakdownUndo = (event: KeyboardEvent) => {
+      if (!(event.ctrlKey || event.metaKey) || event.altKey || event.key.toLocaleLowerCase() !== 'z') return;
+      const target = event.target as HTMLElement | null;
+      if (target?.closest('input, textarea, [contenteditable="true"]')) return;
+      event.preventDefault();
+      if (event.shiftKey) editor.commands.redo();
+      else editor.commands.undo();
+    };
+    window.addEventListener('keydown', handleBreakdownUndo);
+    return () => window.removeEventListener('keydown', handleBreakdownUndo);
+  }, [breakdownOpen, editor, technicalBreakdownOpen]);
+
+  const moveScenesFromWhiteboard = useCallback((
+    sceneIds: string[],
+    act: ScenarioAct,
+    destinationBoundary: number,
+  ) => {
+    if (!canUseSceneTimeline || !editor?.isEditable || versionTransition.current) return;
+    if (moveScenarioSceneGroup(editor, sceneIds, act, destinationBoundary)) {
+      setActiveSceneId(sceneIds[0] ?? null);
+      setDocumentState(previous => ({
+        ...previous,
+        isDirty: true,
+        status: sceneIds.length > 1 ? `${sceneIds.length} scènes déplacées` : 'Scène déplacée',
+      }));
+    }
+  }, [canUseSceneTimeline, editor]);
+
+  const updateSceneFromWhiteboard = useCallback((
+    sceneId: string,
+    metadata: SceneWhiteboardMetadata,
+  ): boolean => {
+    if (!canUseSceneTimeline || !editor?.isEditable || versionTransition.current) return false;
+    const updated = updateScenarioScene(editor, sceneId, metadata);
+    if (updated) {
+      setDocumentState(previous => ({
+        ...previous,
+        isDirty: true,
+        status: 'Carte de scène actualisée',
+      }));
+    }
+    return updated;
+  }, [canUseSceneTimeline, editor]);
+
+  const duplicateSceneFromWhiteboard = useCallback((sceneId: string) => {
+    if (!canUseSceneTimeline || !editor?.isEditable || versionTransition.current) return;
+    const duplicateId = duplicateScenarioScene(editor, sceneId);
+    if (!duplicateId) return;
+    setActiveSceneId(duplicateId);
+    setDocumentState(previous => ({
+      ...previous,
+      isDirty: true,
+      status: 'Scène dupliquée',
+    }));
+  }, [canUseSceneTimeline, editor]);
+
+  const addSceneFromWhiteboard = useCallback((act: ScenarioAct) => {
+    if (!canUseSceneTimeline || !editor?.isEditable || versionTransition.current) return;
+    const sceneId = addScenarioScene(editor, act);
+    if (!sceneId) return;
+    setActiveSceneId(sceneId);
+    setDocumentState(previous => ({ ...previous, isDirty: true, status: `Scène ajoutée à l’acte ${act}` }));
+  }, [canUseSceneTimeline, editor]);
+
+  const addActFromWhiteboard = useCallback(() => {
+    if (!canUseSceneTimeline || !editor?.isEditable || versionTransition.current) return;
+    if (addScenarioAct(editor)) {
+      setDocumentState(previous => ({
+        ...previous,
+        isDirty: true,
+        status: 'Acte ajouté',
+      }));
+    }
+  }, [canUseSceneTimeline, editor]);
+
+  const updateActDescriptionFromWhiteboard = useCallback((act: ScenarioAct, description: string) => {
+    if (!canUseSceneTimeline || !editor?.isEditable || versionTransition.current) return;
+    if (updateScenarioActDescription(editor, act, description)) {
+      setDocumentState(previous => ({
+        ...previous,
+        isDirty: true,
+        status: `Description de l’acte ${act} actualisée`,
+      }));
+    }
+  }, [canUseSceneTimeline, editor]);
+
+  const deleteActFromWhiteboard = useCallback(async (act: ScenarioAct) => {
+    if (!canUseSceneTimeline || !editor?.isEditable || versionTransition.current) return;
+    const affectedScenes = getScenarioScenes(editor.state.doc).filter(scene => scene.act === act).length;
+    const destination = act > 1 ? `l’acte ${act - 1}` : 'le nouvel acte 1';
+    const prompt = affectedScenes
+      ? `Supprimer l’acte ${act} ? Ses ${affectedScenes} scène${affectedScenes > 1 ? 's' : ''} seront conservées et rattachées à ${destination}.`
+      : `Supprimer l’acte ${act} ?`;
+    const shouldDelete = isTauri() ? await confirm(prompt, {
+      title: 'Supprimer un acte',
+      kind: 'warning',
+      okLabel: 'Supprimer l’acte',
+      cancelLabel: 'Annuler',
+    }) : window.confirm(prompt);
+    if (!shouldDelete || !editor.isEditable) return;
+    if (deleteScenarioAct(editor, act)) {
+      setDocumentState(previous => ({
+        ...previous,
+        isDirty: true,
+        status: affectedScenes ? 'Acte supprimé, scènes conservées' : 'Acte supprimé',
+      }));
+    }
+  }, [canUseSceneTimeline, editor]);
+
+  const openSceneFromWhiteboard = useCallback((sceneId: string) => {
+    setWhiteboardOpen(false);
+    requestAnimationFrame(() => navigateToScene(sceneId));
+  }, [navigateToScene]);
+
+  const openSceneFromBreakdown = useCallback((sceneId: string) => {
+    setBreakdownOpen(false);
+    requestAnimationFrame(() => navigateToScene(sceneId));
+  }, [navigateToScene]);
 
   const cloudEditor: CloudProjectEditor = {
     read: () => editor?.getJSON() ?? initialContent,
@@ -2462,6 +2847,11 @@ function AuthenticatedApp() {
   const coverPagePresent = hasCoverPageContent(coverPage);
   const statistics = getDocumentStatistics(editor?.getJSON() ?? initialContent);
   const timelineScenes = editor ? getScenarioScenes(editor.state.doc) : [];
+  const projectBreakdowns = editor ? getProjectBreakdowns(editor.state.doc) : {};
+  const projectTechnicalBreakdown = editor ? getTechnicalBreakdown(editor.state.doc) : { version: 1, columns: [], shots: [] } as TechnicalBreakdownData;
+  const scenarioCharacters = editor ? getScenarioCharacters(editor.state.doc) : [];
+  const scenarioActCount = editor ? getScenarioActCount(editor.state.doc) : 3;
+  const scenarioActDescriptions = editor ? getScenarioActDescriptions(editor.state.doc) : [];
   const coverPageVisible = coverPagePresent && !coverPageHidden;
   const documentSheetCount = pageCount + (coverPageVisible ? 1 : 0);
   // Feuille purement visuelle, toujours après le scénario : elle apporte de
@@ -2476,10 +2866,45 @@ function AuthenticatedApp() {
       )
     : textReplacementDrafts;
 
+  async function exportWorkspacePdf(request: WorkspacePdfExportRequest): Promise<void> {
+    if (!editor || workspacePdfExportBusy || documentSavePending.current || versionTransition.current) return;
+    documentSavePending.current = true;
+    setWorkspacePdfExportBusy(true);
+    try {
+      const workspace = request.kind === 'breakdown' ? 'depouillement' : 'decoupage-technique';
+      const path = await chooseWorkspacePdfToSave(documentState.title, workspace);
+      if (!path) return;
+      const { createBreakdownPdf, createTechnicalBreakdownPdf } = await import('./document/workspacePdfExport');
+      const contents = request.kind === 'breakdown'
+        ? await createBreakdownPdf(documentState.title, timelineScenes, projectBreakdowns, request.options)
+        : await createTechnicalBreakdownPdf(documentState.title, timelineScenes, projectTechnicalBreakdown, request.options);
+      await writePdf(path, contents);
+      setWorkspacePdfExportKind(null);
+      setDocumentState(previous => ({
+        ...previous,
+        status: request.kind === 'breakdown' ? 'Dépouillement PDF exporté' : 'Découpage technique PDF exporté',
+      }));
+    } catch (error) {
+      await showError(error);
+    } finally {
+      setWorkspacePdfExportBusy(false);
+      documentSavePending.current = false;
+    }
+  }
+
+  if (!initialRecoveryFinished) {
+    return <div className="app-shell theme-dark initial-recovery-shell" role="status" aria-live="polite">
+      <div className="initial-recovery-screen">
+        <img src="/senario-logo.png" alt="" width="34" height="34" />
+        <span>Restauration du projet…</span>
+      </div>
+    </div>;
+  }
+
   return (
     <div
       ref={appShellRef}
-      className="app-shell theme-dark"
+      className={`app-shell theme-dark${cloudProjectsOpen || breakdownOpen || technicalBreakdownOpen ? ' has-no-workspace-toolbar' : ''}`}
       onKeyDownCapture={event => { if (versionTransition.current) { event.preventDefault(); event.stopPropagation(); } }}
       onMouseMove={(event) => {
         aiPointerPosition.current = {
@@ -2527,16 +2952,71 @@ function AuthenticatedApp() {
                 <button type="button" role="menuitem" onClick={() => runFileAction(async () => { await saveDocument(true); })}>
                   Enregistrer sous… <kbd>Ctrl+Maj+S</kbd>
                 </button>
-                <button type="button" role="menuitem" onClick={() => { setFileMenuOpen(false); setCloudProjectsOpen(true); }}>
-                  Projets cloud…
-                </button>
                 <hr />
-                <button type="button" role="menuitem" onClick={openPdfExport}>
-                  Exporter en PDF… <kbd>Ctrl+Maj+E</kbd>
-                </button>
-                <button type="button" role="menuitem" onClick={() => runFileAction(openPdfDocument)}>
-                  Importer un PDF…
-                </button>
+                {!cloudProjectsOpen && !whiteboardOpen && <div
+                  className="file-menu-branch"
+                  onMouseEnter={() => setFileSubmenu("export")}
+                  onMouseLeave={() => setFileSubmenu(null)}
+                  onBlur={(event) => {
+                    if (!event.currentTarget.contains(event.relatedTarget)) setFileSubmenu(null);
+                  }}
+                >
+                  <button
+                    type="button"
+                    role="menuitem"
+                    aria-haspopup="menu"
+                    aria-expanded={fileSubmenu === "export"}
+                    onFocus={() => setFileSubmenu("export")}
+                    onClick={() => setFileSubmenu("export")}
+                  >
+                    <span>Exporter</span><UiIcon name="chevron" />
+                  </button>
+                  {fileSubmenu === "export" && (
+                    <div className="file-submenu" role="menu" aria-label="Formats d’export">
+                      <button type="button" role="menuitem" onClick={openCurrentPdfExport}>
+                        Exporter en PDF <kbd>Ctrl+Maj+E</kbd>
+                      </button>
+                      {!breakdownOpen && !technicalBreakdownOpen && <>
+                        <button type="button" role="menuitem" disabled={!canUseProfessionalFormats} title={!canUseProfessionalFormats ? "Disponible avec l’offre Studio" : undefined} onClick={() => openExportDialog("fdx")}>
+                          <span>Final Draft (FDX)</span>{!canUseProfessionalFormats && <span className="studio-feature-badge">Studio</span>}
+                        </button>
+                        <button type="button" role="menuitem" disabled={!canUseProfessionalFormats} title={!canUseProfessionalFormats ? "Disponible avec l’offre Studio" : undefined} onClick={() => openExportDialog("fountain")}>
+                          <span>Fountain</span>{!canUseProfessionalFormats && <span className="studio-feature-badge">Studio</span>}
+                        </button>
+                        <button type="button" role="menuitem" disabled={!canUseProfessionalFormats} title={!canUseProfessionalFormats ? "Disponible avec l’offre Studio" : undefined} onClick={() => openExportDialog("docx")}>
+                          <span>Word (DOCX)</span>{!canUseProfessionalFormats && <span className="studio-feature-badge">Studio</span>}
+                        </button>
+                      </>}
+                    </div>
+                  )}
+                </div>}
+                {!cloudProjectsOpen && !whiteboardOpen && !breakdownOpen && !technicalBreakdownOpen && <div
+                  className="file-menu-branch"
+                  onMouseEnter={() => setFileSubmenu("import")}
+                  onMouseLeave={() => setFileSubmenu(null)}
+                  onBlur={(event) => {
+                    if (!event.currentTarget.contains(event.relatedTarget)) setFileSubmenu(null);
+                  }}
+                >
+                  <button
+                    type="button"
+                    role="menuitem"
+                    aria-haspopup="menu"
+                    aria-expanded={fileSubmenu === "import"}
+                    onFocus={() => setFileSubmenu("import")}
+                    onClick={() => setFileSubmenu("import")}
+                  >
+                    <span>Importer</span><UiIcon name="chevron" />
+                  </button>
+                  {fileSubmenu === "import" && (
+                    <div className="file-submenu" role="menu" aria-label="Formats d’import">
+                      <button type="button" role="menuitem" onClick={() => runFileAction(openPdfDocument)}>PDF</button>
+                      <button type="button" role="menuitem" onClick={() => runFileAction(() => importPortableDocument("fdx"))}>Final Draft (FDX)</button>
+                      <button type="button" role="menuitem" onClick={() => runFileAction(() => importPortableDocument("fountain"))}>Fountain</button>
+                      <button type="button" role="menuitem" onClick={() => runFileAction(() => importPortableDocument("docx"))}>Word (DOCX)</button>
+                    </div>
+                  )}
+                </div>}
                 {recentScenarios.length > 0 && (
                   <>
                     <hr />
@@ -2716,9 +3196,29 @@ function AuthenticatedApp() {
               Aide
             </button>
           </div>
+          <div className="menu-version-control">
+            <ProjectVersionControl
+              versions={listedProjectVersions.length
+                ? listedProjectVersions.filter(version => !version.deletedAt).map(version => ({ id: version.id, name: version.name }))
+                : [{ id: 'initial', name: 'Version 1' }]}
+              activeId={listedActiveVersionId ?? 'initial'}
+              title={!canUseProjectVersions ? 'Versions — disponible avec l’offre Studio' : cloudVersionLocked ? 'Chargement des versions cloud…' : 'Choisir une version de ce projet'}
+              disabled={(!canUseProjectVersions && !versionCloudState.project) || versionBusy || (cloudReadOnly && !versionCloudState.project) || cloudVersionLocked || aiBusy || pdfExportBusy || pdfImportBusy || Boolean(commentEditingRequestId)}
+              canCreate={canUseProjectVersions && !cloudReadOnly}
+              canRename={canUseProjectVersions && !cloudReadOnly}
+              canDelete={canUseProjectVersions && !cloudReadOnly && (!versionCloudState.project || versionCloudState.project.role === 'owner') && listedProjectVersions.filter(version => !version.deletedAt).length >= 2}
+              locked={!canUseProjectVersions && !versionCloudState.project}
+              onSelect={id => changeProjectVersion(id)}
+              onDuplicate={() => changeProjectVersion('duplicate', nextAvailableVersionName(), listedActiveVersionId ?? '')}
+              onBlank={() => changeProjectVersion('blank', nextAvailableVersionName())}
+              onRename={(id, name) => changeProjectVersion('rename', name, id)}
+              onDelete={id => changeProjectVersion('delete', '', id)}
+            />
+          </div>
         </nav>
       </header>
 
+      {!cloudProjectsOpen && !whiteboardOpen && !breakdownOpen && !technicalBreakdownOpen ? (
       <div className="formatting-toolbar" role="toolbar" aria-label="Mise en forme">
         <button
           className={editor?.isActive("bold") ? "is-active" : ""}
@@ -2756,70 +3256,40 @@ function AuthenticatedApp() {
               refreshEditorState(editor);
             }
           }}>{SCENARIO_ELEMENT_TYPES.map(type => <option value={type} key={type}>{getScenarioElementLabel(type)}</option>)}</UiSelect>
-        <UiSelect className="project-version-control" aria-label="Version" value={listedActiveVersionId ?? 'initial'}
-          title={cloudVersionLocked ? 'Chargement des versions cloud…' : 'Choisir ou créer une version de ce projet'}
-          disabled={versionBusy || (cloudReadOnly && !versionCloudState.project) || cloudVersionLocked || aiBusy || pdfExportBusy || pdfImportBusy || commentComposerOpen}
-          onChange={event => chooseVersion(event.target.value)}>
-          {listedProjectVersions.length ? listedProjectVersions.filter(v => !v.deletedAt).map(v => <option key={v.id} value={v.id}>Version : {v.name}</option>)
-            : <option value="initial">Version : Version 1</option>}
-          <option value="action:duplicate" disabled={cloudReadOnly}>Dupliquer une version…</option>
-          <option value="action:blank" disabled={cloudReadOnly}>Créer une version vierge…</option>
-          <option value="action:rename" disabled={cloudReadOnly}>Renommer cette version…</option>
-          <option value="action:delete" disabled={cloudReadOnly || (versionCloudState.project && versionCloudState.project.role !== 'owner') || listedProjectVersions.filter(v => !v.deletedAt).length < 2}>Supprimer cette version…</option>
-          <option value="action:restore" disabled={cloudReadOnly || (versionCloudState.project && versionCloudState.project.role !== 'owner') || !listedProjectVersions.some(v => v.deletedAt)}>Restaurer une version…</option>
-        </UiSelect>
         <div className="document-status">
-          <CloudProjectStatus onOpen={() => setCloudProjectsOpen(true)} />
+          <CloudProjectStatus onOpen={openCloudView} />
           <span className="document-save-status" title={documentState.status}>{documentState.status}</span>
           <span>Page {currentPage + (coverPageVisible ? 1 : 0)}/{documentSheetCount}</span>
           <button className="zoom-reset" type="button" onClick={resetZoom} title="Taille réelle (Ctrl+0)" aria-label={`Zoom ${zoom} %, rétablir la taille réelle`}>{zoom} %</button>
         </div>
       </div>
+      ) : whiteboardOpen ? (
+        <div className="whiteboard-mode-toolbar" aria-label="Vue Whiteboard active">
+          <UiIcon name="whiteboard" />
+          <span className="document-title" title={documentState.title}>{documentState.title}{documentState.isDirty ? " *" : ""}</span>
+          <button
+            className="whiteboard-add-act"
+            type="button"
+            disabled={!editor?.isEditable || scenarioActCount >= MAX_SCENARIO_ACT_COUNT}
+            onClick={addActFromWhiteboard}
+          ><UiIcon name="plus" /> Ajouter un acte</button>
+          <div className="whiteboard-mode-actions">
+            <button type="button" disabled={!editor?.can().undo() || !editor?.isEditable} onClick={() => editor?.commands.undo()}>Annuler <kbd>Ctrl+Z</kbd></button>
+            <button type="button" disabled={!editor?.can().redo() || !editor?.isEditable} onClick={() => editor?.commands.redo()}>Rétablir <kbd>Ctrl+Maj+Z</kbd></button>
+          </div>
+          <div className="document-status">
+            <CloudProjectStatus onOpen={openCloudView} />
+            <span className="document-save-status" title={documentState.status}>{documentState.status}</span>
+          </div>
+        </div>
+      ) : null}
 
-      {versionError && !versionDialog && <div className="modal-backdrop"><section className="pdf-export-panel" role="alertdialog" aria-modal="true" aria-label="Version inchangée">
+      {versionError && <div className="modal-backdrop"><section className="pdf-export-panel" role="alertdialog" aria-modal="true" aria-label="Version inchangée">
         <h2>Version inchangée</h2><p role="alert">{versionError}</p>
         <div className="panel-actions"><button autoFocus type="button" onClick={() => setVersionError('')}>Fermer</button></div>
       </section></div>}
-      {versionBusy && !versionDialog && <div className="modal-backdrop"><section className="pdf-export-panel" role="status">Enregistrement de la version en cours…</section></div>}
-      {versionDialog && <div className="modal-backdrop">
-        <section className="pdf-export-panel project-version-dialog" role="dialog" aria-modal="true" aria-label="Versions du projet"
-          onKeyDown={event => {
-            event.stopPropagation();
-            if (event.key === 'Escape' && !versionBusy) { setVersionDialog(null); setVersionError(''); }
-            if (event.key === 'Tab') {
-              const controls = Array.from(event.currentTarget.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled)')).filter(el => el.tabIndex >= 0);
-              const first = controls[0], last = controls[controls.length - 1];
-              if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
-              if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
-            }
-          }}>
-          <header className="panel-header"><h2>{versionDialog === 'delete' ? 'Supprimer cette version ?' : versionDialog === 'restore' ? 'Restaurer une version' : versionDialog === 'rename' ? 'Renommer la version' : 'Créer une version'}</h2></header>
-          <p>Projet : {documentState.title}</p>
-          <form onSubmit={event => { event.preventDefault(); void changeProjectVersion(versionDialog, versionName, versionSource); }}>
-            {['duplicate', 'blank', 'rename'].includes(versionDialog) && <label>Nom de la version
-              <input autoFocus value={versionName} maxLength={80} required disabled={versionBusy} onChange={event => setVersionName(event.target.value)} />
-            </label>}
-            {versionDialog === 'duplicate' && <label>Version à dupliquer
-              <UiSelect aria-label="Version à dupliquer" value={versionSource} onChange={event => setVersionSource(event.target.value)} disabled={versionBusy}>
-                {listedProjectVersions.length ? listedProjectVersions.filter(v => !v.deletedAt).map(v => <option key={v.id} value={v.id}>{v.name}</option>) : <option value="">Version 1</option>}
-              </UiSelect>
-            </label>}
-            {versionDialog === 'blank' && <p>La nouvelle version sera vide, sans commentaires ni page de garde. Les autres versions seront conservées.</p>}
-            {versionDialog === 'delete' && <p>« {listedProjectVersions.find(v => v.id === listedActiveVersionId)?.name} » sera retirée du menu. Son contenu restera récupérable dans ce projet.</p>}
-            {versionDialog === 'restore' && <label>Version supprimée
-              <UiSelect aria-label="Version supprimée" value={versionSource} required onChange={event => setVersionSource(event.target.value)}>
-                <option value="">Choisir une version</option>
-                {listedProjectVersions.filter(v => v.deletedAt).map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
-              </UiSelect>
-            </label>}
-            {versionError && <p role="alert">{versionError}</p>}
-            <div className="panel-actions"><button type="button" disabled={versionBusy} onClick={() => { setVersionDialog(null); setVersionError(''); }}>Annuler</button>
-              <button type="submit" disabled={versionBusy || (versionDialog === 'restore' && !listedProjectVersions.some(v => v.deletedAt && v.id === versionSource))}>{versionBusy ? 'Enregistrement…' : versionDialog === 'delete' ? 'Supprimer la version' : versionDialog === 'restore' ? 'Restaurer' : 'Enregistrer'}</button></div>
-          </form>
-        </section>
-      </div>}
 
-      {commentActionTarget && !commentComposerOpen && !cloudReadOnly && (
+      {commentActionTarget && !commentEditingRequestId && !cloudReadOnly && !cloudProjectsOpen && !whiteboardOpen && !breakdownOpen && !technicalBreakdownOpen && (
         <button
           className="comment-inline-button"
           type="button"
@@ -2832,10 +3302,9 @@ function AuthenticatedApp() {
           <UiIcon name="message"/>
         </button>
       )}
-
-
+      <div className="workspace-page-stack">
       <main
-        className="workspace has-scene-timeline"
+        className={`workspace has-scene-timeline${cloudProjectsOpen || whiteboardOpen || breakdownOpen || technicalBreakdownOpen ? ' is-workspace-page-hidden' : ''}`}
         aria-label="Editeur de scenario"
         onMouseDown={(event) => {
           setCommentActionTarget(null);
@@ -2878,17 +3347,33 @@ function AuthenticatedApp() {
         onWheel={handleWorkspaceWheel}
         onContextMenu={openScenarioContextMenu}
       >
-        <SceneTimeline
-          scenes={timelineScenes}
-          activeSceneId={activeSceneId}
-          readOnly={!editor?.isEditable || versionBusy || versionTransition.current}
-          onNavigate={navigateToScene}
-          onMove={moveSceneFromTimeline}
-          onDelete={scene => void deleteSceneFromTimeline(scene)}
-        />
+        {canUseSceneTimeline ? (
+          <SceneTimeline
+            scenes={timelineScenes}
+            activeSceneId={activeSceneId}
+            readOnly={!editor?.isEditable || versionBusy || versionTransition.current}
+            onNavigate={navigateToScene}
+            onMove={moveSceneFromTimeline}
+            onDelete={scene => void deleteSceneFromTimeline(scene)}
+          />
+        ) : (
+          <aside className="scene-timeline scene-timeline-locked" aria-label="Timeline des scènes — offre Studio">
+            <header>
+              <div>
+                <h2>Timeline</h2>
+              </div>
+              <span className="studio-feature-badge">Studio</span>
+            </header>
+            <div className="scene-timeline-lock-message">
+              <p>La timeline et la réorganisation des scènes sont disponibles avec l’offre Studio.</p>
+              <button type="button" onClick={() => setAccountPanelOpen(true)}>Voir mon compte</button>
+            </div>
+          </aside>
+        )}
         <div className={`editor-stage ${comments.length ? 'has-comment-margin' : ''}`}>
         {editor && <CommentMargin editor={editor} threads={comments} readOnly={cloudReadOnly}
           activeId={activeCommentId} onActivate={(thread) => navigateToComment(thread, true)} onDeactivate={() => setActiveCommentId(null)} zoom={zoom}
+          startEditingId={commentEditingRequestId} onStartEditingHandled={() => setCommentEditingRequestId(null)}
           onUpdate={updateCommentThread} onDelete={id => void deleteCommentThread(id)} />}
         <div
           className="document-zoom"
@@ -2937,16 +3422,130 @@ function AuthenticatedApp() {
         </div>
         </div>
       </main>
-      <footer className="editor-statistics" aria-label="Statistiques du scénario">
-        <OfflineLicenseStatus />
-        <span><strong>{statistics.words}</strong> mots</span>
-        <span title="Estimation indicative : une page de scénario correspond à environ une minute à l’écran.">Temps estimé : <strong>≈ {statistics.words ? pageCount : 0} min</strong></span>
-        <span><strong>{documentSheetCount}</strong> pages</span>
-        <span><strong>{statistics.scenes}</strong> scènes</span>
-        <span><strong>{statistics.locations}</strong> décors</span>
+      {cloudProjectsOpen && <CloudProjectsPanel
+        embedded
+        apiFactory={() => createRuntimeCommercialApi(async () => {
+          await cloudProjectRuntime.close();
+          authenticatedOperations.stop();
+          await sessions.invalidate();
+          setCloudProjectsOpen(false);
+          setAccountPanelOpen(true);
+        })}
+        editor={cloudEditor}
+        onClose={() => setCloudProjectsOpen(false)}
+        onSignIn={() => {
+          setCloudProjectsOpen(false);
+          setAccountPanelOpen(true);
+        }}
+      />}
+      {whiteboardOpen && canUseSceneTimeline && (
+        <SceneWhiteboard
+          scenes={timelineScenes}
+          actCount={scenarioActCount}
+          actDescriptions={scenarioActDescriptions}
+          readOnly={!editor?.isEditable || versionBusy || versionTransition.current}
+          canUndo={Boolean(editor?.can().undo())}
+          canRedo={Boolean(editor?.can().redo())}
+          onOpen={openSceneFromWhiteboard}
+          onMove={moveScenesFromWhiteboard}
+          onUpdate={updateSceneFromWhiteboard}
+          onDuplicate={duplicateSceneFromWhiteboard}
+          onAddScene={addSceneFromWhiteboard}
+          onDelete={scene => void deleteSceneFromTimeline(scene)}
+          onDeleteAct={act => void deleteActFromWhiteboard(act)}
+          onUpdateActDescription={updateActDescriptionFromWhiteboard}
+          onUndo={() => { editor?.commands.undo(); }}
+          onRedo={() => { editor?.commands.redo(); }}
+        />
+      )}
+      {breakdownOpen && (
+        <SceneBreakdown
+          scenes={timelineScenes}
+          document={editor.state.doc}
+          breakdowns={projectBreakdowns}
+          activeSceneId={activeSceneId}
+          readOnly={!editor?.isEditable || versionBusy || versionTransition.current}
+          onOpenScene={openSceneFromBreakdown}
+          onChange={updateSceneBreakdown}
+          onChangeMany={updateSceneBreakdowns}
+        />
+      )}
+      {technicalBreakdownOpen && (
+        <TechnicalBreakdown
+          scenes={timelineScenes}
+          document={editor.state.doc}
+          breakdown={projectTechnicalBreakdown}
+          characters={scenarioCharacters}
+          activeSceneId={activeSceneId}
+          readOnly={!editor?.isEditable || versionBusy || versionTransition.current}
+          canUndo={Boolean(editor?.can().undo())}
+          canRedo={Boolean(editor?.can().redo())}
+          onChange={updateProjectTechnicalBreakdown}
+          onUndo={() => { editor?.commands.undo(); }}
+          onRedo={() => { editor?.commands.redo(); }}
+        />
+      )}
+      </div>
+      <footer className="application-bottom-bar">
+        <div className="bottom-license-status"><OfflineLicenseStatus /></div>
+        <nav className="workspace-page-navigation" aria-label="Pages de l’application">
+          <button
+            className={cloudProjectsOpen ? 'is-active' : ''}
+            type="button"
+            aria-current={cloudProjectsOpen ? 'page' : undefined}
+            onClick={openCloudView}
+          >
+            <UiIcon name="folder" />
+            <span>Cloud</span>
+          </button>
+          <button
+            className={whiteboardOpen ? 'is-active' : ''}
+            type="button"
+            aria-current={whiteboardOpen ? 'page' : undefined}
+            onClick={openWhiteboardView}
+          >
+            <UiIcon name="whiteboard" />
+            <span>Whiteboard</span>
+          </button>
+          <button
+            className={!cloudProjectsOpen && !whiteboardOpen && !breakdownOpen && !technicalBreakdownOpen ? 'is-active' : ''}
+            type="button"
+            aria-current={!cloudProjectsOpen && !whiteboardOpen && !breakdownOpen && !technicalBreakdownOpen ? 'page' : undefined}
+            onClick={() => { setCloudProjectsOpen(false); setWhiteboardOpen(false); setBreakdownOpen(false); setTechnicalBreakdownOpen(false); }}
+          >
+            <UiIcon name="screenplay" />
+            <span>Scénario</span>
+          </button>
+          <button
+            className={breakdownOpen ? 'is-active' : ''}
+            type="button"
+            aria-current={breakdownOpen ? 'page' : undefined}
+            onClick={openBreakdownView}
+          >
+            <UiIcon name="breakdown" />
+            <span>Dépouillement</span>
+          </button>
+          <button
+            className={technicalBreakdownOpen ? 'is-active' : ''}
+            type="button"
+            aria-current={technicalBreakdownOpen ? 'page' : undefined}
+            onClick={openTechnicalBreakdownView}
+          >
+            <UiIcon name="list" />
+            <span>Découpage technique</span>
+          </button>
+        </nav>
+        <div className="editor-statistics" aria-label="Statistiques du scénario">
+          <div id="workspace-bottom-actions" className="workspace-bottom-actions" />
+          <span><strong>{statistics.words}</strong> mots</span>
+          <span title="Estimation indicative : une page de scénario correspond à environ une minute à l’écran.">Temps : <strong>≈ {statistics.words ? pageCount : 0} min</strong></span>
+          <span><strong>{documentSheetCount}</strong> pages</span>
+          <span><strong>{statistics.scenes}</strong> scènes</span>
+          <span><strong>{statistics.locations}</strong> décors</span>
+        </div>
       </footer>
 
-      {smartType && (
+      {!cloudProjectsOpen && !whiteboardOpen && !breakdownOpen && !technicalBreakdownOpen && smartType && (
         <div
           className="smart-type"
           role="listbox"
@@ -2977,7 +3576,7 @@ function AuthenticatedApp() {
         </div>
       )}
 
-      {aiTarget && (
+      {!cloudProjectsOpen && !whiteboardOpen && !breakdownOpen && !technicalBreakdownOpen && aiTarget && (
         <>
           <div
             className="ai-paragraph-highlight"
@@ -3166,54 +3765,8 @@ function AuthenticatedApp() {
       {accountPanelOpen && (
         <AccountLicensePanel
           onClose={() => setAccountPanelOpen(false)}
-          onOpenCloud={() => { setAccountPanelOpen(false); setCloudProjectsOpen(true); }}
+          onOpenCloud={() => { setAccountPanelOpen(false); openCloudView(); }}
         />
-      )}
-
-      {cloudProjectsOpen && <CloudProjectsPanel
-        apiFactory={() => createRuntimeCommercialApi(async () => {
-          await cloudProjectRuntime.close();
-          authenticatedOperations.stop();
-          await sessions.invalidate();
-          setCloudProjectsOpen(false);
-          setAccountPanelOpen(true);
-        })}
-        editor={cloudEditor}
-        onClose={() => setCloudProjectsOpen(false)}
-        onSignIn={() => {
-          setCloudProjectsOpen(false);
-          setAccountPanelOpen(true);
-        }}
-      />}
-
-      {commentComposerOpen && (
-        <div className="modal-backdrop" role="presentation" onMouseDown={() => setCommentComposerOpen(false)}>
-          <section className="comment-composer" role="dialog" aria-modal="true" aria-label="Ajouter un commentaire" onMouseDown={(event) => event.stopPropagation()}>
-            <h2>Ajouter un commentaire</h2>
-            <p>« {commentAnchor?.originalText} »</p>
-            <UiTextarea
-              ref={commentInput}
-              placeholder="Écrire un commentaire…"
-              maxLength={16384}
-              disabled={cloudReadOnly}
-              value={commentDraft}
-              onChange={(event) => setCommentDraft(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.ctrlKey && event.key === "Enter") {
-                  event.preventDefault();
-                  saveNewComment();
-                }
-                if (event.key === "Escape") {
-                  setCommentComposerOpen(false);
-                }
-              }}
-            />
-            <footer>
-              <button type="button" onClick={() => setCommentComposerOpen(false)}>Annuler</button>
-              <button className="primary-button" type="button" onClick={saveNewComment}>Commenter</button>
-            </footer>
-          </section>
-        </div>
       )}
 
       {findReplaceOpen && (
@@ -3281,21 +3834,38 @@ function AuthenticatedApp() {
         </div>
       )}
 
+      {workspacePdfExportKind && (
+        <WorkspacePdfExportDialog
+          key={workspacePdfExportKind}
+          kind={workspacePdfExportKind}
+          scenes={timelineScenes}
+          breakdowns={projectBreakdowns}
+          technicalBreakdown={projectTechnicalBreakdown}
+          busy={workspacePdfExportBusy}
+          onClose={() => { if (!workspacePdfExportBusy) setWorkspacePdfExportKind(null); }}
+          onExport={request => { void exportWorkspacePdf(request); }}
+        />
+      )}
+
       {pdfExportOpen && (
         <div className="modal-backdrop" role="presentation" onMouseDown={() => !pdfExportBusy && setPdfExportOpen(false)}>
-          <section className="pdf-export-panel" role="dialog" aria-modal="true" aria-label="Options d’export PDF" onMouseDown={(event) => event.stopPropagation()}>
+          <section className="pdf-export-panel" role="dialog" aria-modal="true" aria-label={`Options d’export ${getExportFormatLabel(exportFormat)}`} onMouseDown={(event) => event.stopPropagation()}>
             <header>
               <div>
-                <h2>Exporter en PDF</h2>
+                <h2>Exporter en {getExportFormatLabel(exportFormat)}</h2>
                 <p>Choisis ce qui doit apparaître dans le document final.</p>
               </div>
               <button className="panel-close-button" type="button" aria-label="Fermer" disabled={pdfExportBusy} onClick={() => setPdfExportOpen(false)}><UiIcon name="x"/></button>
             </header>
             <fieldset>
-              <legend>Contenu du PDF</legend>
+              <legend>Contenu du fichier {getExportFormatLabel(exportFormat)}</legend>
               <label><input type="checkbox" checked={pdfExportDraft.includeCoverPage} onChange={(event) => setPdfExportDraft((draft) => ({ ...draft, includeCoverPage: event.target.checked }))} /> Page de garde</label>
-              <label><input type="checkbox" checked={pdfExportDraft.includeSceneNumbers} onChange={(event) => setPdfExportDraft((draft) => ({ ...draft, includeSceneNumbers: event.target.checked }))} /> Numérotation de scène</label>
-              <label><input type="checkbox" checked={pdfExportDraft.includePageNumbers} onChange={(event) => setPdfExportDraft((draft) => ({ ...draft, includePageNumbers: event.target.checked }))} /> Pagination</label>
+              {exportFormat !== "docx" && (
+                <label><input type="checkbox" checked={pdfExportDraft.includeSceneNumbers} onChange={(event) => setPdfExportDraft((draft) => ({ ...draft, includeSceneNumbers: event.target.checked }))} /> Numérotation de scène</label>
+              )}
+              {exportFormat === "pdf" && (
+                <label><input type="checkbox" checked={pdfExportDraft.includePageNumbers} onChange={(event) => setPdfExportDraft((draft) => ({ ...draft, includePageNumbers: event.target.checked }))} /> Pagination</label>
+              )}
             </fieldset>
             <label className="pdf-translation-field">
               Traduction du scénario
@@ -3337,12 +3907,12 @@ function AuthenticatedApp() {
                   </div>
                 </div>
               )}
-              <small>La traduction est utilisée uniquement pour ce PDF ; ton fichier .scenario n’est pas modifié.</small>
+              <small>La traduction est utilisée uniquement pour cet export ; ton fichier .scenario n’est pas modifié.</small>
             </label>
             <footer>
               <button type="button" disabled={pdfExportBusy} onClick={() => setPdfExportOpen(false)}>Annuler</button>
-              <button className="primary-button" type="button" disabled={pdfExportBusy} onClick={() => void exportPdf()}>
-                {pdfExportBusy ? "Traduction en cours…" : "Exporter"}
+              <button className="primary-button" type="button" disabled={pdfExportBusy} onClick={() => void exportCurrentFormat()}>
+                {pdfExportBusy ? "Préparation de l’export…" : "Exporter"}
               </button>
             </footer>
           </section>
@@ -3365,8 +3935,12 @@ function AuthenticatedApp() {
               onDrop={(event) => {
                 event.preventDefault();
                 const file = event.dataTransfer.files[0] as (File & { path?: string }) | undefined;
-                if (file?.path?.toLocaleLowerCase().endsWith(".pdf")) setPdfImportPath(file.path);
-                else setPdfImportError("Dépose un fichier PDF depuis l’explorateur Windows.");
+                try {
+                  if (!isTauri() && file) setPdfImportPath(registerBrowserPdf(file));
+                  else if (file?.path?.toLocaleLowerCase().endsWith(".pdf")) setPdfImportPath(file.path);
+                  else throw new Error('Dépose un fichier PDF ou utilise « Rechercher dans les fichiers ».');
+                  setPdfImportError('');
+                } catch (error) { setPdfImportError(error instanceof Error ? error.message : 'PDF indisponible.'); }
               }}
             >
               <strong>{pdfImportPath ? getFileTitle(pdfImportPath) : "Dépose ton PDF ici"}</strong>
@@ -3655,7 +4229,7 @@ function applyPdfTranslations(
   translatedTexts: string[],
 ): JSONContent {
   if (positions.length !== translatedTexts.length) {
-    throw new Error("La traduction est incomplète. Le PDF n'a pas été exporté.");
+    throw new Error("La traduction est incomplète. Le fichier n’a pas été exporté.");
   }
   const nodes = [...(content.content ?? [])];
   positions.forEach((position, index) => {
@@ -3669,6 +4243,29 @@ function applyPdfTranslations(
     };
   });
   return { ...content, content: nodes };
+}
+
+function getExportFormatLabel(format: ExportFormat): string {
+  return format === "pdf" ? "PDF" : INTERCHANGE_FORMATS[format].label;
+}
+
+function applyPortableExportOptions(document: ScenarioFile, draft: PdfExportDraft): ScenarioFile {
+  const content = draft.includeSceneNumbers
+    ? document.content
+    : {
+        ...document.content,
+        content: (document.content.content ?? []).map((node) => {
+          if (node.type !== "paragraph" || !node.attrs?.sceneNumber) return node;
+          const attrs = { ...node.attrs };
+          delete attrs.sceneNumber;
+          return { ...node, attrs };
+        }),
+      };
+  return {
+    ...document,
+    content,
+    coverPageHidden: !draft.includeCoverPage,
+  };
 }
 
 function getPdfExportNodeText(node: JSONContent): string {

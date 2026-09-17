@@ -1,4 +1,4 @@
-import { useLayoutEffect, useMemo, useRef, useState, type DragEvent } from 'react';
+import { Fragment, useLayoutEffect, useMemo, useRef, useState, type DragEvent } from 'react';
 import { UiIcon } from '../ui/UiIcon';
 import type { ScenarioScene } from './sceneTimelineModel';
 
@@ -65,8 +65,7 @@ export function SceneTimeline({
     <aside className="scene-timeline" aria-label="Timeline des scènes">
       <header>
         <div>
-          <span className="scene-timeline-eyebrow">Structure</span>
-          <h2>Scènes</h2>
+          <h2>Timeline</h2>
         </div>
         <span className="scene-timeline-count" aria-label={`${scenes.length} scènes`}>{scenes.length}</span>
       </header>
@@ -79,13 +78,17 @@ export function SceneTimeline({
             setDropBoundary(scenes.length);
           }
         }} onDrop={event => commitDrop(event, scenes.length)}>
-          {scenes.map((scene, index) => (
+          {scenes.map((scene, index) => <Fragment key={scene.id}>
+            {((index === 0 && scene.act > 1) || (index > 0 && scenes[index - 1].act !== scene.act)) && (
+              <li className="scene-timeline-act-separator" aria-label={`Début de l’acte ${scene.act}`}>
+                <span>Acte {scene.act}</span>
+              </li>
+            )}
             <li
               ref={element => {
                 if (element) itemElements.current.set(scene.id, element);
                 else itemElements.current.delete(scene.id);
               }}
-              key={scene.id}
               data-scene-id={scene.id}
               className={[
                 activeSceneId === scene.id ? 'is-active' : '',
@@ -131,7 +134,7 @@ export function SceneTimeline({
                 <UiIcon name="trash" />
               </button>
             </li>
-          ))}
+          </Fragment>)}
           <li
             className={`scene-timeline-tail${dropBoundary === scenes.length ? ' is-drop-target' : ''}`}
             aria-hidden="true"

@@ -1,11 +1,13 @@
 {
   "name": "scenario-app",
   "private": true,
-  "version": "0.1.12",
+  "version": "0.1.13",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
+    "build:web:beta": "tsc && vite build --mode phase9",
+    "deploy:web:beta": "npm run build:web:beta && wrangler pages deploy dist --project-name senario-app-preproduction --branch main --commit-dirty=true",
     "build:beta": "tauri build --config src-tauri/tauri.preproduction.conf.json --bundles nsis",
     "test": "vitest run",
     "preview": "vite preview",
@@ -20,6 +22,7 @@
     "@tiptap/extension-placeholder": "^3.30.5",
     "@tiptap/react": "^3.30.5",
     "@tiptap/starter-kit": "^3.30.5",
+    "fflate": "^0.8.3",
     "jspdf": "^4.2.1",
     "pdfjs-dist": "^6.3.289",
     "react": "^19.1.0",
@@ -32,6 +35,7 @@
     "@vitejs/plugin-react": "^4.6.0",
     "typescript": "~5.8.3",
     "vite": "^7.0.4",
-    "vitest": "^4.1.11"
+    "vitest": "^4.1.11",
+    "wrangler": "^4.132.0"
   }
 }

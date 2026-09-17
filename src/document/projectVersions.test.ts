@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { parseScenarioFile } from './scenarioFile';
 import { addProjectVersion, captureVersion, deleteProjectVersion, ensureVersionedProject, nextVersionName,
-  renameProjectVersion, restoreProjectVersion, selectProjectVersion } from './projectVersions';
+  renameProjectVersion, selectProjectVersion } from './projectVersions';
 
 const fixture = () => parseScenarioFile(JSON.stringify({
   formatVersion: 1, title: 'Mon film', savedAt: '2026-09-14T10:00:00.000Z',
@@ -61,16 +61,17 @@ describe('Versions nommées du même projet', () => {
     const project = ensureVersionedProject(fixture());
     expect(() => deleteProjectVersion(project, project.activeVersionId)).toThrow('dernière version');
   });
-  it('supprime de façon récupérable, change de sélection puis restaure sans perte', () => {
-    const original = ensureVersionedProject(fixture()), next = addProjectVersion(original, 'Version 2', null);
-    const deleted = deleteProjectVersion(next, original.activeVersionId);
-    expect(deleted.activeVersionId).toBe(next.activeVersionId);
-    expect(() => selectProjectVersion(deleted, original.activeVersionId)).toThrow();
-    const restored = restoreProjectVersion(parseScenarioFile(JSON.stringify(deleted)) as typeof deleted, original.activeVersionId);
-    expect(restored.content).toEqual(original.content);
-    expect(restored.comments).toEqual(original.comments);
-    expect(restored.versions[1].document).toEqual(next.versions[1].document);
-    expect(deleteProjectVersion(next, next.activeVersionId).activeVersionId).toBe(original.activeVersionId);
+  it('supprime définitivement uniquement la version ciblée et conserve les autres', () => {
+    const original = ensureVersionedProject(fixture());
+    const second = addProjectVersion(original, 'Version 2', original.activeVersionId);
+    const third = addProjectVersion(second, 'Version 3', second.activeVersionId);
+    const deleted = deleteProjectVersion(third, second.activeVersionId);
+    expect(deleted.activeVersionId).toBe(third.activeVersionId);
+    expect(deleted.versions.map(version => version.id)).toEqual([original.activeVersionId, third.activeVersionId]);
+    expect(deleted.versions[1].basedOnVersionId).toBe(original.activeVersionId);
+    expect(deleted.versions[0].document).toEqual(original.versions[0].document);
+    expect(deleted.versions[1].document).toEqual(third.versions[2].document);
+    expect(deleteProjectVersion(second, second.activeVersionId).activeVersionId).toBe(original.activeVersionId);
   });
   it('évite les noms ambigus et ne remplace jamais une version lors du renommage', () => {
     const original = ensureVersionedProject(fixture()), next = addProjectVersion(original, 'Version 2', null);
@@ -80,14 +81,6 @@ describe('Versions nommées du même projet', () => {
     const renamed = renameProjectVersion(next, next.activeVersionId, 'Fin alternative');
     expect(renamed.versions[0]).toEqual(original.versions[0]);
     expect(renamed.versions[1].document).toEqual(next.versions[1].document);
-  });
-  it('restaure sous un autre nom si le nom a été réutilisé', () => {
-    const original = ensureVersionedProject(fixture()), next = addProjectVersion(original, 'Version 2', null);
-    const deleted = deleteProjectVersion(next, original.activeVersionId);
-    const reused = renameProjectVersion(deleted, next.activeVersionId, 'Version 1');
-    const restored = restoreProjectVersion(reused, original.activeVersionId);
-    expect(restored.versions[0].name).not.toBe(restored.versions[1].name);
-    expect(restored.content).toEqual(original.content);
   });
   it.each(['duplicate-id', 'missing-active', 'deleted-active', 'content-mismatch', 'cover-mismatch', 'comments-mismatch', 'corrupt-comments', 'invalid-date', 'v1-envelope'])('refuse un fichier incohérent : %s', damage => {
     const project = ensureVersionedProject(fixture());

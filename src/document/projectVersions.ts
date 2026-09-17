@@ -105,13 +105,16 @@ export function renameProjectVersion(project: VersionedProject, id: string, name
   const checked = checkedName(project, name, id);
   return materialize({ ...project, versions: project.versions.map(v => v.id === id ? { ...v, name: checked } : v) });
 }
-/** Soft deletion: content stays inside the project and can be restored. */
+/** Permanently removes exactly one version. Descendants keep their independent
+ * documents and are reattached to the removed version's parent for a valid graph. */
 export function deleteProjectVersion(project: VersionedProject, id: string): VersionedProject {
   const survivors = project.versions.filter(v => v.id !== id && !v.deletedAt);
   if (!survivors.length) throw new Error('La dernière version du projet ne peut pas être supprimée.');
-  if (!project.versions.some(v => v.id === id && !v.deletedAt)) return fail();
+  const removed = project.versions.find(v => v.id === id && !v.deletedAt);
+  if (!removed) return fail();
   return materialize({ ...project, activeVersionId: project.activeVersionId === id ? survivors[0].id : project.activeVersionId,
-    versions: project.versions.map(v => v.id === id ? { ...v, deletedAt: new Date().toISOString() } : v) });
+    versions: project.versions.filter(v => v.id !== id).map(v => v.basedOnVersionId === id
+      ? { ...v, basedOnVersionId: removed.basedOnVersionId } : v) });
 }
 export function restoreProjectVersion(project: VersionedProject, id: string): VersionedProject {
   const version = project.versions.find(v => v.id === id && v.deletedAt);

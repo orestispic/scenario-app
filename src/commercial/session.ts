@@ -37,7 +37,11 @@ export class SessionManager {
     return result;
   }
 
-  private async persist(session: SessionTokens): Promise<string> {
+  private async persist(session: SessionTokens, generation: number): Promise<string | null> {
+    if (generation !== this.generation) {
+      await this.revoke(session.accessToken).catch(() => undefined);
+      return null;
+    }
     const expiresAt = Date.parse(session.expiresAt);
     if (
       !session.accessToken ||
@@ -63,13 +67,23 @@ export class SessionManager {
       }
       throw new Error("Le coffre-fort système est indisponible. Reconnectez-vous.");
     }
+    if (generation !== this.generation) {
+      await this.vault.clear();
+      await this.revoke(session.accessToken).catch(() => undefined);
+      return null;
+    }
     this.access = { token: session.accessToken, expiresAt };
     this.publish(true);
     return session.accessToken;
   }
 
   accept(session: SessionTokens): Promise<string> {
-    return this.serial(() => this.persist(session));
+    const generation = this.generation;
+    return this.serial(async () => {
+      const token = await this.persist(session, generation);
+      if (!token) throw new AuthSessionError("Connexion annulée par la déconnexion.", false);
+      return token;
+    });
   }
 
   getAccessToken(): Promise<string | null> {
@@ -94,7 +108,7 @@ export class SessionManager {
           }
           return null;
         }
-        return await this.persist(session);
+        return await this.persist(session, generation);
       } catch (error) {
         this.access = null;
         if (error instanceof AuthSessionError && error.terminal) {

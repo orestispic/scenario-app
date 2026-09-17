@@ -5,13 +5,29 @@ import type { OfflineTrustStore } from './offlineTrust';
 import type { EntitlementCacheStorage } from './entitlementCache';
 import { BOUND_CACHE_KEY, verifyBoundGrant } from './boundEntitlementCache';
 import type { EntitlementsResponse, MeResponse } from './contractsV2';
+import type { Entitlement } from './contracts';
 
-export type LicenseState = { kind: 'free' | 'valid' | 'expired' | 'clock-error'; expiresAt?: string };
+export type LicenseState = {
+  kind: 'free' | 'valid' | 'expired' | 'clock-error';
+  expiresAt?: string;
+  entitlements?: Entitlement[];
+};
+
+export function hasActiveEntitlement(state: LicenseState, code: string): boolean {
+  return state.kind === 'valid' && Boolean(
+    state.entitlements?.some(entitlement => entitlement.code === code && entitlement.enabled),
+  );
+}
 export async function licenseDigest(value: string): Promise<string> {
   return Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value))), b => b.toString(16).padStart(2, '0')).join('');
 }
+function decodeGrantPayload(value: string): Record<string, unknown> {
+  const base64 = value.replace(/-/g, '+').replace(/_/g, '/').padEnd(Math.ceil(value.length / 4) * 4, '=');
+  const bytes = Uint8Array.from(atob(base64), character => character.charCodeAt(0));
+  return JSON.parse(new TextDecoder().decode(bytes)) as Record<string, unknown>;
+}
 export function trustedTime(lastSeen: number, serverTime: number, wall: number): number {
-  if (![lastSeen, serverTime, wall].every(Number.isFinite) || wall + 60_000 < lastSeen) throw new Error('Horloge modifiée. Reconnectez-vous pour vérifier la licence.');
+  if (![lastSeen, serverTime, wall].every(Number.isFinite) || wall + 5 * 60_000 < lastSeen) throw new Error('Horloge modifiée. Reconnectez-vous pour vérifier la licence.');
   return Math.max(lastSeen, serverTime, wall);
 }
 
@@ -24,7 +40,9 @@ export class OfflineLicense {
   private anchor = { wall: Date.now(), monotonic: performance.now() };
   constructor(private trust: OfflineTrustStore, private storage: EntitlementCacheStorage,
     private fingerprint: () => string, private api: () => AuthenticatedCommercialApi,
-    private token: () => Promise<string | null>) {}
+    private token: () => Promise<string | null>,
+    private keyThumbprint: () => string = fingerprint,
+    private currentDevice?: () => Promise<{ id: string }>) {}
   subscribe = (listener: () => void) => { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; };
   private publish(state: LicenseState) { this.state = state; this.listeners.forEach(fn => fn()); }
   async clear() {
@@ -38,7 +56,10 @@ export class OfflineLicense {
     try {
       const trust = await this.trust.read();
       const raw = this.storage.getItem(BOUND_CACHE_KEY);
-      if (!trust?.lease || !raw || trust.lease.deviceFingerprint !== this.fingerprint() || await licenseDigest(raw) !== trust.lease.digest) {
+      const sameDevice = trust?.lease?.deviceKeyThumbprint
+        ? trust.lease.deviceKeyThumbprint === this.keyThumbprint()
+        : trust?.lease?.deviceFingerprint === this.fingerprint();
+      if (!trust?.lease || !raw || !sameDevice || await licenseDigest(raw) !== trust.lease.digest) {
         this.publish({ kind: 'free' }); return null;
       }
       const cache = JSON.parse(raw);
@@ -51,7 +72,11 @@ export class OfflineLicense {
       if (epoch !== this.epoch) return null;
       await this.trust.write({ ...trust, lease: { ...trust.lease, lastSeen: now } });
       if (epoch !== this.epoch) { await this.trust.clear(); return null; }
-      this.publish({ kind: 'valid', expiresAt: cache.snapshot.offlineValidUntil });
+      this.publish({
+        kind: 'valid',
+        expiresAt: cache.snapshot.offlineValidUntil,
+        entitlements: cache.snapshot.entitlements,
+      });
       return { me: trust.me, entitlements: { snapshot: cache.snapshot, offlineGrant: cache.grant } };
     } catch { this.publish({ kind: 'expired' }); return null; }
   }
@@ -64,22 +89,34 @@ export class OfflineLicense {
         // Explicit logout and authoritative 401/403 responses clear it separately.
         if (!await this.token()) { await this.restore(); return; }
         const api = this.api();
-        const [config, me, entitlements] = await Promise.all([api.getConfiguration(), api.getMe(), api.getEntitlements()]);
+        const [config, me] = await Promise.all([api.getConfiguration(), api.getMe()]);
+        const device = this.currentDevice ? await this.currentDevice() : null;
+        const entitlements = device ? await api.renewOfflineLicense(device.id) : await api.getEntitlements();
         const { offlineGrant: grant, snapshot } = entitlements;
-        const payload = JSON.parse(atob(grant.payload.replace(/-/g, '+').replace(/_/g, '/')));
-        const serverTime = Date.parse(payload.serverTime);
-        if (!payload.deviceId || payload.deviceFingerprint !== this.fingerprint() || !Number.isFinite(serverTime)) {
+        const payload = decodeGrantPayload(grant.payload);
+        const serverTime = Date.parse(String(payload.serverTime ?? ''));
+        const boundToDevice = typeof payload.deviceKeyThumbprint === 'string'
+          ? payload.deviceKeyThumbprint === this.keyThumbprint()
+          : payload.deviceFingerprint === this.fingerprint();
+        if (!payload.deviceId || !boundToDevice || !Number.isFinite(serverTime)) {
           await this.clear(); return;
         }
-        await verifyBoundGrant(snapshot, grant, config.offlineGrantPublicKey, config.offlineGrantKeyId, me.account.id, new Date(serverTime));
+        const publicKey = config.offlineGrantPublicKeys?.[grant.keyId]
+          ?? (grant.keyId === config.offlineGrantKeyId ? config.offlineGrantPublicKey : undefined);
+        if (!publicKey) throw new Error('Clé de signature de licence inconnue.');
+        await verifyBoundGrant(snapshot, grant, publicKey, grant.keyId, me.account.id, new Date(serverTime));
         if (epoch !== this.epoch) return;
         const raw = JSON.stringify({ schemaVersion: 4, snapshot, grant, verifiedAt: new Date(serverTime).toISOString() });
         this.storage.setItem(BOUND_CACHE_KEY, raw);
-        await this.trust.write({ schemaVersion: 1, me, publicKey: config.offlineGrantPublicKey, keyId: config.offlineGrantKeyId,
-          lease: { digest: await licenseDigest(raw), deviceFingerprint: this.fingerprint(), lastSeen: Date.now(), serverTime } });
+        await this.trust.write({ schemaVersion: 1, me, publicKey, keyId: grant.keyId,
+          lease: { digest: await licenseDigest(raw), deviceKeyThumbprint: this.keyThumbprint(), lastSeen: serverTime, serverTime } });
         if (epoch !== this.epoch) { await this.trust.clear(); return; }
         this.anchor = { wall: serverTime, monotonic: performance.now() };
-        this.publish({ kind: 'valid', expiresAt: snapshot.offlineValidUntil });
+        this.publish({
+          kind: 'valid',
+          expiresAt: snapshot.offlineValidUntil,
+          entitlements: snapshot.entitlements,
+        });
       } catch (error) {
         if (epoch !== this.epoch) return;
         if (error instanceof AuthSessionError && error.terminal || error instanceof CommercialHttpError && [401,403].includes(error.status)) await this.clear();
@@ -91,7 +128,7 @@ export class OfflineLicense {
   start(): () => void {
     void this.restore().then(() => this.refresh());
     const refresh = () => { void this.refresh(); };
-    const timer = window.setInterval(refresh, 15 * 60_000);
+    const timer = window.setInterval(refresh, 6 * 60 * 60_000);
     const expiry = window.setInterval(() => { if (!this.pending) void this.restore(); }, 60_000);
     window.addEventListener('online', refresh);
     return () => { clearInterval(timer); clearInterval(expiry); window.removeEventListener('online', refresh); };

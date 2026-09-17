@@ -5,20 +5,46 @@ import { findCommentAnchorPosition, type CommentThread } from './comments';
 import { placeMarginNotes } from './documentStatistics';
 
 type Draft = { thread: CommentThread; original: string; text: string };
-export function CommentMargin({editor, threads, readOnly, activeId, onActivate, onDeactivate, onUpdate, onDelete, zoom}: {
+
+export function CommentMargin({editor, threads, startEditingId, readOnly, activeId, onActivate, onDeactivate, onStartEditingHandled, onUpdate, onDelete, zoom}: {
   editor: Editor; threads: CommentThread[]; readOnly: boolean; activeId: string | null; zoom: number;
+  startEditingId: string | null;
   onActivate(thread: CommentThread): void;
   onDeactivate(): void;
+  onStartEditingHandled(): void;
   onUpdate(id: string, update: (thread: CommentThread) => CommentThread): void;
   onDelete(id: string): void;
 }) {
   const rail = useRef<HTMLDivElement>(null);
+  const commentInput = useRef<HTMLTextAreaElement>(null);
   const [positions, setPositions] = useState<Record<string, number>>({});
   const [draft, setDraft] = useState<Draft | null>(null);
   // Retain a local draft even if its remote comment is deleted while editing.
   const shown = draft && !threads.some(t => t.id === draft.thread.id) ? [...threads, draft.thread] : threads;
   const current = draft && threads.find(t => t.id === draft.thread.id);
   const changed = Boolean(draft && (!current || current.messages[0]?.text !== draft.original));
+  useEffect(() => {
+    if (!startEditingId || draft) return;
+    const thread = threads.find(item => item.id === startEditingId);
+    if (!thread) return;
+    const text = thread.messages[0]?.text ?? '';
+    setDraft({ thread, original: text, text });
+    onStartEditingHandled();
+  }, [draft, onStartEditingHandled, startEditingId, threads]);
+  // Une carte est d'abord rendue invisible le temps de calculer sa position.
+  // On ne peut focaliser son champ qu'une fois cette position disponible :
+  // sinon le navigateur conserve le curseur dans l'éditeur du scénario.
+  useLayoutEffect(() => {
+    const draftId = draft?.thread.id;
+    if (!draftId || positions[draftId] === undefined) return;
+    const frame = requestAnimationFrame(() => {
+      const input = commentInput.current;
+      if (!input || input.disabled) return;
+      input.focus({ preventScroll: true });
+      input.setSelectionRange(input.value.length, input.value.length);
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [draft?.thread.id, draft ? positions[draft.thread.id] : undefined]);
   useLayoutEffect(() => {
     const stage = rail.current?.parentElement;
     if (!stage) return;
@@ -93,11 +119,11 @@ export function CommentMargin({editor, threads, readOnly, activeId, onActivate, 
         {!editing && <button className="margin-note-hitbox" type="button" aria-expanded={expanded}
           onClick={() => onActivate(thread)}>
           {expanded && (thread.anchor.lost || thread.status === 'resolved') && <small>{thread.anchor.lost ? 'Passage introuvable' : 'Commentaire résolu'}</small>}
-          <span>{thread.messages[0]?.text}</span>
+          <span>{thread.messages[0]?.text || 'Commentaire vide'}</span>
         </button>}
         {expanded && <div className="margin-note-details">
           {editing ? <form onSubmit={event => {event.preventDefault(); save();}}>
-            <UiTextarea autoFocus aria-label="Modifier le commentaire" maxLength={16384} value={draft.text} disabled={readOnly}
+            <UiTextarea ref={commentInput} aria-label={draft.original ? "Modifier le commentaire" : "Écrire le commentaire"} placeholder="Écrire un commentaire…" maxLength={16384} value={draft.text} disabled={readOnly}
               onChange={event => setDraft({...draft,text:event.target.value})} />
             {changed && <p role="alert">Ce commentaire a changé ou a été supprimé. Copiez votre brouillon avant d’annuler.</p>}
             <div className="margin-note-actions"><button type="submit" disabled={readOnly || changed || !draft.text.trim()}>Enregistrer</button><button type="button" onClick={() => setDraft(null)}>Annuler</button></div>

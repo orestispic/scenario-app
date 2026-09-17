@@ -18,7 +18,8 @@
   .authentication-gate span {color:var(--text-2);font-size:12px;}
   .app-shell.theme-dark.authentication-required {grid-template-rows:minmax(0,1fr);}
   .app-shell.theme-dark .modal-backdrop.is-auth-required {background:var(--bg);}
-  .app-shell.theme-dark {width:100%;min-width:0;grid-template-rows:minmax(42px,auto) 42px minmax(0,1fr) auto;background:var(--bg);color:var(--text);font:14px/1.45 var(--font-ui);-webkit-font-smoothing:antialiased;}
+  .app-shell.theme-dark {width:100%;min-width:0;grid-template-rows:minmax(42px,auto) 42px minmax(0,1fr) 52px;background:var(--bg);color:var(--text);font:14px/1.45 var(--font-ui);-webkit-font-smoothing:antialiased;}
+  .app-shell.theme-dark.has-no-workspace-toolbar {grid-template-rows:minmax(42px,auto) 0 minmax(0,1fr) 52px;}
   .app-shell * {box-sizing:border-box;scrollbar-width:thin;scrollbar-color:#344252 transparent;}
   .app-shell ::selection {background:rgba(70,153,243,.36);color:var(--text);}
   .app-shell ::placeholder {color:var(--text-3);opacity:1;}
@@ -65,14 +66,17 @@
   .app-shell.theme-dark .ui-select-option[aria-selected=true] {background:var(--surface-selected);color:#d9ebff;}
 
   /* Toolbar primitives; responsive layout only. */
-  .app-shell.theme-dark :is(.menu-bar,.formatting-toolbar) {min-width:0;background:var(--surface-2);border-color:var(--border);gap:4px;padding:0 6px;}
-  .app-shell.theme-dark .menu-bar {justify-content:flex-start;gap:16px;padding:0 12px;}
+  .app-shell.theme-dark :is(.menu-bar,.formatting-toolbar,.whiteboard-mode-toolbar) {min-width:0;background:var(--surface-2);border-color:var(--border);gap:4px;padding:0 6px;}
+  .app-shell.theme-dark .menu-bar {grid-row:1;justify-content:flex-start;gap:16px;padding:0 12px;}
   .app-brand {display:flex;align-items:center;gap:8px;flex-shrink:0;font-size:16px;font-weight:650;letter-spacing:-.25px;}
   .app-brand img {object-fit:contain;}
   .app-shell .menu-bar nav {min-width:0;flex:1;gap:2px;flex-wrap:wrap;padding:4px 0;}
   .app-shell .file-menu-container {height:32px;}
+  .menu-version-control {display:flex;align-items:center;height:32px;min-width:0;margin-left:auto;padding:2px 0;}
+  .menu-version-control .project-version-control {width:190px;min-width:150px;}
   .app-shell.theme-dark .menu-button {height:32px;min-height:32px;background:transparent;border-color:transparent;color:var(--text-2);}
   .app-shell.theme-dark .menu-button[aria-expanded=true] {background:var(--surface-selected);color:#d9ebff;}
+  .formatting-toolbar,.whiteboard-mode-toolbar {grid-row:2;}
   .app-shell.theme-dark .formatting-toolbar>button {height:28px;min-height:28px;width:32px;padding:0;background:transparent;border-color:transparent;color:var(--text-2);}
   .app-shell.theme-dark .formatting-toolbar>button.is-active {background:var(--surface-selected);border-color:rgba(110,179,255,.55);color:#d9ebff;}
   .toolbar-divider {height:20px;width:1px;background:var(--divider);margin:0 3px;flex-shrink:0;}
@@ -83,6 +87,20 @@
   .document-save-status {max-width:20vw;overflow:hidden;text-overflow:ellipsis;}
   .app-shell.theme-dark .zoom-reset {height:28px;min-height:28px;width:auto;min-width:54px;padding:0 8px;}
   .app-shell.theme-dark .cloud-menu-status {width:auto;max-width:24vw;overflow:hidden;text-overflow:ellipsis;display:block;padding:0 8px;}
+  .whiteboard-mode-toolbar {display:flex;align-items:center;border-bottom:1px solid var(--border);color:var(--text-2);}
+  .whiteboard-mode-toolbar>.ui-icon {width:18px;height:18px;margin-left:4px;color:var(--accent-hover);}
+  .app-shell.theme-dark .whiteboard-add-act {width:auto;height:28px;min-height:28px;padding:0 8px;color:var(--text-2);background:transparent;border-color:var(--border);font-size:10px;}
+  .whiteboard-add-act>.ui-icon {width:13px;height:13px;margin-right:5px;}
+  .whiteboard-mode-actions {display:flex;align-items:center;gap:5px;margin-left:auto;}
+  .app-shell.theme-dark .whiteboard-mode-actions button {width:auto;height:28px;min-height:28px;padding:0 8px;background:transparent;border-color:transparent;color:var(--text-2);font-size:10px;}
+  .whiteboard-mode-actions kbd {margin-left:4px;}
+  .whiteboard-mode-toolbar .document-status {margin-left:4px;}
+  .workspace-page-stack {position:relative;display:grid;grid-row:3;min-width:0;min-height:0;overflow:hidden;}
+  .workspace-page-stack>.workspace,
+  .workspace-page-stack>.whiteboard-workspace,
+  .workspace-page-stack>.breakdown-workspace {grid-area:1/1;min-width:0;min-height:0;}
+  .workspace-page-stack>.workspace {height:100%;}
+  .app-shell.theme-dark .workspace-page-stack>.workspace.has-scene-timeline.is-workspace-page-hidden {display:none;}
   .app-shell.theme-dark .workspace {background:var(--bg);padding:32px;}
   .app-shell.theme-dark .page-sheet {background:var(--surface-1);border-color:var(--border);box-shadow:var(--shadow-1);}
   .app-shell.theme-dark :is(.scenario-editor,.cover-page) {color:var(--text);}
@@ -92,9 +110,22 @@
   .app-shell.theme-dark .scenario-editor p[data-scenario-type=SCENE_HEADING]::before,
   .app-shell.theme-dark .scenario-editor p[data-scenario-type=SCENE_HEADING]::after {color:var(--text-3);}
   .editor-stage {position:relative;width:fit-content;margin:0 auto;}
-  .editor-stage:has(.margin-note) {padding-left:274px;}
+  /* La marge de commentaires occupe la gauche : on réserve la même largeur à
+     droite afin que la feuille elle-même reste exactement centrée. */
+  .editor-stage:has(.margin-note),
+  .editor-stage.has-comment-margin {padding-inline:274px;}
   .app-shell .editor-stage .document-zoom {margin:0;}
-  .editor-statistics {display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:8px 24px;min-height:34px;padding:8px 16px;background:var(--surface-2);color:var(--text-3);border-top:1px solid var(--divider);font-size:11px;z-index:10;}
+  .application-bottom-bar {position:relative;z-index:20;display:grid;grid-row:4;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);align-items:stretch;min-width:0;background:var(--surface-2);border-top:1px solid var(--divider);color:var(--text-3);}
+  .bottom-license-status {display:flex;align-items:center;min-width:0;padding:0 12px;font-size:10px;overflow:hidden;}
+  .bottom-license-status>span {overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .workspace-page-navigation {display:flex;align-items:stretch;height:51px;}
+  .app-shell.theme-dark .workspace-page-navigation button {position:relative;display:flex;flex-direction:column;width:92px;height:51px;min-height:51px;gap:2px;padding:5px 10px 4px;color:var(--text-3);background:transparent;border:0;border-radius:0;font-size:9px;font-weight:600;}
+  .app-shell.theme-dark .workspace-page-navigation button:hover:not(:disabled) {color:var(--text);background:var(--surface-hover);border-color:transparent;}
+  .app-shell.theme-dark .workspace-page-navigation button.is-active {color:var(--accent-hover);background:var(--surface-selected);border-color:transparent;}
+  .workspace-page-navigation button.is-active::before {position:absolute;top:0;right:12px;left:12px;height:2px;background:var(--accent);border-radius:0 0 2px 2px;content:'';}
+  .workspace-page-navigation .ui-icon {width:21px;height:21px;stroke-width:1.6;}
+  .application-bottom-bar .editor-statistics {display:flex;flex-wrap:nowrap;align-items:center;justify-content:flex-end;gap:14px;min-width:0;min-height:0;padding:0 12px;background:transparent;color:var(--text-3);border:0;font-size:10px;overflow:hidden;white-space:nowrap;z-index:auto;}
+  .workspace-bottom-actions:empty {display:none;}
   .editor-statistics strong {color:var(--text-2);font-weight:600;}
 
   /* Modal, panel, popover and list primitives. Content determines their width. */
@@ -108,10 +139,14 @@
   .app-shell.theme-dark :is(.modal-backdrop,.cover-menu) :where(p,li,small,dd) {font-size:12px;line-height:1.55;color:var(--text-2);}
   .app-shell.theme-dark :is(.modal-backdrop,.cover-menu) a {color:var(--accent-hover);}
   .app-shell.theme-dark :is(.file-menu,.smart-type,.scenario-context-menu,.ai-popover,.transition-popover,.cover-menu,.studio-member-menu>div) {color:var(--text);background:var(--surface-3);border:1px solid #344153;border-radius:var(--r-md);box-shadow:var(--shadow-2);padding:6px;}
-  .app-shell.theme-dark .file-menu {top:36px;left:0;}
+  .app-shell.theme-dark .file-menu {top:36px;left:0;overflow:visible;}
+  .app-shell.theme-dark .file-submenu {color:var(--text);background:var(--surface-3);border:1px solid #344153;border-radius:var(--r-md);box-shadow:var(--shadow-2);}
   .app-shell.theme-dark .cover-menu {left:0;right:auto;padding:16px;max-width:calc(100vw - 32px);max-height:calc(100dvh - 100px);overflow:auto;}
-  .app-shell.theme-dark :is(.file-menu,.smart-type,.scenario-context-menu,.ai-popover,.transition-popover)>button {height:30px;min-height:30px;display:flex;width:100%;justify-content:flex-start;padding:0 8px;border:0;border-radius:6px;background:transparent;color:var(--text-2);font-size:12px;font-weight:400;text-align:left;}
-  .app-shell.theme-dark :is(.file-menu,.smart-type,.scenario-context-menu,.ai-popover,.transition-popover)>button:hover {background:var(--surface-hover);color:var(--text);}
+  .app-shell.theme-dark :is(.file-menu,.smart-type,.scenario-context-menu,.ai-popover,.transition-popover)>button,
+  .app-shell.theme-dark :is(.file-menu-branch,.file-submenu)>button {height:30px;min-height:30px;display:flex;width:100%;justify-content:flex-start;padding:0 8px;border:0;border-radius:6px;background:transparent;color:var(--text-2);font-size:12px;font-weight:400;text-align:left;}
+  .app-shell.theme-dark :is(.file-menu,.smart-type,.scenario-context-menu,.ai-popover,.transition-popover)>button:hover,
+  .app-shell.theme-dark :is(.file-menu-branch,.file-submenu)>button:hover,
+  .app-shell.theme-dark .file-menu-branch>button[aria-expanded=true] {background:var(--surface-hover);color:var(--text);}
   .app-shell.theme-dark .smart-type button:is(:hover,.is-selected) {background:var(--surface-selected);color:#d9ebff;}
   .app-shell.theme-dark :is(.file-menu hr,.smart-type-heading,.ai-popover-heading,.transition-popover-heading) {border-color:var(--divider);background:transparent;}
   .app-shell.theme-dark :is(.smart-type-heading,.ai-popover-heading,.transition-popover-heading,.cloud-eyebrow) {font:10px var(--font-mono);color:var(--text-3);}
@@ -233,8 +268,10 @@
   .app-shell.theme-dark .account-management-grid>.account-license-section {align-content:start;gap:9px;min-width:0;padding:13px 14px;}
   .account-device-list,.account-activation-list {display:grid!important;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px!important;margin:0!important;padding:0!important;list-style:none;}
   .app-shell.theme-dark .account-device-list li {display:flex;align-items:center;justify-content:space-between;gap:8px;padding:7px 8px;border:1px solid var(--divider);border-radius:6px;background:var(--surface-2);}
-  .account-device-list li>span {white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-  .account-device-list small {color:var(--success)!important;font-size:9px!important;text-transform:uppercase;}
+  .account-device-list li>span {display:grid;gap:2px;min-width:0;}
+  .account-device-list li>span strong {white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:11px;}
+  .account-device-list li>span small {color:var(--text-3)!important;font-size:9px!important;text-transform:none;white-space:normal;line-height:1.35;}
+  .account-device-list li>small {color:var(--text-3)!important;font-size:9px!important;text-transform:uppercase;}
   .account-device-list button {min-height:26px;padding:0 8px;font-size:10px;}
   .app-shell.theme-dark .account-device-help {margin:0;color:var(--text-3);font-size:10px;}
   .account-activation-form {display:grid;gap:5px;}
@@ -243,26 +280,52 @@
   .account-activation-form input {min-width:0;}
   .account-activation-list li {font-size:10px!important;}
   .account-overview-panel .account-license-details>footer {display:flex;justify-content:flex-end;gap:7px;padding-top:0;}
+  .account-session-loading {display:grid;place-items:center;min-height:180px;color:var(--text-2);font-size:12px;}
 
   @keyframes ui-modal-in {from{opacity:0;transform:translateY(8px) scale(.985);}to{opacity:1;transform:none;}}
   @media(max-width:1439px){.app-shell.theme-dark .menu-bar{gap:8px;}.app-shell.theme-dark .menu-button{padding:0 8px;}}
   @media(max-width:1099px){.document-save-status{display:none;}.app-shell.theme-dark .cloud-project-layout{grid-template-columns:1fr;}.account-rights-grid{grid-template-columns:repeat(3,minmax(0,1fr));}}
-  @media(max-width:799px){.app-shell.theme-dark .menu-bar{align-items:flex-start;min-width:0;width:100%;padding:8px;}.app-shell .menu-bar nav{flex:none;width:calc(100% - 36px);}.app-shell.theme-dark .formatting-toolbar{overflow-x:auto;overflow-y:hidden;}.app-brand{padding-top:4px;}.app-brand span,.document-title,.document-status>span,.toolbar-divider{display:none;}.app-shell.theme-dark .workspace{padding:16px;}.paragraph-type-control{width:136px;}.editor-statistics{gap:6px 12px;}.app-shell.theme-dark .cover-menu{position:fixed;top:100px;left:16px;right:auto;}.cloud-member,.cloud-member>div,.cloud-version{flex-wrap:wrap;}.app-shell.theme-dark .account-license-details dl>div{grid-template-columns:1fr;gap:4px;}.account-overview-grid,.account-management-grid{grid-template-columns:1fr;}.account-rights-grid{grid-template-columns:repeat(2,minmax(0,1fr));}.app-shell.theme-dark .account-profile-section dl{grid-template-columns:1fr;gap:8px}.app-shell.theme-dark .account-profile-section dl>div{padding:0;border-left:0}.account-profile-heading{grid-template-columns:36px minmax(0,1fr)}.account-plan-badge{grid-column:2;justify-self:start;}}
+  @media(max-width:799px){.app-shell.theme-dark .menu-bar{align-items:flex-start;min-width:0;width:100%;padding:8px;}.app-shell .menu-bar nav{flex:none;width:calc(100% - 36px);}.app-shell.theme-dark .formatting-toolbar{overflow-x:auto;overflow-y:hidden;}.app-brand{padding-top:4px;}.app-brand span,.document-title,.document-status>span,.toolbar-divider{display:none;}.app-shell.theme-dark .workspace{padding:16px;}.paragraph-type-control{width:136px;}.application-bottom-bar .editor-statistics{display:none;}.app-shell.theme-dark .cover-menu{position:fixed;top:100px;left:16px;right:auto;}.cloud-member,.cloud-member>div,.cloud-version{flex-wrap:wrap;}.app-shell.theme-dark .account-license-details dl>div{grid-template-columns:1fr;gap:4px;}.account-overview-grid,.account-management-grid{grid-template-columns:1fr;}.account-rights-grid{grid-template-columns:repeat(2,minmax(0,1fr));}.app-shell.theme-dark .account-profile-section dl{grid-template-columns:1fr;gap:8px}.app-shell.theme-dark .account-profile-section dl>div{padding:0;border-left:0}.account-profile-heading{grid-template-columns:36px minmax(0,1fr)}.account-plan-badge{grid-column:2;justify-self:start;}}
   @media(prefers-reduced-motion:reduce){.app-shell *{animation-duration:.001ms!important;transition-duration:.001ms!important;scroll-behavior:auto!important;}}
 }
 @media print {
-  .formatting-toolbar,.comment-rail,.editor-statistics,.comment-inline-button,.scenario-context-menu,.ui-select-panel {display:none;}
+  .formatting-toolbar,.whiteboard-mode-toolbar,.application-bottom-bar,.comment-rail,.editor-statistics,.comment-inline-button,.scenario-context-menu,.ui-select-panel,.breakdown-workspace {display:none;}
   .editor-stage {padding-left:0;min-height:0!important;}
   .theme-dark .cover-page {color:#111;}
 }
 
-/* Named versions reuse the supplied select, dialog, input and action buttons. */
-.project-version-control { width: 192px; min-width: 128px; }
-.project-version-control .ui-select-trigger>span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.app-shell .project-version-dialog { width: min(460px, calc(100vw - 32px)); }
-.project-version-dialog form { display: grid; gap: 16px; }
-.project-version-dialog label { display: grid; gap: 8px; }
-.project-version-dialog .ui-select { width: 100%; }
+/* Named versions: selection stays stable; creation and contextual management are
+   deliberately separate to prevent an action from targeting the wrong version. */
+.project-version-control { display:inline-grid;grid-template-columns:minmax(0,1fr) 30px;width:222px;min-width:158px;height:28px; }
+.app-shell.theme-dark .project-version-control>button {height:28px;min-height:28px;}
+.app-shell.theme-dark .project-version-control .version-select-trigger {min-width:0;width:100%;justify-content:space-between;border-radius:var(--r-sm) 0 0 var(--r-sm);font-size:11px;}
+.project-version-control .version-select-trigger>span {overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.version-trigger-label {display:flex;align-items:center;gap:6px;min-width:0;}
+.version-trigger-label>span:first-child {overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.studio-feature-badge {display:inline-flex;align-items:center;justify-content:center;flex:0 0 auto;min-height:18px;padding:0 6px;color:#f3ca69;background:rgba(229,179,62,.10);border:1px solid rgba(229,179,62,.32);border-radius:999px;font:8px/1 var(--font-mono);letter-spacing:.05em;text-transform:uppercase;}
+.app-shell.theme-dark .file-submenu>button:disabled {opacity:.72;color:var(--text-3);}
+.app-shell.theme-dark .project-version-control .version-create-trigger {width:30px;min-width:30px;padding:0;border-left:0;border-radius:0 var(--r-sm) var(--r-sm) 0;color:var(--text-2);}
+.app-shell.theme-dark .project-version-control .version-create-trigger[aria-expanded=true] {color:#d9ebff;background:var(--surface-selected);border-color:rgba(110,179,255,.55);}
+.app-shell .project-version-list,.app-shell .version-create-menu {animation:ui-menu-in var(--fast) var(--ease);transform-origin:top center;}
+.app-shell .project-version-list {overflow:auto;}
+.project-version-row {display:grid;gap:3px;}
+.project-version-row+.project-version-row {margin-top:2px;}
+.app-shell.theme-dark .project-version-row>.ui-select-option {display:flex;justify-content:space-between;gap:8px;}
+.project-version-row>.ui-select-option span {min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.project-version-row>.ui-select-option .ui-icon {color:var(--accent-hover);}
+.project-version-context-menu {display:grid;grid-template-columns:1fr 1fr;gap:4px;padding:0 4px 5px;}
+.app-shell.theme-dark .project-version-context-menu button,.app-shell.theme-dark .project-version-delete-confirmation button {height:27px;min-height:27px;padding:0 8px;font-size:11px;}
+.app-shell.theme-dark button.is-danger {color:#ffb1b8;border-color:rgba(240,91,101,.38);background:rgba(240,91,101,.08);}
+.app-shell.theme-dark button.is-danger:hover:not(:disabled) {color:#ffd6d9;border-color:rgba(240,91,101,.58);background:rgba(240,91,101,.16);}
+.project-version-inline-rename {display:grid;grid-template-columns:minmax(0,1fr) 28px 28px;gap:4px;padding:2px 4px 5px;}
+.app-shell.theme-dark .project-version-inline-rename input {height:28px;min-height:28px;padding:0 7px;}
+.app-shell.theme-dark .project-version-inline-rename button {width:28px;min-width:28px;height:28px;min-height:28px;padding:0;}
+.project-version-delete-confirmation {display:grid;gap:7px;padding:7px 8px 8px;color:var(--text-2);font-size:11px;border:1px solid rgba(240,91,101,.28);border-radius:var(--r-sm);background:rgba(240,91,101,.06);}
+.project-version-delete-confirmation>span {overflow-wrap:anywhere;}
+.project-version-delete-confirmation>div {display:flex;justify-content:flex-end;gap:5px;}
+.app-shell.theme-dark .version-create-menu button {width:100%;height:30px;min-height:30px;justify-content:flex-start;padding:0 8px;border:0;background:transparent;color:var(--text-2);font-size:12px;}
+.app-shell.theme-dark .version-create-menu button:hover {color:var(--text);background:var(--surface-hover);}
+@keyframes ui-menu-in {from{opacity:0;transform:translateY(-3px) scale(.99);}to{opacity:1;transform:none;}}
 .version-availability { margin: 0; padding: 6px 16px; color: var(--text-2); font-size: 11px; }
 .account-rights-section h4 { margin: 8px 0; color: var(--text-2); font-size: 11px; }
 
@@ -270,10 +333,17 @@
 @media screen {
   .app-shell.theme-dark .workspace.has-scene-timeline {
     display: grid;
-    grid-template-columns: 240px minmax(max-content, 1fr);
+    /* La timeline déborde dans une colonne de largeur nulle : elle ne peut
+       donc plus décaler la feuille, qui reste centrée dans tout l’écran. */
+    grid-template-columns: 0 minmax(0, 1fr);
     align-items: start;
-    gap: 24px;
-    padding-left: 16px;
+    gap: 0;
+    padding-inline: 32px;
+  }
+  .workspace.has-scene-timeline .editor-stage {
+    margin: 0;
+    left: 50%;
+    transform: translateX(-50%);
   }
   .scene-timeline {
     position: sticky;
@@ -323,7 +393,7 @@
     list-style: none;
     overscroll-behavior: contain;
   }
-  .scene-timeline li:not(.scene-timeline-tail) {
+  .scene-timeline li:not(.scene-timeline-tail):not(.scene-timeline-act-separator) {
     position: relative;
     display: grid;
     grid-template-columns: 18px minmax(0, 1fr) 28px;
@@ -337,9 +407,13 @@
     cursor: grab;
     transition: opacity var(--fast) var(--ease), background var(--fast) var(--ease), border-color var(--fast) var(--ease), box-shadow var(--fast) var(--ease);
   }
-  .scene-timeline li:not(.scene-timeline-tail):hover { background: var(--surface-hover); border-color: #394758; }
-  .scene-timeline li:not(.scene-timeline-tail).is-active { background: var(--surface-selected); border-color: rgba(110,179,255,.55); box-shadow: inset 2px 0 0 var(--accent); }
-  .scene-timeline li:not(.scene-timeline-tail).is-dragging { opacity: .36; border-style: dashed; cursor: grabbing; }
+  .scene-timeline li:not(.scene-timeline-tail):not(.scene-timeline-act-separator):hover { background: var(--surface-hover); border-color: #394758; }
+  .scene-timeline li:not(.scene-timeline-tail):not(.scene-timeline-act-separator).is-active { background: var(--surface-selected); border-color: rgba(110,179,255,.55); box-shadow: inset 2px 0 0 var(--accent); }
+  .scene-timeline li:not(.scene-timeline-tail):not(.scene-timeline-act-separator).is-dragging { opacity: .36; border-style: dashed; cursor: grabbing; }
+  .scene-timeline-act-separator {display:flex;align-items:center;gap:7px;height:22px;margin:2px 0 6px;color:var(--text-3);font:8px/1 var(--font-mono);letter-spacing:.08em;text-transform:uppercase;}
+  .scene-timeline-act-separator::before,
+  .scene-timeline-act-separator::after {height:1px;flex:1;background:var(--divider);content:'';}
+  .scene-timeline-act-separator>span {flex:none;}
   .scene-timeline li.is-drop-before::before,
   .scene-timeline-tail.is-drop-target::before {
     position: absolute;
@@ -409,15 +483,20 @@
   .scene-timeline-tail.is-drop-target::after { top: 1px; }
   .scene-timeline-empty { margin: 0; padding: 20px 16px; color: var(--text-3); font-size: 11px; line-height: 1.55; text-align: center; }
   .scene-timeline-readonly { margin: 0; padding: 8px 12px; color: var(--text-3); border-top: 1px solid var(--divider); font: 9px var(--font-mono); text-align: center; text-transform: uppercase; }
+  .scene-timeline-locked {grid-template-rows:auto 1fr;}
+  .scene-timeline-lock-message {display:grid;align-content:center;justify-items:center;gap:12px;padding:24px 18px;text-align:center;}
+  .scene-timeline-lock-message p {margin:0;color:var(--text-3);font-size:11px;line-height:1.55;}
+  .app-shell.theme-dark .scene-timeline-lock-message button {min-height:30px;padding:0 10px;color:var(--text-2);background:var(--surface-3);border-color:var(--border);font-size:11px;}
+  .app-shell.theme-dark .scene-timeline-lock-message button:hover {color:var(--text);background:var(--surface-hover);border-color:#394758;}
   @keyframes scene-drop-in { from { opacity: 0; transform: scaleX(.72); } to { opacity: 1; transform: scaleX(1); } }
 }
 
 @media screen and (max-width: 900px) {
-  .app-shell.theme-dark .workspace.has-scene-timeline { grid-template-columns: 196px minmax(max-content, 1fr); gap: 16px; padding-left: 12px; }
+  .app-shell.theme-dark .workspace.has-scene-timeline { grid-template-columns: 0 minmax(0, 1fr); gap: 0; padding-inline: 16px; }
   .scene-timeline { width: 196px; }
   .scene-timeline > header { padding: 10px 12px; }
   .scene-timeline ol { padding: 8px; }
-  .scene-timeline li:not(.scene-timeline-tail) { grid-template-columns: 15px minmax(0, 1fr) 26px; }
+  .scene-timeline li:not(.scene-timeline-tail):not(.scene-timeline-act-separator) { grid-template-columns: 15px minmax(0, 1fr) 26px; }
   .app-shell.theme-dark .scene-timeline-delete { opacity: .72; }
 }
 

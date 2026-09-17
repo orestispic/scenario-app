@@ -43,6 +43,15 @@ it('a failed flush keeps the current text and refuses a switch',async()=>{
   expect(f.editor.readFile().coverPage.projectName).toBe('Ne pas perdre');
   expect(f.docs.get('b')?.coverPage.projectName).toBe('Texte B');
 });
+it('retrying an uncertain save on a named version does not cause a false conflict',async()=>{
+  const f=fixture(); await f.runtime.open(f.api,'account','root',f.editor);
+  const sync=vi.mocked(f.api.syncCloudScenario);
+  sync.mockRejectedValueOnce(new TypeError('offline'));
+  f.edit('First'); await f.runtime.flush(); f.edit('Second'); await f.runtime.flush();
+  expect(f.docs.get('a')?.coverPage.projectName).toBe('Second');
+  let status=''; f.runtime.subscribe(s=>{status=s.status;}); expect(status).toBe('synced');
+  expect(sync.mock.calls[1]).toEqual(sync.mock.calls[0]);
+});
 it('retries uncertain commands with exactly the same operation id',async()=>{
   const f=fixture();await f.runtime.open(f.api,'account','root',f.editor);
   vi.mocked(f.api.changeProjectVersion).mockRejectedValueOnce(new TypeError('uncertain'));
@@ -62,6 +71,18 @@ it('deleting the active version selects a surviving sibling without writing over
   await f.runtime.changeVersion('delete');
   expect(f.editor.readFile().coverPage.projectName).toBe('Texte B');
   expect(f.api.syncCloudScenario).not.toHaveBeenCalled();
+});
+it('renames or deletes the exact inactive version selected from the menu',async()=>{
+  const f=fixture();await f.runtime.open(f.api,'account','root',f.editor);
+  await f.runtime.changeVersion('rename','Version B renommée','b');
+  expect(f.branches[1].name).toBe('Version B renommée');
+  expect(f.editor.readFile().coverPage.projectName).toBe('Texte A');
+  const calls = vi.mocked(f.api.changeProjectVersion).mock.calls;
+  expect(calls[calls.length - 1]?.[1].versionId).toBe('b');
+  await f.runtime.changeVersion('delete','','b');
+  expect(f.branches[1].deletedAt).not.toBeNull();
+  expect(f.branches[0].deletedAt).toBeNull();
+  expect(f.editor.readFile().coverPage.projectName).toBe('Texte A');
 });
 it('closing during a version request prevents a late response from reopening the account',async()=>{
   const f=fixture();await f.runtime.open(f.api,'account','root',f.editor);

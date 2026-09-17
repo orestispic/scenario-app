@@ -23,6 +23,7 @@ export async function verifyBoundGrant(
   const signed = JSON.parse(payload.snapshotJson ?? "null") as EntitlementSnapshot | null;
   if (
     payload.contractVersion !== "2026-09-v4" ||
+    (payload.licenseFormatVersion !== undefined && payload.licenseFormatVersion !== 2) ||
     payload.userId !== userId ||
     !signed ||
     signed.id !== snapshot.id ||

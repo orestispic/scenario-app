@@ -41,6 +41,29 @@ function setup() {
 }
 
 describe("system-vault session lifecycle", () => {
+  it("never republishes authentication if logout happens during vault persistence", async () => {
+    const s = setup();
+    const listener = vi.fn();
+    s.manager.subscribe(listener);
+    const write = s.vault.write;
+    let finish!: () => void;
+    vi.mocked(s.vault.write).mockImplementationOnce(async token => {
+      await new Promise<void>(resolve => { finish = resolve; });
+      await write(token);
+    });
+    const accepting = s.manager.accept(s.session("late"));
+    const rejection = expect(accepting).rejects.toThrow("annulée");
+    await vi.waitFor(() => expect(finish).toBeTypeOf("function"));
+    const logout = s.manager.logout();
+    finish();
+    await rejection;
+    await logout;
+    expect(listener).not.toHaveBeenCalledWith(true);
+    expect(s.stored()).toBeNull();
+    expect(s.revoke).toHaveBeenCalledWith("access-late");
+    await s.manager.accept(s.session("next"));
+    expect(await s.manager.getAccessToken()).toBe("access-next");
+  });
   it("persists only refresh, restores after restart and rotates once for concurrent requests", async () => {
     const s = setup();
     await s.manager.accept(s.session("initial"));

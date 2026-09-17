@@ -2,7 +2,8 @@ import assert from 'node:assert/strict';
 import { pathToFileURL } from 'node:url';
 import { createHash, randomUUID } from 'node:crypto';
 import { createLocalRuntime } from '../../scenario-site-commercial/worker/src/localRuntime.ts';
-const {chromium}=await import(pathToFileURL(process.env.SCENARIO_PLAYWRIGHT_PATH).href);
+const playwright=await import(pathToFileURL(process.env.SCENARIO_PLAYWRIGHT_PATH).href);
+const {chromium}=playwright.default??playwright;
 const base='http://127.0.0.1:1422',runtime=await createLocalRuntime({allowedOrigins:[base],telemetry:{record(){}}});
 const browser=await chromium.launch({channel:'msedge',headless:true});
 const branches=[],documents=new Map();let root,diagnosticPage;
@@ -53,16 +54,19 @@ try {
  const editor=page.locator('.scenario-editor'),chooser=page.getByRole('combobox',{name:'Version',exact:true});
  await editor.click();await page.keyboard.type('Texte de la version A');
  async function choose(name){await chooser.click();await page.getByRole('option',{name,exact:true}).click();}
- async function create(action,name){await choose(action);const dialog=page.getByRole('dialog',{name:'Versions du projet'});await dialog.getByLabel('Nom de la version',{exact:true}).fill(name);await dialog.getByRole('button',{name:'Enregistrer',exact:true}).click();await dialog.waitFor({state:'hidden'});}
- await create('Dupliquer une version…','Variante');
+ async function create(action,name){await page.getByRole('button',{name:'Créer une version',exact:true}).click();await page.getByRole('menuitem',{name:action,exact:true}).click();await page.waitForFunction(expected=>document.querySelector('.project-version-control [role=combobox]')?.textContent===`Version : ${expected}`,name);}
+ async function rename(current,next){await chooser.click();await page.getByRole('option',{name:current,exact:true}).click({button:'right'});await page.getByRole('menuitem',{name:'Renommer',exact:true}).click();await page.getByLabel(`Nouveau nom de ${current}`,{exact:true}).fill(next);await page.getByRole('button',{name:'Enregistrer le nom',exact:true}).click();}
+ await create('Dupliquer la version actuelle','Version 2');await rename('Version 2','Variante');
  assert.ok((await editor.textContent()).includes('Texte de la version A'));
  await editor.click();await page.keyboard.press('Control+End');await page.keyboard.type(' Suite B');
- await choose('Version : Version 1');await page.waitForFunction(()=>document.querySelector('.scenario-editor')?.textContent==='Texte de la version A');
- await choose('Version : Variante');await page.waitForFunction(()=>document.querySelector('.scenario-editor')?.textContent?.includes('Suite B'));
- await create('Créer une version vierge…','Vide');assert.equal(await editor.textContent(),'');
- await choose('Version : Variante');await page.waitForFunction(()=>document.querySelector('.scenario-editor')?.textContent?.includes('Suite B'));
- await choose('Supprimer cette version…');await page.getByRole('button',{name:'Supprimer la version',exact:true}).click();await page.waitForFunction(()=>document.querySelector('.scenario-editor')?.textContent==='Texte de la version A');
+ await choose('Version 1');await page.waitForFunction(()=>document.querySelector('.scenario-editor')?.textContent==='Texte de la version A');
+ await choose('Variante');await page.waitForFunction(()=>document.querySelector('.scenario-editor')?.textContent?.includes('Suite B'));
+ await create('Nouvelle version vierge','Version 2');await rename('Version 2','Vide');assert.equal(await editor.textContent(),'');
+ await choose('Variante');await page.waitForFunction(()=>document.querySelector('.scenario-editor')?.textContent?.includes('Suite B'));
+ await chooser.click();await page.getByRole('option',{name:'Vide',exact:true}).click({button:'right'});await page.getByRole('menuitem',{name:'Supprimer',exact:true}).click();await page.getByRole('alert').getByRole('button',{name:'Supprimer',exact:true}).click();
+ await page.waitForFunction(()=>document.querySelector('.project-version-control [role=combobox]')?.textContent==='Version : Variante');
+ assert.ok((await editor.textContent()).includes('Suite B'));
  assert.deepEqual(errors,[]);
- console.log('PASS real app UI with isolated v14 fixture: cloud open, duplicate, outgoing save, A/B switch, blank and delete.');
+ console.log('PASS real app UI with isolated v14 fixture: compact create menu, inline rename, A/B switch, blank and targeted delete.');
 } catch(error){console.error(await diagnosticPage?.locator('[role="dialog"]').allTextContents());throw error;}
 finally {await browser.close();}

@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import { pathToFileURL } from 'node:url';
 import { mkdir } from 'node:fs/promises';
-const { chromium } = await import(pathToFileURL(process.env.SCENARIO_PLAYWRIGHT_PATH).href);
+const playwright = await import(pathToFileURL(process.env.SCENARIO_PLAYWRIGHT_PATH).href);
+const { chromium } = playwright.default ?? playwright;
 const base = process.env.SCENARIO_TEST_URL || 'http://127.0.0.1:1422';
 const browser = await chromium.launch({ channel: 'msedge', headless: true });
 try {
@@ -49,36 +50,47 @@ try {
     await chooser.click();
     await page.getByRole('option', { name, exact: true }).click();
   }
-  async function create(action, name) {
-    await choose(action);
-    await page.getByLabel('Nom de la version', { exact: true }).fill(name);
-    await page.getByRole('dialog', { name: 'Versions du projet' }).getByRole('button', { name: 'Enregistrer', exact: true }).click();
-    await page.getByRole('dialog', { name: 'Versions du projet' }).waitFor({ state: 'hidden' });
-    await page.waitForFunction(name => document.querySelector('.project-version-control button')?.textContent === `Version : ${name}`, name);
+  async function create(action, generatedName) {
+    await page.getByRole('button', { name: 'Créer une version', exact: true }).click();
+    await page.getByRole('menuitem', { name: action, exact: true }).click();
+    await page.waitForFunction(name => document.querySelector('.project-version-control [role=combobox]')?.textContent === `Version : ${name}`, generatedName);
   }
-  await create('Dupliquer une version…', 'Variante');
+  async function rename(currentName, nextName) {
+    await chooser.click();
+    await page.getByRole('option', { name: currentName, exact: true }).click({ button: 'right' });
+    await page.getByRole('menuitem', { name: 'Renommer', exact: true }).click();
+    await page.getByLabel(`Nouveau nom de ${currentName}`, { exact: true }).fill(nextName);
+    await page.getByRole('button', { name: 'Enregistrer le nom', exact: true }).click();
+  }
+  await create('Dupliquer la version actuelle', 'Version 2');
+  await rename('Version 2', 'Variante');
+  await page.waitForFunction(() => document.querySelector('.project-version-control [role=combobox]')?.textContent === 'Version : Variante');
   await editor.click(); await page.keyboard.press('Control+End'); await page.keyboard.type(' Fin alternative.');
-  await choose('Version : Version 1');
+  await choose('Version 1');
   await page.waitForFunction(() => document.querySelector('.scenario-editor')?.textContent === 'Texte original.');
   await editor.click(); await page.keyboard.press('Control+z');
   assert.equal(await editor.textContent(), 'Texte original.', 'Undo cannot pull content from the other version');
-  await choose('Version : Variante');
+  await choose('Variante');
   await editor.getByText('Texte original. Fin alternative.', { exact: true }).waitFor();
-  await create('Créer une version vierge…', 'Vide');
+  await create('Nouvelle version vierge', 'Version 2');
+  await rename('Version 2', 'Vide');
   assert.equal(await editor.textContent(), '');
   assert.equal(await page.locator('.margin-note').count(), 0);
   await page.reload(); await chooser.waitFor();
-  await page.waitForFunction(() => document.querySelector('.project-version-control button')?.textContent === 'Version : Vide');
+  await page.waitForFunction(() => document.querySelector('.project-version-control [role=combobox]')?.textContent === 'Version : Vide');
   assert.equal(await editor.textContent(), '', 'Newer recovery wins over older disk file');
-  await choose('Version : Variante');
+  await choose('Variante');
   await editor.getByText('Texte original. Fin alternative.', { exact: true }).waitFor();
-  await choose('Supprimer cette version…');
-  await page.getByRole('button', { name: 'Supprimer la version', exact: true }).click();
-  await page.waitForFunction(() => document.querySelector('.project-version-control button')?.textContent === 'Version : Version 1');
-  await choose('Restaurer une version…');
-  await page.getByRole('combobox', { name: 'Version supprimée' }).click();
-  await page.getByRole('option', { name: 'Variante', exact: true }).click();
-  await page.getByRole('button', { name: 'Restaurer', exact: true }).click();
+  await editor.click(); await page.keyboard.press('Control+End'); await page.keyboard.type(' Temporaire.');
+  // A context action on an inactive row must target that exact version and leave
+  // the current editor and its undo history untouched.
+  await chooser.click();
+  await page.getByRole('option', { name: 'Vide', exact: true }).click({ button: 'right' });
+  await page.getByRole('menuitem', { name: 'Supprimer', exact: true }).click();
+  await page.getByRole('alert').getByRole('button', { name: 'Supprimer', exact: true }).click();
+  await page.waitForFunction(() => document.querySelector('.project-version-control [role=combobox]')?.textContent === 'Version : Variante');
+  assert.equal(await editor.textContent(), 'Texte original. Fin alternative. Temporaire.');
+  await editor.click(); await page.keyboard.press('Control+z');
   await editor.getByText('Texte original. Fin alternative.', { exact: true }).waitFor();
   await editor.click(); await page.keyboard.press('Control+End'); await page.keyboard.type(' Encore.');
   await page.waitForFunction(() => localStorage.getItem('version-test-recovery')?.includes('Encore.'));
@@ -87,7 +99,7 @@ try {
   // Failed writes must not switch or lose outgoing edits; retry must work.
   for (const command of ['write_backup', 'write_autosave']) {
     await page.evaluate(command => { window.__failVersionWrite = command; }, command);
-    await choose('Version : Version 1');
+    await choose('Version 1');
     await page.getByRole('alert').getByText('Disque plein (test)', { exact: true }).waitFor();
     assert.equal(await editor.textContent(), 'Texte original. Fin alternative. Encore.');
     assert.match(await chooser.textContent(), /Variante/);
@@ -96,7 +108,7 @@ try {
   }
   // Double switching, editing and keyboard shortcuts are blocked during persistence.
   await page.evaluate(() => { window.__delayVersionWrite = true; });
-  await choose('Version : Version 1');
+  await choose('Version 1');
   await page.waitForFunction(() => Boolean(window.__releaseVersionWrite));
   assert.equal(await chooser.isDisabled(), true);
   assert.equal(await editor.getAttribute('contenteditable'), 'false');
@@ -106,15 +118,13 @@ try {
   await page.keyboard.press('Control+s');
   await page.waitForFunction(() => JSON.parse(localStorage.getItem('version-test-disk')).formatVersion === 2);
   const saved = await page.evaluate(() => JSON.parse(localStorage.getItem('version-test-disk')));
-  assert.equal(saved.versions.length, 3);
+  assert.equal(saved.versions.length, 2);
   assert.equal(saved.versions[1].document.content.content[0].content.filter(n => n.type === 'text').map(n => n.text).join(''), 'Texte original. Fin alternative. Encore.');
   assert.equal(saved.versions[0].document.coverPage.screenwriter, 'Alice');
-  assert.equal(saved.versions[2].document.coverPage.screenwriter, '');
   assert.equal(saved.versions[0].document.comments[0].messages[0].text, 'Commentaire original');
-  assert.equal(saved.versions[2].document.comments.length, 0);
   await mkdir('outputs/project-versions', { recursive: true });
-  await chooser.click(); await page.screenshot({ path: 'outputs/project-versions/editor.png' });
+  await chooser.click(); await page.waitForTimeout(180); await page.screenshot({ path: 'outputs/project-versions/editor.png' });
   assert.deepEqual(errors, []);
-  console.log('PASS: duplicate, blank, independent edits/comments/cover, switch, undo isolation, delete/restore, continued autosave, reload, disk save, I/O failures, transaction lock');
+  console.log('PASS: compact creation menu, inline rename, targeted permanent delete, independent edits, switch, undo isolation, autosave, reload, I/O failures and transaction lock');
   await context.close();
 } finally { await browser.close(); }

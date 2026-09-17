@@ -12,6 +12,10 @@ fn device_entry(scope: &str) -> Result<keyring::Entry, String> {
     scoped_entry("com.scenario.commercial.device-identity.v1", scope)
 }
 
+fn device_key_entry(scope: &str) -> Result<keyring::Entry, String> {
+    scoped_entry("com.scenario.commercial.device-key.v1", scope)
+}
+
 fn scoped_entry(service: &str, scope: &str) -> Result<keyring::Entry, String> {
     if !cfg!(any(target_os = "windows", target_os = "macos")) {
         return Err("System vault unsupported on this platform".into());
@@ -126,6 +130,32 @@ pub fn get_or_create_device_identity(scope: String, candidate: String) -> Result
                 .map_err(|_| "System vault unavailable")?;
             Ok(candidate)
         }
+        Err(_) => Err("System vault unavailable".into()),
+    }
+}
+
+#[tauri::command]
+pub fn read_device_keypair(scope: String) -> Result<Option<String>, String> {
+    let _guard = VAULT_LOCK.lock().map_err(|_| "System vault unavailable")?;
+    match device_key_entry(&scope)?.get_password() {
+        Ok(value) => Ok(Some(value)),
+        Err(keyring::Error::NoEntry) => Ok(None),
+        Err(_) => Err("System vault unavailable".into()),
+    }
+}
+
+#[tauri::command]
+pub fn write_device_keypair(scope: String, value: String) -> Result<(), String> {
+    let _guard = VAULT_LOCK.lock().map_err(|_| "System vault unavailable")?;
+    if value.len() < 128 || value.len() > 4096 || value.chars().any(char::is_control) {
+        return Err("Invalid device keypair".into());
+    }
+    let credential = device_key_entry(&scope)?;
+    match credential.get_password() {
+        Ok(_) => Err("Device key already exists".into()),
+        Err(keyring::Error::NoEntry) => credential
+            .set_password(&value)
+            .map_err(|_| "System vault unavailable".into()),
         Err(_) => Err("System vault unavailable".into()),
     }
 }

@@ -45,6 +45,7 @@ export function AccountLicensePanel({
   const [billing, setBilling] = useState<BillingState | null>(null);
   const [activations, setActivations] = useState<ActivationRedemptionView[]>([]);
   const [busy, setBusy] = useState(false);
+  const [sessionLoading, setSessionLoading] = useState(true);
   const [offline, setOffline] = useState(false);
   const [message, setMessage] = useState("");
 
@@ -73,15 +74,19 @@ export function AccountLicensePanel({
   }
 
   useEffect(() => {
-    void sessions
-      .getAccessToken()
-      .then((token) => {
-        if (token) return loadAuthenticatedAccount();
-      })
-      .catch(async (error) => {
+    void (async () => {
+      try {
+        if (await sessions.getAccessToken()) {
+          setSession(true);
+          await loadAuthenticatedAccount();
+        }
+      } catch (error) {
         if (!(await restoreOffline(error)))
           setMessage("Session indisponible. Vous pouvez réessayer ou vous reconnecter.");
-      });
+      } finally {
+        setSessionLoading(false);
+      }
+    })();
   }, []);
 
   async function restoreOffline(error: unknown): Promise<boolean> {
@@ -115,6 +120,7 @@ export function AccountLicensePanel({
       authenticatedOperations.reset();
       await offlineLicense.clear();
       deviceActivation.reset();
+      deviceActivation.resume();
       await sessions.accept(nextSession);
     }
     const api = accountApi();
@@ -190,12 +196,31 @@ export function AccountLicensePanel({
   }
 
   async function removeRegisteredDevice(deviceId: string) {
-    if (!session || deviceId === currentDeviceId) return;
+    if (!session) return;
+    const isCurrent = deviceId === currentDeviceId;
+    if (!window.confirm(isCurrent
+      ? 'Désactiver cet appareil ? Vous resterez connecté, mais les fonctions payantes exigeront une nouvelle activation.'
+      : 'Désactiver cet autre appareil ? Sa licence sera révoquée à sa prochaine connexion ou à l’expiration de son accès hors ligne.')) return;
     const api = accountApi();
     await api.deactivateDevice(deviceId);
-    deviceActivation.reset();
+    if (isCurrent) {
+      deviceActivation.suspend();
+      setCurrentDeviceId(null);
+      await offlineLicense.clear();
+    } else if (!currentDeviceId) {
+      deviceActivation.resume();
+      const currentDevice = await deviceActivation.ensure();
+      setCurrentDeviceId(currentDevice.id);
+    }
+    setDevices(await api.getDevices());
+    if (!isCurrent) await offlineLicense.refresh();
+  }
+
+  async function reactivateCurrentDevice() {
+    deviceActivation.resume();
     const currentDevice = await deviceActivation.ensure();
     setCurrentDeviceId(currentDevice.id);
+    const api = accountApi();
     setDevices(await api.getDevices());
     await offlineLicense.refresh();
   }
@@ -287,7 +312,7 @@ export function AccountLicensePanel({
       >
         <header>
           <div>
-            <h2>{session && me && entitlements ? 'Compte et licence' : screen === 'signin' ? 'Se connecter' : screen === 'signup' ? 'Créer un compte' : 'Réinitialiser le mot de passe'}</h2>
+            <h2>{sessionLoading || session ? 'Compte et licence' : screen === 'signin' ? 'Se connecter' : screen === 'signup' ? 'Créer un compte' : 'Réinitialiser le mot de passe'}</h2>
             {session && me && entitlements && localTestMode && <p>Compte de démonstration</p>}
           </div>
           {!required && (
@@ -302,7 +327,14 @@ export function AccountLicensePanel({
           )}
         </header>
 
-        {session && me && entitlements ? (
+        {sessionLoading ? (
+          <div className="account-session-loading" role="status">Ouverture de votre compte…</div>
+        ) : session && (!me || !entitlements) ? (
+          <div className="account-session-loading" role="status">
+            <p>Les informations du compte n’ont pas pu être chargées.</p>
+            <button disabled={busy} onClick={() => void run(() => loadAuthenticatedAccount(), 'Compte actualisé.')}>Réessayer</button>
+          </div>
+        ) : session && me && entitlements ? (
           <div className="account-license-details">
             <div className="account-overview-grid">
               <section className="account-license-section account-profile-section">
@@ -367,14 +399,19 @@ export function AccountLicensePanel({
                   <span>{activeDevices.length} actif(s)</span>
                 </div>
                 <p className="account-device-help">Cet appareil est autorisé automatiquement après votre connexion.</p>
-                {activeDevices.length ? (
+                {devices.length ? (
                   <ul className="account-device-list">
-                    {activeDevices.map((device) => (
+                    {devices.map((device) => (
                       <li key={device.id}>
-                        <span>{device.id === currentDeviceId ? 'Cet appareil' : device.label ?? 'Appareil autorisé'}</span>
-                        {device.id === currentDeviceId ? (
-                          <small>Actuel</small>
-                        ) : (
+                        <span>
+                          <strong>{device.id === currentDeviceId ? 'Cet appareil' : device.label ?? 'Appareil autorisé'}</strong>
+                          <small>
+                            {device.platform === 'windows' ? 'Windows' : 'macOS'} · première activation {new Date(device.firstActivatedAt ?? device.lastSeenAt).toLocaleDateString('fr-FR')}
+                            {' · '}dernière utilisation {new Date(device.lastSeenAt).toLocaleDateString('fr-FR')}
+                            {device.clientVersion ? ` · Senario ${device.clientVersion}` : ''}
+                          </small>
+                        </span>
+                        {device.status === 'active' ? (
                           <button
                             type="button"
                             disabled={busy}
@@ -383,14 +420,17 @@ export function AccountLicensePanel({
                               'Ancien appareil retiré. Cet appareil est maintenant autorisé.',
                             )}
                           >
-                            Retirer
+                            {device.id === currentDeviceId ? 'Désactiver cet appareil' : 'Désactiver'}
                           </button>
-                        )}
+                        ) : <small>Désactivé</small>}
                       </li>
                     ))}
                   </ul>
                 ) : (
                   <p>Aucun appareil actif.</p>
+                )}
+                {!currentDeviceId && (
+                  <button type="button" disabled={busy} onClick={() => void run(reactivateCurrentDevice, 'Cet appareil est réactivé.')}>Réactiver cet appareil</button>
                 )}
               </section>
 

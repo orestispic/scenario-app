@@ -12,6 +12,7 @@ use tauri::{AppHandle, Emitter, Manager, State, WindowEvent};
 
 const MAX_SCENARIO_SIZE: u64 = 32 * 1024 * 1024;
 const MAX_PDF_SIZE: u64 = 64 * 1024 * 1024;
+const MAX_INTERCHANGE_SIZE: u64 = 64 * 1024 * 1024;
 const MAX_BACKUP_FILES: usize = 30;
 
 #[derive(Default)]
@@ -114,6 +115,39 @@ fn read_pdf(path: String) -> Result<Vec<u8>, String> {
     fs::read(path).map_err(|error| format!("Impossible de lire le PDF : {error}"))
 }
 
+fn is_supported_interchange_path(path: &Path) -> bool {
+    path.extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| {
+            matches!(
+                extension.to_ascii_lowercase().as_str(),
+                "fdx" | "fountain" | "docx"
+            )
+        })
+}
+
+#[tauri::command]
+fn read_interchange_file(path: String) -> Result<Vec<u8>, String> {
+    let path = PathBuf::from(path);
+    if !is_supported_interchange_path(&path) {
+        return Err(
+            "Seuls les fichiers FDX, Fountain et DOCX peuvent être importés ici.".to_string(),
+        );
+    }
+    let metadata = fs::metadata(&path)
+        .map_err(|error| format!("Impossible d’ouvrir le fichier à importer : {error}"))?;
+    if !metadata.is_file() {
+        return Err("Le chemin sélectionné n’est pas un fichier.".to_string());
+    }
+    if metadata.len() == 0 {
+        return Err("Le fichier sélectionné est vide.".to_string());
+    }
+    if metadata.len() > MAX_INTERCHANGE_SIZE {
+        return Err("Ce fichier dépasse la taille maximale autorisée de 64 Mo.".to_string());
+    }
+    fs::read(path).map_err(|error| format!("Impossible de lire le fichier à importer : {error}"))
+}
+
 #[tauri::command]
 fn write_scenario(path: String, contents: String) -> Result<(), String> {
     ensure_scenario_size(contents.len(), "enregistré")?;
@@ -165,6 +199,23 @@ fn record_recent_scenario(app: AppHandle, path: String) -> Result<Vec<RecentScen
 #[tauri::command]
 fn write_pdf(path: String, contents: Vec<u8>) -> Result<(), String> {
     write_bytes_atomically(PathBuf::from(path), &contents, "le PDF")
+}
+
+#[tauri::command]
+fn write_interchange_file(path: String, contents: Vec<u8>) -> Result<(), String> {
+    let path = PathBuf::from(path);
+    if !is_supported_interchange_path(&path) {
+        return Err("L’export doit utiliser l’extension .fdx, .fountain ou .docx.".to_string());
+    }
+    if contents.is_empty() {
+        return Err("Le document exporté est vide.".to_string());
+    }
+    if contents.len() as u64 > MAX_INTERCHANGE_SIZE {
+        return Err(
+            "Le document exporté dépasse la taille maximale autorisée de 64 Mo.".to_string(),
+        );
+    }
+    write_bytes_atomically(path, &contents, "le document exporté")
 }
 
 #[tauri::command]
@@ -486,16 +537,20 @@ pub fn run() {
             session_vault::read_device_identity,
             session_vault::write_device_identity,
             session_vault::get_or_create_device_identity,
+            session_vault::read_device_keypair,
+            session_vault::write_device_keypair,
             session_vault::read_offline_trust,
             session_vault::write_offline_trust,
             session_vault::clear_offline_trust,
             launched_scenario_path,
             read_scenario,
             read_pdf,
+            read_interchange_file,
             write_scenario,
             read_recent_scenarios,
             record_recent_scenario,
             write_pdf,
+            write_interchange_file,
             write_autosave,
             write_backup,
             read_recovery,
@@ -595,5 +650,14 @@ mod tests {
     fn enforces_the_same_size_limit_for_every_scenario_save() {
         assert!(ensure_scenario_size(MAX_SCENARIO_SIZE as usize, "testé").is_ok());
         assert!(ensure_scenario_size(MAX_SCENARIO_SIZE as usize + 1, "testé").is_err());
+    }
+
+    #[test]
+    fn accepts_only_supported_interchange_extensions() {
+        assert!(is_supported_interchange_path(Path::new("film.fdx")));
+        assert!(is_supported_interchange_path(Path::new("film.FOUNTAIN")));
+        assert!(is_supported_interchange_path(Path::new("film.docx")));
+        assert!(!is_supported_interchange_path(Path::new("film.docm")));
+        assert!(!is_supported_interchange_path(Path::new("film.exe")));
     }
 }

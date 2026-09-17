@@ -55,6 +55,76 @@ export const ScenarioParagraph = Node.create({
         renderHTML: (attributes) =>
           attributes.blockId ? { "data-block-id": attributes.blockId } : {},
       },
+      whiteboardAct: {
+        default: null,
+        parseHTML: (element) => {
+          const value = Number(element.getAttribute("data-whiteboard-act"));
+          return Number.isInteger(value) && value >= 1 ? value : null;
+        },
+        renderHTML: (attributes) =>
+          Number.isInteger(attributes.whiteboardAct) && attributes.whiteboardAct >= 1
+            ? { "data-whiteboard-act": String(attributes.whiteboardAct) }
+            : {},
+      },
+      whiteboardActCount: {
+        default: null,
+        parseHTML: (element) => {
+          const value = Number(element.getAttribute("data-whiteboard-act-count"));
+          return Number.isInteger(value) && value >= 1 ? value : null;
+        },
+        renderHTML: (attributes) =>
+          Number.isInteger(attributes.whiteboardActCount) && attributes.whiteboardActCount >= 1
+            ? { "data-whiteboard-act-count": String(attributes.whiteboardActCount) }
+            : {},
+      },
+      whiteboardActDescriptions: {
+        default: "",
+        parseHTML: (element) => element.getAttribute("data-whiteboard-act-descriptions") ?? "",
+        renderHTML: (attributes) =>
+          typeof attributes.whiteboardActDescriptions === "string" && attributes.whiteboardActDescriptions
+            ? { "data-whiteboard-act-descriptions": attributes.whiteboardActDescriptions }
+            : {},
+      },
+      whiteboardSummary: {
+        default: "",
+        parseHTML: (element) => element.getAttribute("data-whiteboard-summary") ?? "",
+        renderHTML: (attributes) =>
+          typeof attributes.whiteboardSummary === "string" && attributes.whiteboardSummary
+            ? { "data-whiteboard-summary": attributes.whiteboardSummary }
+            : {},
+      },
+      whiteboardTag: {
+        default: "",
+        parseHTML: (element) => element.getAttribute("data-whiteboard-tag") ?? "",
+        renderHTML: (attributes) =>
+          typeof attributes.whiteboardTag === "string" && attributes.whiteboardTag
+            ? { "data-whiteboard-tag": attributes.whiteboardTag }
+            : {},
+      },
+      whiteboardColor: {
+        default: "",
+        parseHTML: (element) => element.getAttribute("data-whiteboard-color") ?? "",
+        renderHTML: (attributes) =>
+          typeof attributes.whiteboardColor === "string" && attributes.whiteboardColor
+            ? { "data-whiteboard-color": attributes.whiteboardColor }
+            : {},
+      },
+      breakdownData: {
+        default: "",
+        parseHTML: (element) => element.getAttribute("data-breakdown") ?? "",
+        renderHTML: (attributes) =>
+          typeof attributes.breakdownData === "string" && attributes.breakdownData
+            ? { "data-breakdown": attributes.breakdownData }
+            : {},
+      },
+      technicalBreakdownData: {
+        default: "",
+        parseHTML: (element) => element.getAttribute("data-technical-breakdown") ?? "",
+        renderHTML: (attributes) =>
+          typeof attributes.technicalBreakdownData === "string" && attributes.technicalBreakdownData
+            ? { "data-technical-breakdown": attributes.technicalBreakdownData }
+            : {},
+      },
     };
   },
 

@@ -49,19 +49,23 @@ export function AiBudgetUsage() {
       <div className="ai-budget-periods">
         {(['daily', 'monthly'] as const).map(key => {
           const budget = budgets[key];
-          const percentage = Math.max(0, Math.min(100, budget.usedPercent));
+          // The server remains authoritative for usage. This is only the inverse
+          // visual representation requested by the product: available credit.
+          const remainingPercentage = Math.max(0, Math.min(100, 100 - budget.usedPercent));
+          const periodLabel = key === 'daily' ? 'journalier' : 'mensuel';
           return <div key={key} className="ai-budget-period">
-            <p>Budget {key === 'daily' ? 'journalier' : 'mensuel'} utilisé : <strong>{budget.usedPercent.toLocaleString('fr-FR')} %</strong></p>
-            {key === 'daily' && <div
+            <p>Crédit IA {periodLabel} restant : <strong>{remainingPercentage.toLocaleString('fr-FR')} %</strong></p>
+            <div
               className="ai-budget-progress"
               role="progressbar"
-              aria-label={`Budget ${key === 'daily' ? 'journalier' : 'mensuel'}`}
+              aria-label={`Crédit IA ${periodLabel} restant`}
               aria-valuemin={0}
               aria-valuemax={100}
-              aria-valuenow={percentage}
+              aria-valuenow={remainingPercentage}
+              aria-valuetext={`${remainingPercentage.toLocaleString('fr-FR')} % de crédit IA ${periodLabel} restant`}
             >
-              <span style={{ width: `${percentage}%` }} />
-            </div>}
+              <span style={{ width: `${remainingPercentage}%` }} />
+            </div>
           </div>;
         })}
       </div>

@@ -9,6 +9,7 @@ import { OfflineLicense } from './offlineLicense';
 import { version as clientVersion } from '../../package.json';
 import { getDeviceFingerprint, initializeDeviceIdentity } from './deviceIdentity';
 import { DeviceActivation } from './deviceActivation';
+import { getDeviceKeyThumbprint, getDevicePublicKey, initializeDeviceKey, signDeviceChallenge, signDeviceRequest } from './deviceKey';
 
 export const localTestMode =
   import.meta.env.DEV && import.meta.env.VITE_SCENARIO_AUTH_MODE === "local-test";
@@ -56,8 +57,14 @@ export function browserStorage() {
 
 export { getDeviceFingerprint };
 
-export function initializeRuntimeDeviceIdentity(): Promise<void> {
-  return initializeDeviceIdentity(commercialScope);
+export async function initializeRuntimeDeviceIdentity(): Promise<void> {
+  await initializeDeviceIdentity(commercialScope);
+  try { await initializeDeviceKey(commercialScope); }
+  catch (error) {
+    // A vault failure disables paid/network operations, never local editing or
+    // access to projects.
+    console.warn('Identité cryptographique appareil indisponible.', error);
+  }
 }
 
 export function getClientPlatform(): "windows" | "macos" {
@@ -66,7 +73,17 @@ export function getClientPlatform(): "windows" | "macos" {
 
 export const deviceActivation = new DeviceActivation(async () => {
   const api = createAuthenticatedCommercialApi({ baseUrl: apiBaseUrl,
-    accessToken: () => sessions.getAccessToken(), signal: authenticatedOperations.signal });
+    accessToken: () => sessions.getAccessToken(), signal: authenticatedOperations.signal,
+    clientContext: {
+      clientVersion,
+      deviceFingerprint: getDeviceFingerprint,
+      platform: getClientPlatform,
+      devicePublicKey: getDevicePublicKey,
+      signDeviceChallenge,
+      deviceKeyThumbprint: getDeviceKeyThumbprint,
+      signDeviceRequest,
+    },
+  });
   return api.activateDevice({ fingerprint: getDeviceFingerprint(), label: "Cet appareil", platform: getClientPlatform() });
 });
 sessions.subscribe(authenticated => { if (!authenticated) deviceActivation.reset(); });
@@ -83,6 +100,10 @@ export function createRuntimeCommercialApi(onUnauthorized?: () => Promise<void>)
       clientVersion,
       deviceFingerprint: getDeviceFingerprint,
       platform: getClientPlatform,
+      devicePublicKey: getDevicePublicKey,
+      signDeviceChallenge,
+      deviceKeyThumbprint: getDeviceKeyThumbprint,
+      signDeviceRequest,
     },
   });
 }
@@ -98,4 +119,4 @@ export const offlineLicense = new OfflineLicense(offlineTrust, browserStorage(),
     const token = await sessions.getAccessToken();
     if (token) { authenticatedOperations.reset(); await deviceActivation.ensure(); }
     return token;
-  });
+  }, getDeviceKeyThumbprint, () => deviceActivation.ensure());

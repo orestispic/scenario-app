@@ -2,6 +2,7 @@ import { parseMetadataResponse, type MetadataResponse, type MetadataWrite } from
 import { parseAiTokenBudgets, notifyAiUsageChanged, type AiTokenBudgets } from './aiTokenUsage';
 import type {
   DeviceView,
+  DeviceChallenge,
   EntitlementsResponse,
   MeResponse,
   PublicConfiguration,
@@ -81,8 +82,15 @@ export class CommercialHttpError extends Error {
 
 import { parseCloudProjects, parseProjectSharing, parseProjectInvitationResponse, type CloudProjectListResponse, type CloudProjectSharingResponse } from './contractsV9';
 import { parseProjectVersions, type CloudProjectVersion, type VersionCommand } from './contractsV14';
+import { parseContacts, parseContactMutation, type ContactListResponse } from './contractsV15';
+import { parseScenarioFile, type ScenarioFile } from '../document/scenarioFile';
 
 export interface AuthenticatedCommercialApi {
+  readCurrentProjectDocument(scenarioId: string, signal?: AbortSignal): Promise<ScenarioFile>;
+  listContacts(): Promise<ContactListResponse>;
+  requestContact(email: string, idempotencyKey: string): Promise<void>;
+  respondContactRequest(requestId: string, decision: 'accept' | 'decline' | 'cancel', idempotencyKey: string): Promise<void>;
+  removeContact(profileId: string, idempotencyKey: string): Promise<void>;
   listCloudProjects(): Promise<CloudProjectListResponse>;
   listProjectVersions(projectId: string): Promise<CloudProjectVersion[]>;
   changeProjectVersion(projectId: string, command: VersionCommand): Promise<void>;
@@ -94,6 +102,7 @@ export interface AuthenticatedCommercialApi {
   getConfiguration(): Promise<PublicConfiguration>;
   getMe(): Promise<MeResponse>;
   getEntitlements(): Promise<EntitlementsResponse>;
+  renewOfflineLicense(deviceId: string): Promise<EntitlementsResponse>;
   getDevices(): Promise<DeviceView[]>;
   activateDevice(input: {
     fingerprint: string;
@@ -181,6 +190,10 @@ export function createAuthenticatedCommercialApi(options: {
     clientVersion: string;
     deviceFingerprint: string | (() => string);
     platform: "windows" | "macos" | (() => "windows" | "macos");
+    devicePublicKey?: () => JsonWebKey;
+    signDeviceChallenge?: (message: string) => Promise<string>;
+    deviceKeyThumbprint?: () => string;
+    signDeviceRequest?: (input: { method: string; path: string; timestamp: string; nonce: string; bodyDigest: string }) => Promise<string>;
   };
 }): AuthenticatedCommercialApi {
   const baseUrl = options.baseUrl.replace(/\/$/, "");
@@ -229,6 +242,26 @@ export function createAuthenticatedCommercialApi(options: {
     if (new Headers(init.headers).has('X-Scenario-Device-Fingerprint') && !path.startsWith('/v3/entitlements')) {
       await options.beforeDeviceRequest?.();
     }
+    let proofHeaders: Record<string, string> = {};
+    if (/^\/v(?:4|5|6|7|9|10|14|15|16)\//.test(path) && options.clientContext?.deviceKeyThumbprint && options.clientContext.signDeviceRequest) {
+      const body = init.body === undefined || init.body === null ? '' : typeof init.body === 'string'
+        ? init.body : (() => { throw new Error('Format de requête incompatible avec la preuve appareil.'); })();
+      const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(body)));
+      let binary = '';
+      for (const byte of digest) binary += String.fromCharCode(byte);
+      const bodyDigest = btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+      const timestamp = String(Date.now());
+      const nonce = crypto.randomUUID();
+      proofHeaders = {
+        'X-Senario-Device-Key': options.clientContext.deviceKeyThumbprint(),
+        'X-Senario-Device-Time': timestamp,
+        'X-Senario-Device-Nonce': nonce,
+        'X-Senario-Device-Body': bodyDigest,
+        'X-Senario-Device-Signature': await options.clientContext.signDeviceRequest({
+          method: init.method ?? 'GET', path, timestamp, nonce, bodyDigest,
+        }),
+      };
+    }
     if (init.signal?.aborted) throw new DOMException('Aborted', 'AbortError');
     const response = await fetcher(`${baseUrl}${path}`, {
       ...init,
@@ -237,6 +270,7 @@ export function createAuthenticatedCommercialApi(options: {
         Accept: "application/json",
         Authorization: `Bearer ${accessToken}`,
         ...(init.body ? { "Content-Type": "application/json" } : {}),
+        ...proofHeaders,
         ...Object.fromEntries(new Headers(init.headers).entries()),
       },
     });
@@ -310,6 +344,20 @@ export function createAuthenticatedCommercialApi(options: {
     };
   }
 
+  async function createDeviceChallenge(purpose: DeviceChallenge['purpose'], deviceId?: string): Promise<DeviceChallenge> {
+    return (await request<{ challenge: DeviceChallenge }>('/v2/devices/challenges', {
+      method: 'POST',
+      body: JSON.stringify({ purpose, ...(deviceId ? { deviceId } : {}) }),
+    })).challenge;
+  }
+
+  function proofContext() {
+    const context = options.clientContext;
+    if (!context?.devicePublicKey || !context.signDeviceChallenge)
+      throw new Error('Preuve cryptographique appareil indisponible.');
+    return context;
+  }
+
   async function aiRequest<T>(path: string, input: unknown): Promise<AiExecutionResponse<T>> {
     const serialized = JSON.stringify(input);
     const pendingKey = `${path}:${serialized}`;
@@ -361,15 +409,40 @@ export function createAuthenticatedCommercialApi(options: {
   return {
     getConfiguration: () => request<PublicConfiguration>("/v1/config"),
     getMe: () => request<MeResponse>("/v1/me"),
-    getEntitlements: () => request<EntitlementsResponse>(options.clientContext ? "/v3/entitlements?offline=1" : "/v3/entitlements", options.clientContext ? { headers: cloudHeaders() } : {}),
+    getEntitlements: () => request<EntitlementsResponse>("/v3/entitlements"),
+    renewOfflineLicense: async (deviceId) => {
+      const context = proofContext();
+      const challenge = await createDeviceChallenge('license_renewal', deviceId);
+      return request<EntitlementsResponse>('/v2/licenses/renew', {
+        method: 'POST',
+        body: JSON.stringify({
+          deviceId,
+          challengeId: challenge.id,
+          signature: await context.signDeviceChallenge!(challenge.message),
+          clientVersion: context.clientVersion,
+        }),
+      });
+    },
     getDevices: async () => (await request<{ devices: DeviceView[] }>("/v1/devices")).devices,
-    activateDevice: async (input) =>
-      (
-        await request<{ device: DeviceView }>("/v1/devices/activate", {
-          method: "POST",
-          body: JSON.stringify(input),
-        })
-      ).device,
+    activateDevice: async (input) => {
+      if (!options.clientContext?.devicePublicKey || !options.clientContext.signDeviceChallenge) {
+        return (await request<{ device: DeviceView }>("/v1/devices/activate", {
+          method: "POST", body: JSON.stringify(input),
+        })).device;
+      }
+      const context = proofContext();
+      const challenge = await createDeviceChallenge('activation');
+      return (await request<{ device: DeviceView }>('/v2/devices/activate', {
+        method: 'POST',
+        body: JSON.stringify({
+          ...input,
+          publicKey: context.devicePublicKey!(),
+          clientVersion: context.clientVersion,
+          challengeId: challenge.id,
+          signature: await context.signDeviceChallenge!(challenge.message),
+        }),
+      })).device;
+    },
     deactivateDevice: (deviceId) =>
       request<void>("/v1/devices/deactivate", {
         method: "POST",
@@ -442,8 +515,17 @@ export function createAuthenticatedCommercialApi(options: {
       );
       return response.download;
     },
+    listContacts: async () => parseContacts(await request('/v15/contacts', { headers: cloudHeaders() })),
+    requestContact: async (email, key) => parseContactMutation(await request('/v15/contact-requests', { method: 'POST', headers: cloudHeaders(key), body: JSON.stringify({ email }) })),
+    respondContactRequest: async (id, decision, key) => parseContactMutation(await request(`/v15/contact-requests/${encodeURIComponent(id)}/respond`, { method: 'POST', headers: cloudHeaders(key), body: JSON.stringify({ decision }) })),
+    removeContact: async (id, key) => parseContactMutation(await request(`/v15/contacts/${encodeURIComponent(id)}/remove`, { method: 'POST', headers: cloudHeaders(key), body: '{}' })),
     listCloudProjects: async () => parseCloudProjects(await request('/v9/projects', { headers: cloudHeaders() })),
     listProjectVersions: async (id) => parseProjectVersions(await request(`/v14/projects/${encodeURIComponent(id)}/versions`, { headers: cloudHeaders() }), id),
+    readCurrentProjectDocument: async (id, signal) => {
+      const result = await request<{ document: unknown }>(`/v16/scenarios/${encodeURIComponent(id)}/document`, {headers:cloudHeaders(),signal});
+      if (!result.document) throw new Error('Document cloud incomplet.');
+      return parseScenarioFile(JSON.stringify(result.document));
+    },
     changeProjectVersion: async (id, command) => { await request(`/v14/projects/${encodeURIComponent(id)}/versions`, { method: 'POST', headers: { ...cloudHeaders(), 'Idempotency-Key': command.operationId }, body: JSON.stringify(command) }); },
     getProjectMetadata: async (id,signal) => parseMetadataResponse(await request(`/v10/projects/${id}/metadata`,{headers:cloudHeaders(),signal})),
     writeProjectMetadata: async (id,write,signal) => parseMetadataResponse(await request(`/v10/projects/${id}/metadata`,{method:'POST',headers:cloudHeaders(write.operationId),body:JSON.stringify(write),signal})),

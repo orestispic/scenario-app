@@ -14,7 +14,8 @@ const MARGIN_LEFT = 38.1;
 const CONTENT_WIDTH = PAGE_WIDTH - MARGIN_LEFT - MARGIN_RIGHT;
 const LINE_HEIGHT = 16 * (25.4 / 96);
 const FOOTER_Y = PAGE_HEIGHT - 10;
-const SCREENPLAY_FONT = "DejaVuSansMono";
+export const PDF_UNICODE_FONT = "DejaVuSansMono";
+const SCREENPLAY_FONT = PDF_UNICODE_FONT;
 const SCREENPLAY_FONT_REGULAR_FILE = "DejaVuSansMono.ttf";
 const SCREENPLAY_FONT_BOLD_FILE = "DejaVuSansMono-Bold.ttf";
 
@@ -152,7 +153,7 @@ export async function createScenarioPdf(
   return new Uint8Array(pdf.output("arraybuffer"));
 }
 
-async function installUnicodeFonts(pdf: jsPDF): Promise<void> {
+export async function installUnicodeFonts(pdf: jsPDF): Promise<void> {
   if (!embeddedFontData) {
     embeddedFontData = Promise.all([
       fetchFontAsBase64(dejavuMonoRegularUrl),
@@ -388,7 +389,7 @@ function getNodeText(node: JSONContent): string {
   return (node.content ?? []).map(getNodeText).join("");
 }
 
-function normalizePdfText(text: string): string {
+export function normalizePdfText(text: string): string {
   return text
     .replace(/[’‘]/g, "'")
     .replace(/[“”]/g, '"')
