@@ -273,6 +273,15 @@
   .account-device-list li>span small {color:var(--text-3)!important;font-size:9px!important;text-transform:none;white-space:normal;line-height:1.35;}
   .account-device-list li>small {color:var(--text-3)!important;font-size:9px!important;text-transform:uppercase;}
   .account-device-list button {min-height:26px;padding:0 8px;font-size:10px;}
+  .device-access-dialog-backdrop {position:fixed;inset:0;z-index:260;display:grid;place-items:center;padding:20px;background:rgba(3,5,8,.76);}
+  .app-shell.theme-dark .device-access-dialog {width:min(560px,calc(100vw - 40px));display:grid;gap:14px;padding:18px;border:1px solid var(--border);border-radius:var(--r-lg);background:var(--surface-2);box-shadow:var(--shadow-3);}
+  .device-access-dialog h3,.device-access-dialog p {margin:0;}
+  .device-access-dialog ul {display:grid;gap:8px;margin:0;padding:0;list-style:none;}
+  .app-shell.theme-dark .device-access-dialog li {display:flex;align-items:center;justify-content:space-between;gap:14px;padding:10px;border:1px solid var(--divider);border-radius:7px;background:var(--surface-3);}
+  .device-access-dialog li>span {display:grid;gap:3px;min-width:0;}
+  .device-access-dialog li small {color:var(--text-3)!important;}
+  .device-access-dialog li button {flex:0 0 auto;}
+  .device-access-actions {display:flex;justify-content:flex-end;gap:8px;}
   .app-shell.theme-dark .account-device-help {margin:0;color:var(--text-3);font-size:10px;}
   .account-activation-form {display:grid;gap:5px;}
   .account-activation-form>label {color:var(--text-2);font-size:10px;}

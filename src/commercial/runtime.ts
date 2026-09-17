@@ -9,6 +9,7 @@ import { OfflineLicense } from './offlineLicense';
 import { version as clientVersion } from '../../package.json';
 import { getDeviceFingerprint, initializeDeviceIdentity } from './deviceIdentity';
 import { DeviceActivation } from './deviceActivation';
+import { ExclusiveDeviceSession } from './exclusiveDeviceSession';
 import { getDeviceKeyThumbprint, getDevicePublicKey, initializeDeviceKey, signDeviceChallenge, signDeviceRequest } from './deviceKey';
 
 export const localTestMode =
@@ -86,14 +87,41 @@ export const deviceActivation = new DeviceActivation(async () => {
   });
   return api.activateDevice({ fingerprint: getDeviceFingerprint(), label: "Cet appareil", platform: getClientPlatform() });
 });
-sessions.subscribe(authenticated => { if (!authenticated) deviceActivation.reset(); });
+
+function createDeviceSessionApi() {
+  return createAuthenticatedCommercialApi({
+    baseUrl: apiBaseUrl,
+    accessToken: () => sessions.getAccessToken(),
+    signal: authenticatedOperations.signal,
+    clientContext: {
+      clientVersion,
+      deviceFingerprint: getDeviceFingerprint,
+      platform: getClientPlatform,
+      devicePublicKey: getDevicePublicKey,
+      signDeviceChallenge,
+      deviceKeyThumbprint: getDeviceKeyThumbprint,
+      signDeviceRequest,
+    },
+  });
+}
+
+export const exclusiveDeviceSession = new ExclusiveDeviceSession(createDeviceSessionApi);
+sessions.subscribe(authenticated => {
+  if (!authenticated) {
+    deviceActivation.reset();
+    exclusiveDeviceSession.reset();
+  }
+});
 
 export function createRuntimeCommercialApi(onUnauthorized?: () => Promise<void>) {
   return createAuthenticatedCommercialApi({
     baseUrl: apiBaseUrl,
     accessToken: () => sessions.getAccessToken(),
     onUnauthorized,
-    beforeDeviceRequest: () => deviceActivation.ensure(),
+    beforeDeviceRequest: async () => {
+      const device = await deviceActivation.ensure();
+      await exclusiveDeviceSession.ensure(device.id);
+    },
     signal: authenticatedOperations.signal,
     clientContext: {
       // The published artifact must report its own version even without a local .env.

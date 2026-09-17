@@ -57,6 +57,12 @@ export interface DeviceChallenge {
   expiresAt: string;
 }
 
+export interface DeviceSessionLease {
+  leaseId: string;
+  deviceId: string;
+  expiresAt: string;
+}
+
 export interface UsageView {
   quotaCode: string;
   used: number;

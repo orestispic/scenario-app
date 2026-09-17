@@ -16,6 +16,7 @@ import {
   cloudSyncQueue,
   authenticatedOperations,
   deviceActivation,
+  exclusiveDeviceSession,
 } from "./runtime";
 import { cloudProjectRuntime } from './cloudProjectRuntime';
 import { AiBudgetUsage } from './AiBudgetUsage';
@@ -48,6 +49,8 @@ export function AccountLicensePanel({
   const [sessionLoading, setSessionLoading] = useState(true);
   const [offline, setOffline] = useState(false);
   const [message, setMessage] = useState("");
+  const [deviceLimitReached, setDeviceLimitReached] = useState(false);
+  const [sessionConflict, setSessionConflict] = useState<{ activeDevice: DeviceView | null; expiresAt: string | null } | null>(null);
 
   useEffect(() => offlineLicense.subscribe(() => {
     if (offline && offlineLicense.state.kind !== 'valid') {
@@ -125,15 +128,32 @@ export function AccountLicensePanel({
     }
     const api = accountApi();
     let activationWarning: string | undefined;
+    let sessionReady = false;
     try {
       const currentDevice = await deviceActivation.ensure();
       setCurrentDeviceId(currentDevice.id);
+      setDeviceLimitReached(false);
+      try {
+        await exclusiveDeviceSession.ensure(currentDevice.id);
+        sessionReady = true;
+        setSessionConflict(null);
+      } catch (error) {
+        if (!(error instanceof CommercialHttpError && error.code === 'device_session_in_use')) throw error;
+        const conflict = error.details?.conflict as { activeDevice?: DeviceView; expiresAt?: string } | undefined;
+        setSessionConflict({
+          activeDevice: conflict?.activeDevice ?? null,
+          expiresAt: typeof conflict?.expiresAt === 'string' ? conflict.expiresAt : null,
+        });
+        activationWarning = 'Senario est déjà utilisé sur un autre appareil.';
+      }
     } catch (error) {
       if (!(error instanceof CommercialHttpError && error.code === "device_limit_reached")) {
         throw error;
       }
       setCurrentDeviceId(null);
-      activationWarning = "Limite d’appareils atteinte. Retirez un ancien appareil pour autoriser automatiquement celui-ci.";
+      setSessionConflict(null);
+      setDeviceLimitReached(true);
+      activationWarning = "Deux appareils sont déjà autorisés. Choisissez celui à remplacer.";
     }
     const [nextMe, nextEntitlements, nextDevices, nextBilling, nextActivations] =
       await Promise.all([
@@ -145,7 +165,7 @@ export function AccountLicensePanel({
       ]);
     await offlineLicense.refresh();
     await cloudSyncQueue.bindAccount(nextMe.account.id);
-    void cloudSyncQueue.process();
+    if (sessionReady) void cloudSyncQueue.process();
     setOffline(false);
     setSession(true);
     setMe(nextMe);
@@ -202,6 +222,7 @@ export function AccountLicensePanel({
       ? 'Désactiver cet appareil ? Vous resterez connecté, mais les fonctions payantes exigeront une nouvelle activation.'
       : 'Désactiver cet autre appareil ? Sa licence sera révoquée à sa prochaine connexion ou à l’expiration de son accès hors ligne.')) return;
     const api = accountApi();
+    if (isCurrent) await exclusiveDeviceSession.release();
     await api.deactivateDevice(deviceId);
     if (isCurrent) {
       deviceActivation.suspend();
@@ -211,15 +232,39 @@ export function AccountLicensePanel({
       deviceActivation.resume();
       const currentDevice = await deviceActivation.ensure();
       setCurrentDeviceId(currentDevice.id);
+      await exclusiveDeviceSession.takeOver(currentDevice.id);
     }
     setDevices(await api.getDevices());
     if (!isCurrent) await offlineLicense.refresh();
+  }
+
+  async function replaceRegisteredDevice(deviceId: string) {
+    const api = accountApi();
+    await api.deactivateDevice(deviceId);
+    deviceActivation.resume();
+    const currentDevice = await deviceActivation.ensure();
+    await exclusiveDeviceSession.takeOver(currentDevice.id);
+    setCurrentDeviceId(currentDevice.id);
+    setDeviceLimitReached(false);
+    setSessionConflict(null);
+    setDevices(await api.getDevices());
+    await offlineLicense.refresh();
+    void cloudSyncQueue.process();
+  }
+
+  async function takeOverActiveSession() {
+    if (!currentDeviceId) return;
+    await exclusiveDeviceSession.takeOver(currentDeviceId);
+    setSessionConflict(null);
+    setMessage('Cet appareil est maintenant la session active.');
+    void cloudSyncQueue.process();
   }
 
   async function reactivateCurrentDevice() {
     deviceActivation.resume();
     const currentDevice = await deviceActivation.ensure();
     setCurrentDeviceId(currentDevice.id);
+    await exclusiveDeviceSession.ensure(currentDevice.id);
     const api = accountApi();
     setDevices(await api.getDevices());
     await offlineLicense.refresh();
@@ -234,6 +279,7 @@ export function AccountLicensePanel({
         // La déconnexion du compte doit continuer même si une liaison temps réel est déjà rompue.
       }
       try {
+        await exclusiveDeviceSession.release();
         await sessions.logout();
       } finally {
         setOffline(false);
@@ -246,6 +292,8 @@ export function AccountLicensePanel({
         setDevices([]);
         setBilling(null);
         setActivations([]);
+        setDeviceLimitReached(false);
+        setSessionConflict(null);
         await offlineLicense.clear();
         await cloudSyncQueue.pauseAndForgetAccount();
       }
@@ -560,6 +608,46 @@ export function AccountLicensePanel({
           <p className="account-license-message" role="status">
             {message}
           </p>
+        )}
+        {session && me && entitlements && deviceLimitReached && (
+          <div className="device-access-dialog-backdrop" role="presentation">
+            <section className="device-access-dialog" role="alertdialog" aria-modal="true" aria-labelledby="device-limit-title">
+              <h3 id="device-limit-title">Deux appareils sont déjà autorisés</h3>
+              <p>Pour utiliser Senario ici, choisissez l’appareil à supprimer. Le nouveau sera ensuite activé automatiquement.</p>
+              <ul>
+                {activeDevices.map(device => (
+                  <li key={device.id}>
+                    <span>
+                      <strong>{device.label ?? (device.platform === 'windows' ? 'PC Windows' : 'Mac')}</strong>
+                      <small>{device.platform === 'windows' ? 'Windows' : 'macOS'} · dernière utilisation {new Date(device.lastSeenAt).toLocaleString('fr-FR')}</small>
+                    </span>
+                    <button type="button" disabled={busy} onClick={() => void run(
+                      () => replaceRegisteredDevice(device.id),
+                      'Appareil remplacé. Celui-ci est maintenant autorisé.',
+                    )}>Supprimer et utiliser ici</button>
+                  </li>
+                ))}
+              </ul>
+              {!required && <button type="button" disabled={busy} onClick={onClose}>Annuler</button>}
+            </section>
+          </div>
+        )}
+        {session && me && entitlements && sessionConflict && !deviceLimitReached && (
+          <div className="device-access-dialog-backdrop" role="presentation">
+            <section className="device-access-dialog" role="alertdialog" aria-modal="true" aria-labelledby="device-session-title">
+              <h3 id="device-session-title">Senario est déjà ouvert ailleurs</h3>
+              <p>
+                {sessionConflict.activeDevice?.label ?? 'Un autre appareil'} utilise actuellement ce compte.
+                Vous pouvez reprendre la session ici ; l’autre appareil sera bloqué immédiatement à sa prochaine synchronisation.
+              </p>
+              <div className="device-access-actions">
+                {!required && <button type="button" disabled={busy} onClick={onClose}>Annuler</button>}
+                <button className="primary-button" type="button" disabled={busy} onClick={() => void run(takeOverActiveSession, 'Session reprise sur cet appareil.')}>
+                  Utiliser Senario ici
+                </button>
+              </div>
+            </section>
+          </div>
         )}
       </section>
     </div>

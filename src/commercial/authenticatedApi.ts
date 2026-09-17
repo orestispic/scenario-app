@@ -3,6 +3,7 @@ import { parseAiTokenBudgets, notifyAiUsageChanged, type AiTokenBudgets } from '
 import type {
   DeviceView,
   DeviceChallenge,
+  DeviceSessionLease,
   EntitlementsResponse,
   MeResponse,
   PublicConfiguration,
@@ -110,6 +111,9 @@ export interface AuthenticatedCommercialApi {
     platform: "windows" | "macos";
   }): Promise<DeviceView>;
   deactivateDevice(deviceId: string): Promise<void>;
+  claimDeviceSession(deviceId: string, force?: boolean): Promise<DeviceSessionLease>;
+  heartbeatDeviceSession(deviceId: string, leaseId: string): Promise<DeviceSessionLease>;
+  releaseDeviceSession(deviceId: string, leaseId: string): Promise<void>;
   getUsage(): Promise<UsageView[]>;
   getAiTokenUsage(): Promise<AiTokenBudgets>;
   logout(): Promise<void>;
@@ -239,11 +243,11 @@ export function createAuthenticatedCommercialApi(options: {
     const accessToken =
       typeof options.accessToken === "function" ? await options.accessToken() : options.accessToken;
     if (!accessToken) throw new CommercialHttpError(401, 'session_expired', "Reconnectez-vous pour continuer.");
-    if (new Headers(init.headers).has('X-Scenario-Device-Fingerprint') && !path.startsWith('/v3/entitlements')) {
+    if (/^\/v(?:4|5|6|7|9|10|14|15|16)\//.test(path)) {
       await options.beforeDeviceRequest?.();
     }
     let proofHeaders: Record<string, string> = {};
-    if (/^\/v(?:4|5|6|7|9|10|14|15|16)\//.test(path) && options.clientContext?.deviceKeyThumbprint && options.clientContext.signDeviceRequest) {
+    if (/^\/v(?:4|5|6|7|9|10|14|15|16|17)\//.test(path) && options.clientContext?.deviceKeyThumbprint && options.clientContext.signDeviceRequest) {
       const body = init.body === undefined || init.body === null ? '' : typeof init.body === 'string'
         ? init.body : (() => { throw new Error('Format de requête incompatible avec la preuve appareil.'); })();
       const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(body)));
@@ -447,6 +451,18 @@ export function createAuthenticatedCommercialApi(options: {
       request<void>("/v1/devices/deactivate", {
         method: "POST",
         body: JSON.stringify({ deviceId }),
+      }),
+    claimDeviceSession: async (deviceId, force = false) =>
+      (await request<{ session: DeviceSessionLease }>('/v17/device-session/claim', {
+        method: 'POST', body: JSON.stringify({ deviceId, force }),
+      })).session,
+    heartbeatDeviceSession: async (deviceId, leaseId) =>
+      (await request<{ session: DeviceSessionLease }>('/v17/device-session/heartbeat', {
+        method: 'POST', body: JSON.stringify({ deviceId, leaseId }),
+      })).session,
+    releaseDeviceSession: (deviceId, leaseId) =>
+      request<void>('/v17/device-session/release', {
+        method: 'POST', body: JSON.stringify({ deviceId, leaseId }),
       }),
     getUsage: async () => (await request<{ usage: UsageView[] }>("/v1/usage")).usage,
     getAiTokenUsage: async () => parseAiTokenBudgets((await request<{ budgets: unknown }>("/v4/ai/usage")).budgets),
