@@ -1,14 +1,14 @@
 {
   "name": "scenario-app",
   "private": true,
-  "version": "0.1.13",
+  "version": "0.1.14",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
     "build:web:beta": "tsc && vite build --mode phase9",
     "deploy:web:beta": "npm run build:web:beta && wrangler pages deploy dist --project-name senario-app-preproduction --branch main --commit-dirty=true",
-    "build:beta": "tauri build --config src-tauri/tauri.preproduction.conf.json --bundles nsis",
+    "build:beta": "tauri build --config src-tauri/tauri.preproduction-local.conf.json --bundles nsis",
     "test": "vitest run",
     "preview": "vite preview",
     "phase9:preflight": "node scripts/phase9-client-preflight.mjs",

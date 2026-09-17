@@ -4,7 +4,7 @@
   "build": { "beforeBuildCommand": "npm run build -- --mode phase9" },
   "bundle": {
     "targets": ["nsis"],
-    "createUpdaterArtifacts": true,
+    "createUpdaterArtifacts": false,
     "fileAssociations": [],
     "windows": { "nsis": { "installerHooks": "installer-beta-hooks.nsh", "installMode": "currentUser" } }
   },

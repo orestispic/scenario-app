@@ -10,7 +10,7 @@ it('signs every hosted cloud mutation over method, path and exact body digest', 
     accessToken: 'synthetic-access-token',
     beforeDeviceRequest: async () => undefined,
     clientContext: {
-      clientVersion: '0.1.13',
+      clientVersion: '0.1.14',
       deviceFingerprint: 'durable-device-fingerprint',
       platform: 'windows',
       deviceKeyThumbprint: () => 'A'.repeat(43),
