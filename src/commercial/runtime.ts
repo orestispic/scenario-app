@@ -9,6 +9,14 @@ import { OfflineLicense } from './offlineLicense';
 import { version as clientVersion } from '../../package.json';
 import { getDeviceFingerprint, initializeDeviceIdentity } from './deviceIdentity';
 import { DeviceActivation } from './deviceActivation';
+import { ExclusiveDeviceSession } from './exclusiveDeviceSession';
+import { getDeviceKeyThumbprint, getDevicePublicKey, initializeDeviceKey, signDeviceChallenge, signDeviceRequest } from './deviceKey';
+import { accountOverview, invalidateAccountOverviewOnSessionChange } from './accountOverview';
+import { createPendingAccountClosureStore } from './pendingAccountClosure';
+import { cloudProjectRuntime } from './cloudProjectRuntime';
+import { switchAccountSession } from './accountSessionSwitch';
+import type { SessionTokens } from './contractsV2';
+import { runSessionInvalidationWithCleanup } from './runtimeSessionInvalidation';
 
 export const localTestMode =
   import.meta.env.DEV && import.meta.env.VITE_SCENARIO_AUTH_MODE === "local-test";
@@ -32,11 +40,13 @@ function createRuntimeAuthAdapter(): AuthAdapter {
   return createSupabaseAuthAdapter({
     supabaseUrl: import.meta.env.VITE_SUPABASE_URL ?? "https://project-ref.supabase.co",
     anonKey: import.meta.env.VITE_SUPABASE_ANON_KEY ?? "not-configured",
+    accountSiteUrl: import.meta.env.VITE_SCENARIO_PUBLIC_APP_URL ?? "https://senario.app/",
   });
 }
 
 export const auth = createRuntimeAuthAdapter();
 const commercialScope = `${apiBaseUrl}|${import.meta.env.VITE_SUPABASE_URL ?? "local"}`;
+export const pendingAccountClosure = createPendingAccountClosureStore(commercialScope);
 export const offlineTrust = createOfflineTrustStore(
   commercialScope,
 );
@@ -46,6 +56,35 @@ export const sessions = new SessionManager(
   async (accessToken) =>
     createAuthenticatedCommercialApi({ baseUrl: apiBaseUrl, accessToken }).logout(),
 );
+invalidateAccountOverviewOnSessionChange(sessions);
+
+const sessionInvalidations = new Map<string, Promise<void>>();
+export function invalidateRuntimeSession(failedAccessToken?: string): Promise<void> {
+  // A delayed 401 from token A and a current 401 from token B are independent.
+  // Deduplicating them in one global promise could let B remain authenticated
+  // merely because A's stale invalidation was still finishing.
+  const key = failedAccessToken ?? '__current_session__';
+  const pending = sessionInvalidations.get(key);
+  if (pending) return pending;
+  let invalidation!: Promise<void>;
+  invalidation = runSessionInvalidationWithCleanup(
+    () => failedAccessToken
+      ? sessions.invalidateIfCurrent(failedAccessToken)
+      : sessions.invalidate().then(() => true),
+    async () => {
+      authenticatedOperations.stop();
+      await Promise.allSettled([
+        offlineLicense.clear(),
+        cloudSyncQueue.pauseAndForgetAccount(),
+      ]);
+    },
+  ).finally(() => {
+    if (sessionInvalidations.get(key) === invalidation)
+      sessionInvalidations.delete(key);
+  });
+  sessionInvalidations.set(key, invalidation);
+  return invalidation;
+}
 
 export function browserStorage() {
   return {
@@ -56,8 +95,14 @@ export function browserStorage() {
 
 export { getDeviceFingerprint };
 
-export function initializeRuntimeDeviceIdentity(): Promise<void> {
-  return initializeDeviceIdentity(commercialScope);
+export async function initializeRuntimeDeviceIdentity(): Promise<void> {
+  await initializeDeviceIdentity(commercialScope);
+  try { await initializeDeviceKey(commercialScope); }
+  catch {
+    // A vault failure disables paid/network operations, never local editing or
+    // access to projects.
+    console.warn('Identité cryptographique appareil indisponible. [device_identity_unavailable]');
+  }
 }
 
 export function getClientPlatform(): "windows" | "macos" {
@@ -66,36 +111,93 @@ export function getClientPlatform(): "windows" | "macos" {
 
 export const deviceActivation = new DeviceActivation(async () => {
   const api = createAuthenticatedCommercialApi({ baseUrl: apiBaseUrl,
-    accessToken: () => sessions.getAccessToken(), signal: authenticatedOperations.signal });
+    accessToken: () => sessions.getAccessToken(), signal: authenticatedOperations.signal,
+    clientContext: {
+      clientVersion,
+      deviceFingerprint: getDeviceFingerprint,
+      platform: getClientPlatform,
+      devicePublicKey: getDevicePublicKey,
+      signDeviceChallenge,
+      deviceKeyThumbprint: getDeviceKeyThumbprint,
+      signDeviceRequest,
+    },
+  });
   return api.activateDevice({ fingerprint: getDeviceFingerprint(), label: "Cet appareil", platform: getClientPlatform() });
 });
-sessions.subscribe(authenticated => { if (!authenticated) deviceActivation.reset(); });
 
-export function createRuntimeCommercialApi(onUnauthorized?: () => Promise<void>) {
+function createDeviceSessionApi() {
   return createAuthenticatedCommercialApi({
     baseUrl: apiBaseUrl,
     accessToken: () => sessions.getAccessToken(),
-    onUnauthorized,
-    beforeDeviceRequest: () => deviceActivation.ensure(),
+    signal: authenticatedOperations.signal,
+    clientContext: {
+      clientVersion,
+      deviceFingerprint: getDeviceFingerprint,
+      platform: getClientPlatform,
+      devicePublicKey: getDevicePublicKey,
+      signDeviceChallenge,
+      deviceKeyThumbprint: getDeviceKeyThumbprint,
+      signDeviceRequest,
+    },
+  });
+}
+
+export const exclusiveDeviceSession = new ExclusiveDeviceSession(createDeviceSessionApi);
+sessions.subscribe(authenticated => {
+  if (!authenticated) {
+    deviceActivation.reset();
+    exclusiveDeviceSession.reset();
+  }
+});
+
+export function createRuntimeCommercialApi(onUnauthorized?: (failedAccessToken: string) => Promise<void>) {
+  return createAuthenticatedCommercialApi({
+    baseUrl: apiBaseUrl,
+    accessToken: () => sessions.getAccessToken(),
+    onUnauthorized: onUnauthorized ?? invalidateRuntimeSession,
+    beforeDeviceRequest: async () => {
+      const device = await deviceActivation.ensure();
+      await exclusiveDeviceSession.ensure(device.id);
+    },
     signal: authenticatedOperations.signal,
     clientContext: {
       // The published artifact must report its own version even without a local .env.
       clientVersion,
       deviceFingerprint: getDeviceFingerprint,
       platform: getClientPlatform,
+      devicePublicKey: getDevicePublicKey,
+      signDeviceChallenge,
+      deviceKeyThumbprint: getDeviceKeyThumbprint,
+      signDeviceRequest,
     },
   });
 }
 
 export const cloudSyncQueue = new CloudSyncQueue(
   createBrowserSyncQueueStorage(),
-  () => createRuntimeCommercialApi(async () => sessions.invalidate()),
+  () => createRuntimeCommercialApi(),
   readScenario,
 );
+
+export function acceptRuntimeAccountSession(nextSession: SessionTokens): Promise<void> {
+  return switchAccountSession(nextSession, {
+    stopAuthenticatedOperations: () => authenticatedOperations.stop(),
+    closeCloudProject: () => cloudProjectRuntime.close(),
+    clearOfflineLicense: () => offlineLicense.clear(),
+    forgetCloudSyncQueue: () => cloudSyncQueue.pauseAndForgetAccount(),
+    invalidateAccountOverview: () => accountOverview.invalidate(),
+    resetDeviceActivation: () => deviceActivation.reset(),
+    resetExclusiveDeviceSession: () => exclusiveDeviceSession.reset(),
+    resumeDeviceActivation: () => deviceActivation.resume(),
+    acceptSession: (session) => sessions.accept(session),
+    discardSession: (session) => sessions.discard(session),
+    resetAuthenticatedOperations: () => authenticatedOperations.reset(),
+  });
+}
 
 export const offlineLicense = new OfflineLicense(offlineTrust, browserStorage(), getDeviceFingerprint,
   () => createRuntimeCommercialApi(), async () => {
     const token = await sessions.getAccessToken();
     if (token) { authenticatedOperations.reset(); await deviceActivation.ensure(); }
     return token;
-  });
+  }, getDeviceKeyThumbprint, () => deviceActivation.ensure());

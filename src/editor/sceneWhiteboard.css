@@ -1,0 +1,358 @@
+@media screen {
+  .app-shell.theme-dark .file-menu > .whiteboard-menu-item { justify-content: space-between; gap: 12px; }
+
+  .whiteboard-workspace {
+    min-width: 0;
+    min-height: 0;
+    overflow: hidden;
+    background: var(--bg);
+  }
+
+  .scene-whiteboard {
+    display: grid;
+    grid-template-rows: minmax(0, 1fr);
+    width: 100%;
+    height: 100%;
+    min-height: 0;
+    overflow: hidden;
+    color: var(--text);
+    background: var(--surface-1);
+    font-family: var(--font-ui);
+    animation: whiteboard-page-in var(--fast) var(--ease);
+  }
+
+  .whiteboard-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 24px;
+    min-height: 82px;
+    padding: 14px 18px;
+    border-bottom: 1px solid var(--divider);
+  }
+
+  .whiteboard-header > div:first-child { display: grid; gap: 2px; min-width: 0; }
+  .whiteboard-header h2 { margin: 0; color: var(--text); font-size: 20px; font-weight: 650; letter-spacing: -.35px; }
+  .whiteboard-header p { margin: 0; overflow: hidden; color: var(--text-3); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+  .whiteboard-eyebrow { color: var(--text-3); font: 9px/1.2 var(--font-mono); letter-spacing: .1em; text-transform: uppercase; }
+  .whiteboard-header-actions { display: flex; align-items: center; gap: 6px; }
+  .app-shell.theme-dark .whiteboard-header-actions button {
+    width: auto;
+    min-width: 0;
+    min-height: 30px;
+    padding: 0 9px;
+    color: var(--text-2);
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    font-size: 11px;
+  }
+  .whiteboard-header-actions kbd { margin-left: 8px; color: var(--text-3); font: 9px var(--font-mono); }
+  .app-shell.theme-dark .whiteboard-header-actions .whiteboard-close { width: 30px; padding: 0; }
+
+  .whiteboard-canvas {
+    position: relative;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(270px, 1fr));
+    gap: 12px;
+    min-height: 0;
+    padding: 12px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    background:
+      linear-gradient(rgba(255,255,255,.018) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255,255,255,.018) 1px, transparent 1px),
+      var(--bg);
+    background-size: 24px 24px;
+    user-select: none;
+  }
+
+  .whiteboard-column {
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr) auto;
+    min-width: 270px;
+    min-height: 0;
+    overflow: hidden;
+    background: rgba(15, 20, 26, .94);
+    border: 1px solid var(--border);
+    border-radius: var(--r-md);
+    box-shadow: var(--shadow-1);
+  }
+
+  .whiteboard-column > header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    min-height: 58px;
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--divider);
+  }
+  .whiteboard-column > header > div { display: grid; gap: 2px; }
+  .whiteboard-column h3 { margin: 0; color: var(--text); font-size: 13px; font-weight: 650; }
+  .whiteboard-column > header span { color: var(--text-3); font-size: 10px; }
+  .app-shell.theme-dark .whiteboard-act-description {
+    width: auto;
+    height: auto;
+    min-height: 0;
+    justify-content: flex-start;
+    padding: 0;
+    color: var(--text-3);
+    background: transparent;
+    border: 0;
+    font-size: 10px;
+    font-weight: 400;
+    text-align: left;
+  }
+  .app-shell.theme-dark .whiteboard-act-description:hover:not(:disabled) { color: var(--text-2); background: transparent; transform: none; }
+  .app-shell.theme-dark .whiteboard-act-description-input {
+    width: min(180px, 100%);
+    height: 24px;
+    min-height: 24px;
+    padding: 0 6px;
+    font-size: 10px;
+  }
+  .whiteboard-column > header strong {
+    display: grid;
+    min-width: 25px;
+    height: 23px;
+    place-items: center;
+    padding: 0 6px;
+    color: var(--text-2);
+    background: var(--surface-3);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    font-size: 10px;
+    font-weight: 600;
+  }
+  .whiteboard-column-actions {display:flex;align-items:center;gap:5px;}
+  .app-shell.theme-dark .whiteboard-column-actions button {
+    width:25px;
+    min-width:25px;
+    height:25px;
+    min-height:25px;
+    padding:0;
+    color:var(--text-3);
+    background:transparent;
+    border-color:transparent;
+    opacity:.25;
+  }
+  .whiteboard-column:hover .whiteboard-column-actions button,
+  .whiteboard-column-actions button:focus-visible {opacity:1;}
+  .app-shell.theme-dark .whiteboard-column-actions button:hover:not(:disabled) {color:var(--error);background:rgba(240,91,101,.08);border-color:rgba(240,91,101,.28);}
+
+  .whiteboard-column ol {
+    min-height: 0;
+    margin: 0;
+    padding: 10px;
+    overflow-y: auto;
+    overflow-x: hidden;
+    overscroll-behavior: contain;
+    list-style: none;
+    scrollbar-gutter: stable;
+  }
+
+  .app-shell.theme-dark .whiteboard-add-scene {
+    width: calc(100% - 20px);
+    height: 32px;
+    min-height: 32px;
+    margin: 0 10px 10px;
+    color: var(--text-2);
+    background: transparent;
+    border: 1px dashed #3a4655;
+  }
+  .app-shell.theme-dark .whiteboard-add-scene:hover:not(:disabled) {
+    color: var(--accent-hover);
+    background: rgba(70,153,243,.06);
+    border-color: rgba(110,179,255,.55);
+  }
+  .whiteboard-add-scene .ui-icon { width: 14px; height: 14px; }
+
+  .whiteboard-scene-card {
+    position: relative;
+    display: grid;
+    gap: 5px;
+    min-height: 88px;
+    margin: 0 0 6px;
+    padding: 8px 9px;
+    color: var(--text);
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--border);
+    border-radius: var(--r-md);
+    box-shadow: 0 1px 5px rgba(0,0,0,.18);
+    cursor: grab;
+    transition: opacity var(--fast) var(--ease), background var(--fast) var(--ease), border-color var(--fast) var(--ease), box-shadow var(--fast) var(--ease), transform var(--fast) var(--ease);
+  }
+  .whiteboard-scene-card:hover { background: var(--surface-hover); border-color: #394758; transform: translateY(-1px); }
+  .whiteboard-scene-card.is-selected { background: var(--surface-selected); border-color: rgba(110,179,255,.64); box-shadow: inset 2px 0 0 var(--accent), 0 0 0 1px rgba(70,153,243,.12); }
+  .whiteboard-scene-card.is-dragging { opacity: .28; border-style: dashed; cursor: grabbing; transform: scale(.985); }
+  .whiteboard-scene-card.has-color-blue { border-left-color: var(--accent); }
+  .whiteboard-scene-card.has-color-amber { border-left-color: var(--amber); }
+  .whiteboard-scene-card.has-color-green { border-left-color: var(--success); }
+  .whiteboard-scene-card.has-color-red { border-left-color: var(--error); }
+  .whiteboard-scene-card.has-color-orange { border-left-color: #f08b3d; }
+  .whiteboard-scene-card.has-color-pink { border-left-color: #f06b9b; }
+  .whiteboard-scene-card.has-color-violet { border-left-color: #9c79e8; }
+  .whiteboard-scene-card.has-color-turquoise { border-left-color: #34c9c2; }
+
+  .whiteboard-scene-card.is-drop-before::before,
+  .whiteboard-scene-card.is-drop-after::after,
+  .whiteboard-drop-tail.is-active::before {
+    position: absolute;
+    z-index: 4;
+    right: 2px;
+    left: 2px;
+    height: 2px;
+    background: var(--accent);
+    border-radius: 999px;
+    box-shadow: 0 0 0 3px rgba(70,153,243,.12), 0 0 12px rgba(70,153,243,.36);
+    content: '';
+    animation: whiteboard-drop-in var(--fast) var(--ease);
+  }
+  .whiteboard-scene-card.is-drop-before::before { top: -6px; }
+  .whiteboard-scene-card.is-drop-after::after { bottom: -6px; }
+
+  .whiteboard-card-topline { display: flex; align-items: center; gap: 6px; min-width: 0; }
+  .whiteboard-scene-number { color: var(--accent-hover); font: 10px var(--font-mono); }
+  .whiteboard-scene-pages { margin-left: auto; color: var(--text-3); font: 9px var(--font-mono); white-space: nowrap; }
+  .whiteboard-scene-tag {
+    max-width: 150px;
+    overflow: hidden;
+    padding: 2px 6px;
+    color: var(--text-2);
+    background: var(--surface-3);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    font-size: 9px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .app-shell.theme-dark .whiteboard-card-topline button {
+    width: 25px;
+    min-width: 25px;
+    height: 25px;
+    min-height: 25px;
+    margin-left: 0;
+    padding: 0;
+    color: var(--text-3);
+    background: transparent;
+    border-color: transparent;
+    opacity: 0;
+  }
+  .whiteboard-scene-card:hover .whiteboard-card-topline button,
+  .whiteboard-scene-card:focus-within .whiteboard-card-topline button,
+  .whiteboard-scene-card.is-selected .whiteboard-card-topline button { opacity: 1; }
+  .whiteboard-scene-card h4 {
+    flex: 1 1 auto;
+    min-width: 0;
+    margin: 0;
+    overflow: hidden;
+    color: var(--text);
+    font: 700 12px/1.3 var(--font-mono);
+    text-transform: uppercase;
+    overflow-wrap: anywhere;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .whiteboard-scene-card > p {
+    display: -webkit-box;
+    min-height: 35px;
+    padding-right: 122px;
+    margin: 0;
+    overflow: hidden;
+    color: var(--text-2);
+    font-size: 12.5px;
+    line-height: 1.4;
+    overflow-wrap: anywhere;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+  }
+  .whiteboard-scene-card > p.is-empty { color: var(--text-3); font-style: italic; }
+
+  .whiteboard-card-actions {
+    position: absolute;
+    right: 8px;
+    bottom: 6px;
+    display: flex;
+    align-items: center;
+    gap: 3px;
+  }
+  .app-shell.theme-dark .whiteboard-card-actions button {
+    width: 25px;
+    min-width: 25px;
+    height: 25px;
+    min-height: 25px;
+    padding: 0;
+    color: var(--text-3);
+    background: transparent;
+    border-color: transparent;
+  }
+  .whiteboard-card-actions button .ui-icon { width: 16px; height: 16px; }
+  .app-shell.theme-dark .whiteboard-card-actions button:hover:not(:disabled) { color: var(--text); background: var(--surface-hover); border-color: var(--border); }
+  .app-shell.theme-dark .whiteboard-card-actions button.is-danger:hover:not(:disabled) { color: var(--error); background: rgba(240,91,101,.08); border-color: rgba(240,91,101,.28); }
+
+  .whiteboard-card-editor { display: grid; gap: 9px; cursor: default; user-select: text; }
+  .whiteboard-card-editor label { position: relative; display: grid; gap: 4px; min-width: 0; color: var(--text-2); font-size: 9px; }
+  .whiteboard-card-editor-title { display: flex; align-items: center; gap: 6px; }
+  .app-shell.theme-dark .whiteboard-card-editor :is(input, textarea) { width: 100%; min-height: 30px; padding: 6px 8px; font-size: 11px; }
+  .app-shell.theme-dark .whiteboard-card-editor textarea { min-height: 64px; resize: vertical; }
+  .app-shell.theme-dark .whiteboard-card-editor .whiteboard-color-select .ui-select-trigger { min-height: 30px; padding: 0 8px; font-size: 11px; }
+  .whiteboard-card-editor-row { display: grid; grid-template-columns: minmax(0, 1fr) 120px; gap: 8px; }
+  .smart-type.whiteboard-title-smart-type {
+    top: calc(100% + 4px);
+    left: 0;
+    z-index: 130;
+    width: max(100%, 250px);
+    color: var(--text);
+  }
+
+  .whiteboard-column-empty {
+    display: grid;
+    min-height: 84px;
+    place-items: center;
+    padding: 16px;
+    color: var(--text-3);
+    border: 1px dashed var(--border);
+    border-radius: var(--r-md);
+    font-size: 10px;
+    text-align: center;
+    pointer-events: none;
+  }
+  .whiteboard-drop-tail { position: relative; height: 12px; }
+  .whiteboard-drop-tail.is-active::before { top: 4px; }
+
+  .whiteboard-selection-box {
+    position: fixed;
+    z-index: 90;
+    background: rgba(70,153,243,.12);
+    border: 1px solid var(--focus);
+    border-radius: 3px;
+    box-shadow: 0 0 16px rgba(70,153,243,.15);
+    pointer-events: none;
+  }
+
+  .whiteboard-context-menu {
+    width: 204px;
+    animation: whiteboard-menu-in var(--menu) var(--ease);
+  }
+  .whiteboard-context-menu .ui-menu-item { font-size:11px; }
+  .whiteboard-context-menu .ui-menu-item.is-danger { color:var(--ui-color-danger); }
+
+  @keyframes whiteboard-page-in { from { opacity: .55; } to { opacity: 1; } }
+  @keyframes whiteboard-menu-in { from { opacity: 0; transform: translateY(-3px); } to { opacity: 1; transform: none; } }
+  @keyframes whiteboard-drop-in { from { opacity: 0; transform: scaleX(.72); } to { opacity: 1; transform: scaleX(1); } }
+}
+
+@media screen and (max-width: 900px) {
+  .whiteboard-canvas { grid-template-columns: repeat(3, minmax(250px, 1fr)); gap: 8px; padding: 8px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .scene-whiteboard,
+  .whiteboard-context-menu,
+  .whiteboard-scene-card { animation: none; transition: none; }
+}
+
+@media print {
+  .whiteboard-workspace { display: none; }
+}

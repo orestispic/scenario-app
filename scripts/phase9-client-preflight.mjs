@@ -54,6 +54,9 @@ function run() {
   const overlay = JSON.parse(
     readFileSync(resolve('src-tauri/tauri.preproduction.conf.json'), 'utf8'),
   );
+  const localOverlay = JSON.parse(
+    readFileSync(resolve('src-tauri/tauri.preproduction-local.conf.json'), 'utf8'),
+  );
   const csp = overlay?.app?.security?.csp ?? '';
   const apiUrl = httpsUrl(environment.VITE_SCENARIO_API_BASE_URL);
   const supabaseUrl = httpsUrl(environment.VITE_SUPABASE_URL);
@@ -107,6 +110,13 @@ function run() {
         !PLACEHOLDER.test(csp),
       action:
         'Reporter les URL API et Supabase de test dans la CSP Tauri préproduction.',
+    },
+    {
+      ready:
+        overlay?.bundle?.createUpdaterArtifacts === true &&
+        localOverlay?.bundle?.createUpdaterArtifacts === false,
+      action:
+        'Activer les artefacts signés dans la release et les désactiver uniquement dans le build local.',
     },
   ];
   const blocked = checks.filter((check) => !check.ready);

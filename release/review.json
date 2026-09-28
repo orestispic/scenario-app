@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "version": "0.1.17",
+  "target": "windows-with-cloud-20-gib",
+  "publicationAuthorized": false,
+  "sourceDigest": null,
+  "checks": {
+    "productionPaymentAndEntitlements": null,
+    "cloudCapacityAndBillingLifecycle": null,
+    "cloud20GiBRecovery": null,
+    "offsiteDatabaseAndObjectRestore": null,
+    "customerEmailDelivery": null,
+    "legalAndPrivacyApproval": null,
+    "monitoringAndSupport": null,
+    "windowsInstallUpdateAndRollback": null
+  }
+}

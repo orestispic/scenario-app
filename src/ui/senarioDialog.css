@@ -1,0 +1,34 @@
+@media screen {
+  .senario-dialog-backdrop {
+    position: fixed;
+    z-index: 1000;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    padding: 20px;
+    background: rgba(3, 5, 8, .76);
+  }
+
+  .senario-dialog {
+    display: grid;
+    grid-template-columns: 30px minmax(0, 1fr);
+    gap: 12px;
+    width: min(470px, 100%);
+    padding: 18px;
+    border: 1px solid var(--border);
+    border-radius: var(--r-lg);
+    background: var(--surface-2);
+    color: var(--text);
+    box-shadow: var(--shadow-3);
+    font-family: var(--font-ui);
+  }
+
+  .senario-dialog > .ui-icon { width: 22px; height: 22px; margin-top: 2px; color: var(--accent-hover); }
+  .senario-dialog.is-destructive > .ui-icon { color: var(--error); }
+  .senario-dialog h2 { margin: 0 0 6px; font-size: 16px; }
+  .senario-dialog p { margin: 0; color: var(--text-2); font-size: 12px; line-height: 1.55; white-space: pre-line; }
+  .senario-dialog footer { grid-column: 1 / -1; display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
+  .senario-dialog button { min-height: 32px; }
+  .app-shell.theme-dark .senario-dialog .senario-dialog-danger { border-color: var(--error); background: var(--error); color: #fff; }
+  .app-shell.theme-dark .senario-dialog .senario-dialog-danger:hover { border-color: #d94c56; background: #d94c56; }
+}

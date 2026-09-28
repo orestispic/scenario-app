@@ -6,6 +6,8 @@ export interface CloudWorkingCopy {
   parentVersionId: string | null;
   file: ScenarioFile;
   pending: boolean;
+  /** False for transient read-only viewer caches, which are never exportable. */
+  downloadAllowed?: boolean;
   savedAt: string;
 }
 export interface CloudProjectStore {
@@ -13,6 +15,7 @@ export interface CloudProjectStore {
   write(copy: CloudWorkingCopy): Promise<void>;
   backup(accountId: string, file: ScenarioFile): Promise<void>;
   list(accountId: string): Promise<CloudWorkingCopy[]>;
+  deleteAccount(accountId: string): Promise<void>;
 }
 
 /** User-owned .scenario copies only: no bearer tokens, URLs, tickets or raw operations. */
@@ -37,11 +40,15 @@ export class IndexedDbCloudProjectStore implements CloudProjectStore {
   async read(accountId: string, projectId: string) { return await this.operation('readonly', (s) => s.get([accountId, projectId])) ?? null; }
   async write(copy: CloudWorkingCopy) { await this.operation('readwrite', (s) => s.put(structuredClone(copy))); }
   async backup(accountId: string, file: ScenarioFile) {
-    await this.write({ accountId, projectId: `local-${crypto.randomUUID()}`, parentVersionId: null, file, pending: true, savedAt: new Date().toISOString() });
+    await this.write({ accountId, projectId: `local-${crypto.randomUUID()}`, parentVersionId: null, file, pending: true, downloadAllowed: true, savedAt: new Date().toISOString() });
   }
   async list(accountId: string): Promise<CloudWorkingCopy[]> {
     const range = IDBKeyRange.bound([accountId, ''], [accountId, '\uffff']);
     return this.operation('readonly', (s) => s.getAll(range));
+  }
+  async deleteAccount(accountId: string): Promise<void> {
+    const range = IDBKeyRange.bound([accountId, ''], [accountId, '\uffff']);
+    await this.operation('readwrite', (s) => s.delete(range));
   }
 }
 

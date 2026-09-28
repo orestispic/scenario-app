@@ -4,12 +4,13 @@ import { spawn, execFileSync } from 'node:child_process';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 assert.equal(process.env.GITHUB_ACTIONS, 'true', 'Use an isolated CI runner');
+assert.equal(process.env.RUNNER_ENVIRONMENT, 'github-hosted', 'Use a disposable GitHub-hosted runner');
 const mode = process.argv[2];
 assert.ok(['seed', 'verify', 'reinstalled'].includes(mode));
 const root = join(process.env.RUNNER_TEMP, 'senario-phase14');
 await mkdir(root, { recursive: true });
 const statePath = join(root, 'native-state.json');
-const scope = 'https://scenario-commercial-api-preproduction.ore-picard.workers.dev|https://zblnsdyaoljnezxdidtx.supabase.co';
+const scope = 'https://scenario-commercial-api-production.ore-picard.workers.dev|https://rtqlsnwfbtnscilfdirv.supabase.co';
 const profile = join(root, mode === 'reinstalled' ? 'fresh-webview' : 'webview');
 // WebView2 150+ ignores environment overrides for elevated hosts (CI runners).
 // These policies affect only our executable on the disposable runner, never users.
@@ -17,7 +18,7 @@ const policy = 'HKLM\\SOFTWARE\\Policies\\Microsoft\\Edge\\WebView2\\';
 for (const [name, value] of [['AdditionalBrowserArguments', '--remote-debugging-port=19314 --remote-debugging-address=127.0.0.1'], ['UserDataFolder', profile]]) {
   execFileSync('reg.exe', ['add', policy + name, '/v', 'scenario-app.exe', '/t', 'REG_SZ', '/d', value, '/f', '/reg:64'], { windowsHide: true });
 }
-const child = spawn(join(process.env.LOCALAPPDATA, 'senario Beta', 'scenario-app.exe'), [], {
+const child = spawn(join(process.env.LOCALAPPDATA, 'senario', 'scenario-app.exe'), [], {
   windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'],
   env: { ...process.env },
 });

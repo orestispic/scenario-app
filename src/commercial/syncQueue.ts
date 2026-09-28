@@ -1,5 +1,7 @@
 import type { AuthenticatedCommercialApi, CommercialHttpError } from "./authenticatedApi";
 import type { CloudConflict, SyncQueueState } from "./contractsV6";
+import { parseScenarioFile, type ScenarioFile } from '../document/scenarioFile';
+import { cloudScenarioFile, uploadCloudImageAssets } from './cloudImageAssets';
 
 export const SYNC_QUEUE_STORAGE_KEY = "scenario-cloud-sync-queue-v1";
 export interface SyncQueueEntry {
@@ -62,6 +64,7 @@ async function sha256(value: string): Promise<string> {
 export class CloudSyncQueue {
   private running: Promise<void> | null = null;
   private retryTimer: number | null = null;
+  private accountEpoch = 0;
   constructor(
     private readonly storage: SyncQueueStorage,
     private readonly api: () => AuthenticatedCommercialApi,
@@ -74,15 +77,17 @@ export class CloudSyncQueue {
   }
 
   async bindAccount(accountId: string): Promise<void> {
+    const epoch = ++this.accountEpoch;
     const queue = parse(await this.storage.read());
     if (queue.ownerAccountId && queue.ownerAccountId !== accountId) queue.entries = [];
     queue.ownerAccountId = accountId;
     queue.paused = false;
     for (const entry of queue.entries) if (entry.state === "pending") entry.nextAttemptAt = 0;
-    await this.save(queue);
+    await this.save(queue, epoch);
   }
 
   async enqueue(localPath: string, title: string, scenarioId?: string): Promise<SyncQueueEntry> {
+    const epoch = this.accountEpoch;
     const queue = parse(await this.storage.read());
     const previous = queue.entries.find((entry) => entry.localPath === localPath);
     const entry: SyncQueueEntry = previous ?? {
@@ -106,13 +111,14 @@ export class CloudSyncQueue {
     entry.conflict = null;
     if (!previous) queue.entries.push(entry);
     queue.paused = false;
-    await this.save(queue);
+    await this.save(queue, epoch);
     return structuredClone(entry);
   }
 
   async process(): Promise<void> {
     if (this.running) return this.running;
-    this.running = this.processOnce().finally(() => {
+    const epoch = this.accountEpoch;
+    this.running = this.processOnce(epoch).finally(() => {
       this.running = null;
     });
     return this.running;
@@ -123,6 +129,7 @@ export class CloudSyncQueue {
     if (this.retryTimer !== null && typeof window !== "undefined")
       window.clearTimeout(this.retryTimer);
     this.retryTimer = null;
+    this.accountEpoch += 1;
     await this.storage.clear();
   }
 
@@ -154,18 +161,25 @@ export class CloudSyncQueue {
     return this.api().getCloudDownload(entry.scenarioId, remote);
   }
 
-  private async processOnce(): Promise<void> {
+  private async processOnce(epoch: number): Promise<void> {
     const queue = parse(await this.storage.read());
-    if (queue.paused) return;
+    if (queue.paused || epoch !== this.accountEpoch) return;
     for (const entry of queue.entries) {
+      if (epoch !== this.accountEpoch) return;
       if (entry.state !== "pending" || entry.nextAttemptAt > this.now()) continue;
       try {
         const content = await this.readLocalFile(entry.localPath);
-        const encoded = new TextEncoder().encode(content);
-        const checksum = await sha256(content);
+        if (epoch !== this.accountEpoch) return;
+        let file: ScenarioFile | null = null;
+        try { file = parseScenarioFile(content); } catch { /* legacy/custom payload: preserve existing path */ }
+        const synchronizedContent = file ? JSON.stringify(cloudScenarioFile(file)) : content;
+        const encoded = new TextEncoder().encode(synchronizedContent);
+        const checksum = await sha256(synchronizedContent);
         const key = await sha256(
           `${entry.scenarioId}:${entry.parentVersionId ?? "root"}:${checksum}`,
         );
+        if (file && entry.parentVersionId) await uploadCloudImageAssets(this.api(), file, entry.scenarioId);
+        if (epoch !== this.accountEpoch) return;
         const response = await this.api().syncCloudScenario(
           {
             scenarioId: entry.scenarioId,
@@ -178,10 +192,14 @@ export class CloudSyncQueue {
             // Origin is immutable across retries so the same idempotency key always
             // has the same request fingerprint, including uncertain responses.
             origin: "save",
-            content,
+            content: synchronizedContent,
           },
           key,
         );
+        if (epoch !== this.accountEpoch) return;
+        // The scenario must exist before its first owner-scoped image link can be created.
+        // Retrying is safe: both the version request and each image upload are idempotent.
+        if (file && !entry.parentVersionId) await uploadCloudImageAssets(this.api(), file, entry.scenarioId);
         entry.parentVersionId = response.version.id;
         entry.remoteVersionId = response.version.id;
         entry.checksum = checksum;
@@ -204,18 +222,20 @@ export class CloudSyncQueue {
             : 0;
         }
       }
-      await this.save(queue);
+      await this.save(queue, epoch);
     }
-    this.scheduleRetry(queue.entries);
+    if (epoch === this.accountEpoch) this.scheduleRetry(queue.entries);
   }
 
   private async change(id: string, mutate: (entry: SyncQueueEntry) => void): Promise<void> {
+    const epoch = this.accountEpoch;
     const queue = parse(await this.storage.read());
     const entry = queue.entries.find((candidate) => candidate.id === id);
     if (entry) mutate(entry);
-    await this.save(queue);
+    await this.save(queue, epoch);
   }
-  private save(queue: QueueDocument) {
+  private save(queue: QueueDocument, expectedEpoch = this.accountEpoch): Promise<void> {
+    if (expectedEpoch !== this.accountEpoch) return Promise.resolve();
     return this.storage.write(JSON.stringify(queue));
   }
 

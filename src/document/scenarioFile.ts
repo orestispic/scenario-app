@@ -1,5 +1,10 @@
 import type { Editor, JSONContent } from "@tiptap/core";
 import type { CommentThread } from "../editor/comments";
+import { parseVersionedProject, type ProjectVersion } from './projectVersions';
+import {
+  normalizeTechnicalImageAssets,
+  type TechnicalImageAssets,
+} from '../editor/technicalImageAssets';
 
 export const SCENARIO_FORMAT_VERSION = 1;
 
@@ -28,7 +33,11 @@ export interface ScenarioFile {
   coverPage: CoverPageData;
   coverPageHidden: boolean;
   comments: CommentThread[];
+  technicalImageAssets?: TechnicalImageAssets;
   savedAt: string;
+  projectId?: string;
+  activeVersionId?: string;
+  versions?: ProjectVersion[];
 }
 
 export interface RecoveryFile {
@@ -105,6 +114,7 @@ export function createScenarioFile(
   coverPage: CoverPageData = createEmptyCoverPage(),
   comments: CommentThread[] = [],
   coverPageHidden = false,
+  technicalImageAssets: TechnicalImageAssets = {},
 ): ScenarioFile {
   const content = editor.getJSON();
   const metadata = collectScenarioMetadata(content);
@@ -117,12 +127,25 @@ export function createScenarioFile(
     coverPage: normalizeCoverPage(coverPage),
     coverPageHidden,
     comments,
+    ...(Object.keys(technicalImageAssets).length
+      ? { technicalImageAssets: structuredClone(technicalImageAssets) }
+      : {}),
     savedAt: new Date().toISOString(),
   };
 }
 
 export function parseScenarioFile(rawContent: string): ScenarioFile {
-  const file = JSON.parse(rawContent) as Partial<ScenarioFile>;
+  let parsed: unknown;
+  try { parsed = JSON.parse(rawContent.replace(/^\uFEFF/u, '')); }
+  catch { throw new Error('Ce fichier .scenario est corrompu ou tronqué. Le fichier reste inchangé.'); }
+  if (!isRecord(parsed) || Array.isArray(parsed)) {
+    throw new Error('Ce fichier .scenario n’est pas compatible avec cette version.');
+  }
+  const file = parsed as Partial<ScenarioFile>;
+  if (file.formatVersion === 2) return parseVersionedProject(file);
+  if (file.versions !== undefined || file.activeVersionId !== undefined) {
+    throw new Error('Ce projet contient des versions mais son format est incohérent. Le fichier reste inchangé.');
+  }
   if (
     file.formatVersion !== SCENARIO_FORMAT_VERSION ||
     !file.content ||
@@ -130,6 +153,8 @@ export function parseScenarioFile(rawContent: string): ScenarioFile {
   ) {
     throw new Error("Ce fichier .scenario n’est pas compatible avec cette version.");
   }
+
+  validateDocumentTree(file.content);
 
   return {
     formatVersion: SCENARIO_FORMAT_VERSION,
@@ -141,8 +166,30 @@ export function parseScenarioFile(rawContent: string): ScenarioFile {
     coverPage: normalizeCoverPage(file.coverPage),
     coverPageHidden: file.coverPageHidden === true,
     comments: normalizeComments(file.comments),
+    ...(() => {
+      const technicalImageAssets = normalizeTechnicalImageAssets(file.technicalImageAssets);
+      return Object.keys(technicalImageAssets).length ? { technicalImageAssets } : {};
+    })(),
     savedAt: typeof file.savedAt === "string" ? file.savedAt : "",
   };
+}
+
+function validateDocumentTree(root: JSONContent): void {
+  const pending = [{ node: root, depth: 0 }];
+  let count = 0;
+  while (pending.length) {
+    const { node, depth } = pending.pop()!;
+    if (!isRecord(node) || typeof node.type !== 'string'
+      || (node.text !== undefined && typeof node.text !== 'string')
+      || (node.content !== undefined && !Array.isArray(node.content))) {
+      throw new Error('Le contenu du scénario est corrompu. Le fichier reste inchangé.');
+    }
+    if (++count > 250_000 || depth > 128) throw new Error('La structure du scénario est trop complexe pour être ouverte en sécurité.');
+    if (node.content) {
+      if (count + pending.length + node.content.length > 250_000) throw new Error('La structure du scénario est trop complexe pour être ouverte en sécurité.');
+      for (const child of node.content) pending.push({ node: child, depth: depth + 1 });
+    }
+  }
 }
 
 function normalizeComments(value: unknown): CommentThread[] {
@@ -212,7 +259,7 @@ function stringValue(value: unknown): string {
 
 export function parseRecoveryFile(rawContent: string): RecoveryFile {
   const recovery = JSON.parse(rawContent) as Partial<RecoveryFile>;
-  if (!recovery.document) {
+  if (!recovery || !recovery.document) {
     throw new Error("La sauvegarde de récupération est invalide.");
   }
 

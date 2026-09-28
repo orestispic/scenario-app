@@ -13,9 +13,16 @@ jobs:
     name: Installateur et mise à jour Windows
     runs-on: windows-latest
     env:
-      VITE_SCENARIO_API_BASE_URL: https://scenario-commercial-api-preproduction.ore-picard.workers.dev
-      VITE_SUPABASE_URL: https://zblnsdyaoljnezxdidtx.supabase.co
-      VITE_SUPABASE_ANON_KEY: sb_publishable_tAI1UPbu2UnelkOeuI1WNg_hPegJP4Y
+      VITE_SCENARIO_API_BASE_URL: https://scenario-commercial-api-production.ore-picard.workers.dev
+      VITE_SCENARIO_ENVIRONMENT: production
+      VITE_SCENARIO_AUTH_MODE: supabase
+      VITE_SUPABASE_URL: https://rtqlsnwfbtnscilfdirv.supabase.co
+      # Public/publishable browser key only. Server secrets must never enter this job.
+      VITE_SUPABASE_ANON_KEY: ${{ vars.VITE_SUPABASE_ANON_KEY_PRODUCTION }}
+      VITE_SCENARIO_BILLING_RETURN_URL: https://senario.app/
+      VITE_SCENARIO_PUBLIC_APP_URL: https://senario.app/
+      SENARIO_SIGNING_CERTIFICATE_THUMBPRINT: ${{ vars.SENARIO_SIGNING_CERTIFICATE_THUMBPRINT }}
+      SENARIO_SIGNING_TIMESTAMP_URL: ${{ vars.SENARIO_SIGNING_TIMESTAMP_URL }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -25,8 +32,13 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - name: Installer les dépendances
         run: npm ci
+      - name: Valider la configuration publique de production
+        run: npm run release:production:check
       - name: Vérifier l’application
         run: npm test -- --run
+      - name: Exiger le certificat commercial provisionné par le fournisseur de signature
+        shell: pwsh
+        run: ./scripts/sign-authenticode.ps1 -CheckOnly
       - name: Construire la version signée en brouillon
         id: build
         uses: tauri-apps/tauri-action@v1
@@ -38,23 +50,31 @@ jobs:
           tagName: v__VERSION__
           releaseName: Senario __VERSION__
           releaseBody: |
-            Version bêta de Senario pour Windows 10 et 11 (64 bits).
+            Senario pour Windows 10 et 11 (64 bits).
             Téléchargez Scenario-Setup.exe puis suivez les étapes de l’installateur.
           releaseDraft: true
           prerelease: false
-          args: --config src-tauri/tauri.preproduction.conf.json --bundles nsis
+          args: --bundles nsis --config src-tauri/tauri.authenticode.conf.json
           updaterJsonPreferNsis: true
           uploadUpdaterJson: true
           uploadUpdaterSignatures: true
           releaseAssetNamePattern: Scenario-Setup[ext]
-      - name: Vérifier la signature de l’installateur
+      - name: Vérifier la signature de mise à jour Tauri
         run: node scripts/verify-updater-release.mjs
-      - name: Vérifier installation, mise à jour et réinstallation Windows
+      - name: Vérifier installation, réinstallation et retour arrière Windows
         shell: pwsh
         run: |
           $taskVersion = (Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json).version
-          ./scripts/phase14-windows-lifecycle.ps1 -Installer "src-tauri/target/release/bundle/nsis/senario Beta_${taskVersion}_x64-setup.exe"
-      - name: Publier uniquement après les tests Windows
+          ./scripts/phase14-windows-lifecycle.ps1 -Installer "src-tauri/target/release/bundle/nsis/senario_${taskVersion}_x64-setup.exe" -PreviousInstaller $env:SENARIO_PREVIOUS_INSTALLER -PreviousVersion $env:SENARIO_PREVIOUS_VERSION -RequireUpgradeAndRollback
+      - name: Vérifier la revue commerciale de cette version
+        run: node scripts/verify-release-review.mjs
+      - name: Vérifier la signature éditeur Windows
+        shell: pwsh
+        run: |
+          $taskVersion = (Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json).version
+          ./scripts/verify-authenticode.ps1 -Installer "src-tauri/target/release/bundle/nsis/senario_${taskVersion}_x64-setup.exe" -RequireTimestamp
+          ./scripts/verify-authenticode.ps1 -Installer "src-tauri/target/release/scenario-app.exe" -RequireTimestamp
+      - name: Publier uniquement après revue et vérifications Windows
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: gh release edit ${{ github.ref_name }} --draft=false --latest

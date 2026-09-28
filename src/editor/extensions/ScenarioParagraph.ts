@@ -1,6 +1,7 @@
 import { Extension, mergeAttributes, Node } from "@tiptap/core";
 import type { Editor } from "@tiptap/core";
-import { TextSelection } from "@tiptap/pm/state";
+import { Plugin, PluginKey, TextSelection } from "@tiptap/pm/state";
+import { Decoration, DecorationSet } from "@tiptap/pm/view";
 import {
   DEFAULT_SCENARIO_ELEMENT_TYPE,
   toScenarioElementType,
@@ -23,6 +24,21 @@ declare module "@tiptap/core" {
       setScenarioElementType: (type: ScenarioElementType) => ReturnType;
     };
   }
+}
+
+const sceneNumberingKey = new PluginKey<DecorationSet>('scenarioSceneNumbering');
+
+function sceneNumberDecorations(document: Parameters<typeof DecorationSet.create>[0]): DecorationSet {
+  const decorations: Decoration[] = [];
+  let sceneNumber = 0;
+  document.descendants((node, position) => {
+    if (node.type.name !== 'paragraph' || node.attrs.scenarioType !== 'SCENE_HEADING') return;
+    sceneNumber += 1;
+    decorations.push(Decoration.node(position, position + node.nodeSize, {
+      'data-scene-number': String(sceneNumber),
+    }));
+  });
+  return DecorationSet.create(document, decorations);
 }
 
 export const ScenarioParagraph = Node.create({
@@ -55,6 +71,76 @@ export const ScenarioParagraph = Node.create({
         renderHTML: (attributes) =>
           attributes.blockId ? { "data-block-id": attributes.blockId } : {},
       },
+      whiteboardAct: {
+        default: null,
+        parseHTML: (element) => {
+          const value = Number(element.getAttribute("data-whiteboard-act"));
+          return Number.isInteger(value) && value >= 1 ? value : null;
+        },
+        renderHTML: (attributes) =>
+          Number.isInteger(attributes.whiteboardAct) && attributes.whiteboardAct >= 1
+            ? { "data-whiteboard-act": String(attributes.whiteboardAct) }
+            : {},
+      },
+      whiteboardActCount: {
+        default: null,
+        parseHTML: (element) => {
+          const value = Number(element.getAttribute("data-whiteboard-act-count"));
+          return Number.isInteger(value) && value >= 1 ? value : null;
+        },
+        renderHTML: (attributes) =>
+          Number.isInteger(attributes.whiteboardActCount) && attributes.whiteboardActCount >= 1
+            ? { "data-whiteboard-act-count": String(attributes.whiteboardActCount) }
+            : {},
+      },
+      whiteboardActDescriptions: {
+        default: "",
+        parseHTML: (element) => element.getAttribute("data-whiteboard-act-descriptions") ?? "",
+        renderHTML: (attributes) =>
+          typeof attributes.whiteboardActDescriptions === "string" && attributes.whiteboardActDescriptions
+            ? { "data-whiteboard-act-descriptions": attributes.whiteboardActDescriptions }
+            : {},
+      },
+      whiteboardSummary: {
+        default: "",
+        parseHTML: (element) => element.getAttribute("data-whiteboard-summary") ?? "",
+        renderHTML: (attributes) =>
+          typeof attributes.whiteboardSummary === "string" && attributes.whiteboardSummary
+            ? { "data-whiteboard-summary": attributes.whiteboardSummary }
+            : {},
+      },
+      whiteboardTag: {
+        default: "",
+        parseHTML: (element) => element.getAttribute("data-whiteboard-tag") ?? "",
+        renderHTML: (attributes) =>
+          typeof attributes.whiteboardTag === "string" && attributes.whiteboardTag
+            ? { "data-whiteboard-tag": attributes.whiteboardTag }
+            : {},
+      },
+      whiteboardColor: {
+        default: "",
+        parseHTML: (element) => element.getAttribute("data-whiteboard-color") ?? "",
+        renderHTML: (attributes) =>
+          typeof attributes.whiteboardColor === "string" && attributes.whiteboardColor
+            ? { "data-whiteboard-color": attributes.whiteboardColor }
+            : {},
+      },
+      breakdownData: {
+        default: "",
+        parseHTML: (element) => element.getAttribute("data-breakdown") ?? "",
+        renderHTML: (attributes) =>
+          typeof attributes.breakdownData === "string" && attributes.breakdownData
+            ? { "data-breakdown": attributes.breakdownData }
+            : {},
+      },
+      technicalBreakdownData: {
+        default: "",
+        parseHTML: (element) => element.getAttribute("data-technical-breakdown") ?? "",
+        renderHTML: (attributes) =>
+          typeof attributes.technicalBreakdownData === "string" && attributes.technicalBreakdownData
+            ? { "data-technical-breakdown": attributes.technicalBreakdownData }
+            : {},
+      },
     };
   },
 
@@ -64,6 +150,21 @@ export const ScenarioParagraph = Node.create({
 
   renderHTML({ HTMLAttributes }) {
     return ["p", mergeAttributes(HTMLAttributes), 0];
+  },
+
+  addProseMirrorPlugins() {
+    return [new Plugin<DecorationSet>({
+      key: sceneNumberingKey,
+      state: {
+        init: (_, state) => sceneNumberDecorations(state.doc),
+        apply: (transaction, previous) => transaction.docChanged
+          ? sceneNumberDecorations(transaction.doc)
+          : previous.map(transaction.mapping, transaction.doc),
+      },
+      props: {
+        decorations: state => sceneNumberingKey.getState(state),
+      },
+    })];
   },
 
   addCommands() {

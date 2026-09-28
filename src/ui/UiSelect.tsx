@@ -28,7 +28,7 @@ export function UiSelect({className='',children,onChange,...props}:SelectHTMLAtt
     select.current.dispatchEvent(new Event('change',{bubbles:true}));setVersion(version+1);
   }
   function move(direction:number){let next=active;for(let n=0;n<options.length;n++){next=(next+direction+options.length)%options.length;if(!options[next].disabled)break;}setActive(next);}
-  return <span className={`ui-select ${className}`}>
+  return <span className={`ui-select ${className}`} title={props.title}>
     <select {...props} ref={select} aria-hidden="true" tabIndex={-1} className="ui-select-native" onChange={event=>{onChange?.(event);setVersion(v=>v+1);}}>{children}</select>
     <button ref={trigger} type="button" role="combobox" aria-label={props['aria-label']} aria-labelledby={props['aria-labelledby']}
       aria-expanded={open} aria-controls={id} aria-haspopup="listbox" aria-activedescendant={open?`${id}-${active}`:undefined}

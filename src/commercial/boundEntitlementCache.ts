@@ -5,6 +5,18 @@ import type { EntitlementCacheStorage } from "./entitlementCache";
 import { verifyOfflineGrant } from "./signedEntitlementCache";
 
 export const BOUND_CACHE_KEY = "scenario-commercial-entitlements-v4";
+
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
+  if (value && typeof value === 'object') {
+    const entries = Object.entries(value as Record<string, unknown>)
+      .filter(([, entry]) => entry !== undefined)
+      .sort(([left], [right]) => left.localeCompare(right));
+    return `{${entries.map(([key, entry]) => `${JSON.stringify(key)}:${canonicalJson(entry)}`).join(',')}}`;
+  }
+  return JSON.stringify(value);
+}
+
 export async function verifyBoundGrant(
   snapshot: EntitlementSnapshot,
   grant: SignedOfflineGrant,
@@ -23,13 +35,14 @@ export async function verifyBoundGrant(
   const signed = JSON.parse(payload.snapshotJson ?? "null") as EntitlementSnapshot | null;
   if (
     payload.contractVersion !== "2026-09-v4" ||
+    (payload.licenseFormatVersion !== undefined && payload.licenseFormatVersion !== 2) ||
     payload.userId !== userId ||
     !signed ||
     signed.id !== snapshot.id ||
     signed.configurationVersion !== snapshot.configurationVersion ||
     signed.issuedAt !== snapshot.issuedAt ||
     signed.offlineValidUntil !== snapshot.offlineValidUntil ||
-    JSON.stringify(signed.entitlements) !== JSON.stringify(snapshot.entitlements) ||
+    canonicalJson(signed.entitlements) !== canonicalJson(snapshot.entitlements) ||
     snapshot.issuedAt !== payload.issuedAt ||
     snapshot.offlineValidUntil !== payload.expiresAt ||
     !Number.isFinite(Date.parse(payload.issuedAt)) ||

@@ -1,6 +1,6 @@
 import { UiIcon } from '../ui/UiIcon';
-import { UiTextarea } from '../ui/UiTextarea';
-import { useEffect, useRef, useState } from "react";
+import { UiButton, UiDialog, UiEmptyState, UiFeedback, UiIconButton, UiPanel, UiTextarea } from '../ui';
+import { useState } from "react";
 import { createStableId, type CommentThread } from "./comments";
 import "./projectComments.css";
 
@@ -20,7 +20,6 @@ export function ProjectCommentsPanel({
   onUpdate(id: string, update: (thread: CommentThread) => CommentThread): void;
   onDelete(id: string): void;
 }) {
-  const panel = useRef<HTMLElement>(null);
   const [draft, setDraft] = useState<{
     id: string;
     kind: "edit" | "reply";
@@ -31,11 +30,6 @@ export function ProjectCommentsPanel({
   const changed = Boolean(
     draft && (!current || (draft.kind === "edit" && current.messages[0]?.text !== draft.original)),
   );
-  useEffect(() => {
-    const previous = document.activeElement as HTMLElement | null;
-    panel.current?.focus();
-    return () => previous?.focus();
-  }, []);
   function submit() {
     if (!draft || readOnly || changed || !draft.text.trim()) return;
     const saved = draft,
@@ -61,65 +55,31 @@ export function ProjectCommentsPanel({
     setDraft(null);
   }
   return (
-    <div className="modal-backdrop" role="presentation">
-      <section
-        ref={panel}
-        tabIndex={-1}
+      <UiDialog
+        open
+        onOpenChange={(open) => { if (!open && !draft) onClose(); }}
         className="project-comments-panel"
-        role="dialog"
-        aria-modal="true"
-        aria-label="Commentaires du projet"
-        onKeyDown={(event) => {
-          if (event.key === "Escape" && !draft) onClose();
-          if (event.key === "Tab") {
-            const focusable = [
-              ...panel.current!.querySelectorAll<HTMLElement>(
-                'button:not(:disabled),textarea:not(:disabled),[tabindex="0"]',
-              ),
-            ];
-            const first = focusable[0],
-              last = focusable[focusable.length - 1];
-            if (
-              event.shiftKey &&
-              (document.activeElement === first || document.activeElement === panel.current)
-            ) {
-              event.preventDefault();
-              last?.focus();
-            } else if (!event.shiftKey && document.activeElement === last) {
-              event.preventDefault();
-              first?.focus();
-            }
-          }
-        }}
+        backdropClassName="theme-dark"
+        bodyClassName="project-comments-body"
+        title="Commentaires"
+        description="Discussions, réponses et commentaires résolus du projet."
+        dismissible={!draft}
+        headerAction={<UiIconButton label="Fermer les commentaires" tooltip="Fermer" onClick={onClose} disabled={Boolean(draft)}><UiIcon name="x"/></UiIconButton>}
       >
-        <header>
-          <div>
-            <h2>Commentaires</h2>
-            <p>Discussions, réponses et commentaires résolus du projet.</p>
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            disabled={Boolean(draft)}
-            aria-label="Fermer les commentaires"
-          ><UiIcon name="x"/></button>
-        </header>
-        {readOnly && <p role="status">Lecture seule : vous pouvez consulter les discussions.</p>}
+        {readOnly && <UiFeedback>Lecture seule : vous pouvez consulter les discussions.</UiFeedback>}
         {!threads.length && (
-          <p>
-            Sélectionnez du texte dans le scénario, puis cliquez sur la bulle pour ajouter un
-            commentaire.
-          </p>
+          <UiEmptyState title="Aucun commentaire"
+            description="Sélectionnez du texte dans le scénario, puis cliquez sur la bulle pour ajouter un commentaire." />
         )}
         {threads.map((thread) => (
-          <article key={thread.id} data-project-comment={thread.id}>
+          <UiPanel className="project-comment-thread" key={thread.id} data-project-comment={thread.id}>
             <header>
               <strong>
                 {thread.status === "resolved" ? "Résolu" : "Discussion ouverte"}
                 {thread.anchor.lost ? " · Passage introuvable" : ""}
               </strong>
-              <button
-                type="button"
+              <UiButton
+                variant="ghost"
                 disabled={thread.anchor.lost || Boolean(draft)}
                 onClick={() => {
                   onClose();
@@ -127,7 +87,7 @@ export function ProjectCommentsPanel({
                 }}
               >
                 Voir le passage
-              </button>
+              </UiButton>
             </header>
             <blockquote>{thread.anchor.originalText}</blockquote>
             {thread.messages.map((message, index) => (
@@ -141,15 +101,13 @@ export function ProjectCommentsPanel({
             ))}
             {!readOnly && (
               <footer>
-                <button
-                  type="button"
+                <UiButton
                   disabled={Boolean(draft)}
                   onClick={() => setDraft({ id: thread.id, kind: "reply", original: "", text: "" })}
                 >
                   Répondre
-                </button>
-                <button
-                  type="button"
+                </UiButton>
+                <UiButton
                   disabled={Boolean(draft)}
                   onClick={() =>
                     setDraft({
@@ -161,9 +119,8 @@ export function ProjectCommentsPanel({
                   }
                 >
                   Modifier
-                </button>
-                <button
-                  type="button"
+                </UiButton>
+                <UiButton
                   disabled={Boolean(draft)}
                   onClick={() =>
                     onUpdate(thread.id, (current) => ({
@@ -174,13 +131,13 @@ export function ProjectCommentsPanel({
                   }
                 >
                   {thread.status === "open" ? "Résoudre" : "Rouvrir"}
-                </button>
-                <button type="button" disabled={Boolean(draft)} onClick={() => onDelete(thread.id)}>
+                </UiButton>
+                <UiButton variant="danger" disabled={Boolean(draft)} onClick={() => onDelete(thread.id)}>
                   Supprimer
-                </button>
+                </UiButton>
               </footer>
             )}
-          </article>
+          </UiPanel>
         ))}
         {draft && (
           <form
@@ -192,6 +149,7 @@ export function ProjectCommentsPanel({
             <label>
               {draft.kind === "reply" ? "Votre réponse" : "Modifier le commentaire"}
               <UiTextarea
+                autoGrow
                 autoFocus
                 maxLength={16384}
                 disabled={readOnly}
@@ -200,22 +158,21 @@ export function ProjectCommentsPanel({
               />
             </label>
             {changed && (
-              <p role="alert">
+              <UiFeedback tone="danger">
                 Ce commentaire a changé ou a été supprimé ailleurs. Copiez votre brouillon avant
                 d’annuler ; aucune modification ne sera écrasée.
-              </p>
+              </UiFeedback>
             )}
             <footer>
-              <button type="button" onClick={() => setDraft(null)}>
+              <UiButton onClick={() => setDraft(null)}>
                 Annuler le brouillon
-              </button>
-              <button type="submit" disabled={readOnly || changed || !draft.text.trim()}>
+              </UiButton>
+              <UiButton variant="primary" type="submit" disabled={readOnly || changed || !draft.text.trim()}>
                 Enregistrer
-              </button>
+              </UiButton>
             </footer>
           </form>
         )}
-      </section>
-    </div>
+      </UiDialog>
   );
 }

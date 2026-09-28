@@ -1,9 +1,34 @@
 import { UiTextarea } from './ui/UiTextarea';
+import {
+  UiButton,
+  UiCatalog,
+  UiContextMenu,
+  UiDialog,
+  UiEmptyState,
+  UiFeedback,
+  UiField,
+  UiIconButton,
+  UiListItem,
+  UiMenu,
+  UiMenuItem,
+  UiMenuSeparator,
+  UiMenuSubmenu,
+  UiPanel,
+  UiPopover,
+  UiSearchField,
+  UiSwitch,
+  UiTabs,
+} from './ui';
+import { AudioWorkspace } from './audio/AudioWorkspace';
 import { AiBudgetUsage } from './commercial/AiBudgetUsage';
 import { UiSelect } from './ui/UiSelect';
+import { ensureVersionedProject, captureVersion, selectProjectVersion, addProjectVersion, deleteProjectVersion,
+  renameProjectVersion, nextVersionName, type VersionedProject } from './document/projectVersions';
+import { ProjectVersionControl } from './document/ProjectVersionControl';
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   type CSSProperties,
@@ -20,8 +45,8 @@ import Placeholder from "@tiptap/extension-placeholder";
 import { EditorState, TextSelection } from "@tiptap/pm/state";
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { confirm, message } from "@tauri-apps/plugin-dialog";
-import { getCurrentWebview } from "@tauri-apps/api/webview";
+import { SenarioDialogHost, showSenarioConfirm, showSenarioMessage } from './ui/SenarioDialog';
+import { parseCloudRecoveryLink, sanitizeCloudRecoveryHref } from './commercial/cloudRecoveryLink';
 import {
   getCurrentScenarioElementType,
   insertScenarioParagraphAfterPosition,
@@ -49,7 +74,6 @@ import {
   reconcileCommentAnchors,
   removeCommentMark,
   syncProjectCommentMarks,
-  type CommentAnchor,
   type CommentThread,
 } from "./editor/comments";
 import {
@@ -73,7 +97,10 @@ import {
 import { clientPointToOverlay, clientRectToOverlay } from "./editor/overlayCoordinates";
 import {
   choosePdfToSave,
+  chooseWorkspacePdfToSave,
   choosePdfToOpen,
+  registerBrowserPdf,
+  chooseInterchangeToOpen,
   chooseScenarioToOpen,
   chooseScenarioToSave,
   clearRecovery,
@@ -84,9 +111,16 @@ import {
   writeAutosave,
   writeBackup,
   writePdf,
+  saveInterchangeFile,
   writeScenario,
   type RecentScenario,
 } from "./document/persistence";
+import {
+  INTERCHANGE_FORMATS,
+  exportInterchange,
+  importInterchange,
+  type InterchangeFormat,
+} from './document/interchange';
 import {
   createScenarioFile,
   createEmptyCoverPage,
@@ -116,20 +150,68 @@ import {
 } from "./document/aiConfig";
 import { AccountLicensePanel } from "./commercial/AccountLicensePanel";
 import { CommercialHttpError } from "./commercial/authenticatedApi";
-import { AuthSessionError } from "./commercial/auth";
+import { AuthSessionError, type LocalTestAuthAdapter } from "./commercial/auth";
+import {
+  canUseFeature,
+  featureLockedMessage,
+  featureOfferLabel,
+  type FeatureId,
+} from './commercial/featureCatalog';
 import { OfflineLicenseStatus } from './commercial/OfflineLicenseStatus';
 import { CloudProjectsPanel, CloudProjectStatus } from './commercial/CloudProjectsPanel';
 import { resolveProjectCommentAnchors } from './commercial/projectMetadataClient';
 import { CommentMargin } from './editor/CommentMargin';
+import { SceneTimeline } from './editor/SceneTimeline';
+import { SceneWhiteboard } from './editor/SceneWhiteboard';
+import { SceneBreakdown } from './editor/SceneBreakdown';
+import { getProjectBreakdowns, updateScenarioBreakdown, updateScenarioBreakdowns, type SceneBreakdown as SceneBreakdownData } from './editor/breakdownModel';
+import { TechnicalBreakdown } from './editor/TechnicalBreakdown';
+import { WorkspacePdfExportDialog, type WorkspacePdfExportRequest } from './editor/WorkspacePdfExportDialog';
+import {
+  getScenarioCharacters,
+  getTechnicalBreakdown,
+  updateTechnicalBreakdown,
+  type TechnicalBreakdown as TechnicalBreakdownData,
+} from './editor/technicalBreakdownModel';
+import {
+  collectTechnicalImageAssetIds,
+  hydrateTechnicalBreakdownImages,
+  type TechnicalImageAsset,
+  type TechnicalImageAssets,
+} from './editor/technicalImageAssets';
 import { getDocumentStatistics } from './editor/documentStatistics';
-import { cloudProjectRuntime, type CloudProjectEditor } from './commercial/cloudProjectRuntime';
+import {
+  addScenarioAct,
+  addScenarioScene,
+  deleteScenarioAct,
+  deleteScenarioScene,
+  duplicateScenarioScene,
+  ensureScenarioSceneActs,
+  getScenarioActDescriptions,
+  getScenarioSceneAtPosition,
+  getScenarioActCount,
+  getScenarioScenes,
+  MAX_SCENARIO_ACT_COUNT,
+  moveScenarioScene,
+  moveScenarioSceneGroup,
+  updateScenarioActDescription,
+  updateScenarioScene,
+  type ScenarioAct,
+  type ScenarioScene,
+  type SceneWhiteboardMetadata,
+} from './editor/sceneTimelineModel';
+import { cloudProjectRuntime, type CloudProjectEditor, type OpenProjectState } from './commercial/cloudProjectRuntime';
 import { collaborationTransaction } from './editor/collaborationTransaction';
 import {
   authenticatedOperations,
+  auth,
   cloudSyncQueue,
   createRuntimeCommercialApi,
+  localTestMode,
   offlineLicense,
   sessions,
+  invalidateRuntimeSession,
+  acceptRuntimeAccountSession,
 } from "./commercial/runtime";
 import "./App.css";
 
@@ -143,6 +225,9 @@ const TEXT_REPLACEMENTS_STORAGE_KEY = "scenario-text-replacements";
 const TEXT_REPLACEMENTS_SEEDED_KEY = "scenario-text-replacements-seeded-v4";
 const TEXT_REPLACEMENTS_ENABLED_KEY = "scenario-text-replacements-enabled";
 const PDF_CUSTOM_LANGUAGES_STORAGE_KEY = "scenario-pdf-custom-languages";
+// Bêta locale : toutes les fonctions sont ouvertes pour pouvoir tester les
+// parcours complets sans modifier l'offre réellement attribuée à un compte.
+// Remettre à false lors du retour des limites commerciales.
 
 function readLocalSetting(key: string): string | null {
   try {
@@ -229,6 +314,9 @@ interface PdfExportDraft {
   customTranslationLanguage: string;
 }
 
+type ExportFormat = "pdf" | InterchangeFormat;
+type FileSubmenu = "import" | "export" | null;
+
 const PDF_TRANSLATION_LANGUAGES = [
   "anglais",
   "espagnol",
@@ -290,7 +378,7 @@ function getCommentActionPosition(
   appShell: HTMLElement | null,
 ): CommentActionTarget | null {
   const { selection } = editor.state;
-  if (selection.empty || selection.$from.parent !== selection.$to.parent) {
+  if (selection.empty) {
     return null;
   }
   const coords = editor.view.coordsAtPos(selection.to);
@@ -331,6 +419,8 @@ function findTextMatches(editor: Editor, search: string, matchCase: boolean): Te
 function isTemporaryAuthenticationFailure(error: unknown): boolean {
   return (
     error instanceof TypeError ||
+    (error instanceof AuthSessionError && !error.terminal) ||
+    (error instanceof DOMException && ['AbortError', 'TimeoutError'].includes(error.name)) ||
     (error instanceof CommercialHttpError && [502, 503, 504].includes(error.status))
   );
 }
@@ -344,14 +434,25 @@ function App() {
       void cloudProjectRuntime.close().catch(() => undefined);
     });
 
-    void sessions
-      .getAccessToken()
-      .then((token) => {
-        if (!active) return;
-        if (token) {
-          authenticatedOperations.reset();
-        }
-      })
+    void (async () => {
+      let token = await sessions.getAccessToken();
+      const automaticLocalProfile = import.meta.env.DEV && localTestMode
+        ? import.meta.env.VITE_SCENARIO_LOCAL_PROFILE
+        : undefined;
+      if (!token && ['discovery', 'author', 'studio'].includes(automaticLocalProfile ?? '')) {
+        const session = await (auth as LocalTestAuthAdapter).signInAs(
+          automaticLocalProfile as 'discovery' | 'author' | 'studio',
+        );
+        await acceptRuntimeAccountSession(session);
+        token = session.accessToken;
+      }
+      if (!active || !token) return;
+      authenticatedOperations.reset();
+      if (automaticLocalProfile) {
+        const me = await createRuntimeCommercialApi().getMe();
+        await offlineLicense.refresh(me);
+      }
+    })()
       .catch(async (error) => {
         if (!active) return;
         if (isTemporaryAuthenticationFailure(error)) {
@@ -377,6 +478,7 @@ function App() {
 }
 
 function AuthenticatedApp() {
+  const [licenseState, setLicenseState] = useState(() => offlineLicense.state);
   const [currentType, setCurrentType] = useState<ScenarioElementType>(
     DEFAULT_SCENARIO_ELEMENT_TYPE,
   );
@@ -384,18 +486,21 @@ function AuthenticatedApp() {
   const [pageCount, setPageCount] = useState(1);
   const [currentPage, setCurrentPage] = useState(1);
   const [fileMenuOpen, setFileMenuOpen] = useState(false);
+  const [fileSubmenu, setFileSubmenu] = useState<FileSubmenu>(null);
   const [viewMenuOpen, setViewMenuOpen] = useState(false);
-  const [commentComposerOpen, setCommentComposerOpen] = useState(false);
   const [commentActionTarget, setCommentActionTarget] = useState<CommentActionTarget | null>(null);
-  const [commentAnchor, setCommentAnchor] = useState<CommentAnchor | null>(null);
-  const [commentDraft, setCommentDraft] = useState("");
+  const [commentEditingRequestId, setCommentEditingRequestId] = useState<string | null>(null);
   const [activeCommentId, setActiveCommentId] = useState<string | null>(null);
   const [comments, setComments] = useState<CommentThread[]>([]);
+  const [technicalImageAssets, setTechnicalImageAssets] = useState<TechnicalImageAssets>({});
   const [cloudReadOnly, setCloudReadOnly] = useState(false);
   const [recentScenarios, setRecentScenarios] = useState<RecentScenario[]>([]);
   const [findReplaceOpen, setFindReplaceOpen] = useState(false);
   const [pdfExportOpen, setPdfExportOpen] = useState(false);
   const [pdfExportBusy, setPdfExportBusy] = useState(false);
+  const [workspacePdfExportKind, setWorkspacePdfExportKind] = useState<'breakdown' | 'technical' | null>(null);
+  const [workspacePdfExportBusy, setWorkspacePdfExportBusy] = useState(false);
+  const [exportFormat, setExportFormat] = useState<ExportFormat>("pdf");
   const [pdfImportOpen, setPdfImportOpen] = useState(false);
   const [pdfImportPath, setPdfImportPath] = useState<string | null>(null);
   const [pdfImportBusy, setPdfImportBusy] = useState(false);
@@ -449,6 +554,7 @@ function AuthenticatedApp() {
   const [aiSettingsOpen, setAiSettingsOpen] = useState(false);
   const [selectedAiPromptId, setSelectedAiPromptId] = useState<string | null>(null);
   const [helpOpen, setHelpOpen] = useState(false);
+  const [uiCatalogOpen, setUiCatalogOpen] = useState(false);
   const [aiDraft, setAiDraft] = useState(() => ({
     prompts: createDefaultAiConfig().prompts,
   }));
@@ -460,6 +566,9 @@ function AuthenticatedApp() {
   const [aiBusy, setAiBusy] = useState(false);
   const [accountPanelOpen, setAccountPanelOpen] = useState(false);
   const [cloudProjectsOpen, setCloudProjectsOpen] = useState(false);
+  const [whiteboardOpen, setWhiteboardOpen] = useState(false);
+  const [breakdownOpen, setBreakdownOpen] = useState(false);
+  const [technicalBreakdownOpen, setTechnicalBreakdownOpen] = useState(false);
   const [scenarioContextMenu, setScenarioContextMenu] =
     useState<ScenarioContextMenuState | null>(null);
   const [zoom, setZoom] = useState(() => {
@@ -475,7 +584,41 @@ function AuthenticatedApp() {
     status: "Prêt",
   });
   const [initialRecoveryFinished, setInitialRecoveryFinished] = useState(false);
+  const projectVersionsRef = useRef<VersionedProject | null>(null);
+  const [projectVersions, setProjectVersions] = useState<VersionedProject | null>(null);
+  const versionTransition = useRef(false);
+  const documentLoadPending = useRef(false);
+  const [documentRevision, setDocumentRevision] = useState(0);
+  const [activeSceneId, setActiveSceneId] = useState<string | null>(null);
+  const documentSavePending = useRef(false);
+  const [versionBusy, setVersionBusy] = useState(false);
+  const [versionError, setVersionError] = useState('');
+  const [versionCloudState, setVersionCloudState] = useState<OpenProjectState>({project:null,status:'closed',message:''});
+  const canUseProfessionalFormats = canUseFeature(licenseState, 'professionalExports');
+  const canUsePersonalComments = canUseFeature(licenseState, 'personalComments');
+  const canUseProjectVersions = canUseFeature(licenseState, 'versionHistory');
+  const canUseVoiceReading = canUseFeature(licenseState, 'voiceReading');
+  const canUseAi = canUseFeature(licenseState, 'artificialIntelligence');
+  const canUseWhiteboard = canUseFeature(licenseState, 'whiteboard');
+  const canUseSceneTimeline = canUseFeature(licenseState, 'timeline');
+  const canUseBreakdown = canUseFeature(licenseState, 'breakdownWorkspace');
+  const canUseTechnicalBreakdown = canUseFeature(licenseState, 'technicalBreakdownWorkspace');
+  const canUseCloudWorkspace = canUseFeature(licenseState, 'cloudWorkspace');
+  const openAccountForFeature = useCallback((feature: FeatureId) => {
+    setFileMenuOpen(false);
+    setFileSubmenu(null);
+    setViewMenuOpen(false);
+    setCoverMenuOpen(false);
+    setAccountPanelOpen(true);
+    setDocumentState((previous) => ({ ...previous, status: featureLockedMessage(feature) }));
+  }, []);
+  const cloudVersionLocked = versionCloudState.status === 'loading' || Boolean(versionCloudState.project && !versionCloudState.branches?.length);
+  const listedProjectVersions = versionCloudState.project ? versionCloudState.branches ?? [] : projectVersions?.versions ?? [];
+  const listedActiveVersionId = versionCloudState.project ? versionCloudState.activeBranchId : projectVersions?.activeVersionId;
   const paginationFrame = useRef<number | null>(null);
+  const scenarioWorkspaceVisibleRef = useRef(false);
+  scenarioWorkspaceVisibleRef.current = initialRecoveryFinished
+    && !cloudProjectsOpen && !whiteboardOpen && !breakdownOpen && !technicalBreakdownOpen;
   const isReplacingDocument = useRef(false);
   const recoveryWasChecked = useRef(false);
   const launchedScenarioWasChecked = useRef(false);
@@ -494,25 +637,37 @@ function AuthenticatedApp() {
   const textReplacementsRef = useRef(textReplacements);
   const textReplacementsEnabledRef = useRef(textReplacementsEnabled);
   const commentsRef = useRef(comments);
-  const commentInput = useRef<HTMLTextAreaElement | null>(null);
+  const technicalImageAssetsRef = useRef<TechnicalImageAssets>(technicalImageAssets);
   const appShellRef = useRef<HTMLDivElement | null>(null);
   const collaborationListeners = useRef(new Set<(document: JSONContent) => void>());
+  useEffect(() => offlineLicense.subscribe(() => setLicenseState(offlineLicense.state)), []);
+  useEffect(() => cloudProjectRuntime.subscribe(setVersionCloudState), []);
+  useEffect(() => {
+    let wasAuthenticated = false;
+    return sessions.subscribe(authenticated => {
+      if (wasAuthenticated && !authenticated) setCloudProjectsOpen(false);
+      wasAuthenticated = authenticated;
+    });
+  }, []);
 
   useEffect(() => {
-    if (!pdfImportOpen) return;
-    let unlisten: (() => void) | undefined;
-    void getCurrentWebview().onDragDropEvent((event) => {
-      if (event.payload.type !== "drop") return;
-      const path = event.payload.paths.find((candidate) => candidate.toLocaleLowerCase().endsWith(".pdf"));
-      if (path) {
-        setPdfImportPath(path);
-        setPdfImportError("");
-      } else {
-        setPdfImportError("Dépose un fichier PDF depuis l’explorateur Windows.");
-      }
-    }).then((cleanup) => { unlisten = cleanup; });
-    return () => { unlisten?.(); };
-  }, [pdfImportOpen]);
+    const recoveryHref = window.location.href;
+    const sanitizedRecoveryHref = sanitizeCloudRecoveryHref(recoveryHref);
+    if (sanitizedRecoveryHref)
+      window.history.replaceState(null, document.title, sanitizedRecoveryHref);
+    const recoveryLink = parseCloudRecoveryLink(recoveryHref);
+    if (!recoveryLink) return;
+    void acceptRuntimeAccountSession(recoveryLink.session).then(() => {
+      setAccountPanelOpen(false);
+      setWhiteboardOpen(false);
+      setBreakdownOpen(false);
+      setTechnicalBreakdownOpen(false);
+      setCloudProjectsOpen(true);
+    }).catch(() => {
+      setCloudProjectsOpen(false);
+      setAccountPanelOpen(true);
+    });
+  }, []);
 
   useEffect(() => {
     currentDocumentState.current = documentState;
@@ -574,13 +729,14 @@ function AuthenticatedApp() {
   }, []);
 
   const refreshPagination = useCallback((editor: Editor) => {
+    if (!scenarioWorkspaceVisibleRef.current) return;
     if (paginationFrame.current !== null) {
       cancelAnimationFrame(paginationFrame.current);
     }
 
     paginationFrame.current = requestAnimationFrame(() => {
       paginationFrame.current = null;
-      if (editor.isDestroyed) {
+      if (editor.isDestroyed || !scenarioWorkspaceVisibleRef.current) {
         return;
       }
       const selectionDom = editor.view.domAtPos(editor.state.selection.from);
@@ -599,7 +755,7 @@ function AuthenticatedApp() {
   }, []);
 
   const refreshSmartType = useCallback((editor: Editor) => {
-    if (!smartTypeInteractionStarted.current) {
+    if (!editor.isEditable || !smartTypeInteractionStarted.current) {
       setSmartType(null);
       return;
     }
@@ -629,6 +785,10 @@ function AuthenticatedApp() {
 
   const refreshCurrentType = useCallback((editor: Editor) => {
     setCurrentType(getCurrentScenarioElementType(editor));
+    setActiveSceneId(getScenarioSceneAtPosition(
+      editor.state.doc,
+      editor.state.selection.from,
+    )?.id ?? null);
   }, []);
 
   const refreshEditorState = useCallback(
@@ -645,6 +805,7 @@ function AuthenticatedApp() {
       return;
     }
 
+    setDocumentRevision(revision => revision + 1);
     setDocumentState((previous) => ({
       ...previous,
       isDirty: true,
@@ -749,6 +910,11 @@ function AuthenticatedApp() {
     },
   });
 
+  useEffect(() => {
+    if (!whiteboardOpen || !editor || editor.isDestroyed || !editor.isEditable) return;
+    ensureScenarioSceneActs(editor);
+  }, [documentRevision, editor, whiteboardOpen]);
+
   // Les suggestions sont affichées en position fixe. Elles doivent donc être
   // recalculées quand la feuille défile, même si le curseur reste immobile.
   useEffect(() => {
@@ -815,7 +981,7 @@ function AuthenticatedApp() {
       const target = event.target;
       if (
         !(target instanceof Element) ||
-        target.closest(".comment-inline-button, .formatting-toolbar, .ui-select-panel") ||
+        target.closest(".comment-inline-button, .audio-inline-action, .audio-menu-container, .audio-player, .audio-settings-panel, .formatting-toolbar, .ui-select-panel") ||
         editor?.view.dom.contains(target)
       ) {
         return;
@@ -912,31 +1078,6 @@ function AuthenticatedApp() {
     [aiBusy, aiTarget, editor, zoom],
   );
 
-  useEffect(() => {
-    if (!transitionMenuOpen) {
-      return;
-    }
-
-    const closeOnOutsideClick = (event: MouseEvent) => {
-      const target = event.target;
-      if (
-        target instanceof Element &&
-        target.closest(
-          ".paragraph-action-cluster",
-        )
-      ) {
-        return;
-      }
-      setTransitionMenuOpen(false);
-      setCustomTransitionOpen(false);
-      setCustomTransitionText("");
-      setAiTarget(null);
-    };
-
-    document.addEventListener("mousedown", closeOnOutsideClick);
-    return () => document.removeEventListener("mousedown", closeOnOutsideClick);
-  }, [transitionMenuOpen]);
-
   // Le bouton et sa bande sont en position fixe. Après un scroll ou un zoom,
   // le paragraphe a bougé sans déclencher mousemove : on le recalcule donc à
   // partir de la dernière position connue du curseur.
@@ -978,14 +1119,29 @@ function AuthenticatedApp() {
   }, [editor, refreshAiTarget, zoom]);
 
   const createDocument = useCallback(
-    (activeEditor: Editor, title: string): ScenarioFile =>
-      createScenarioFile(
+    (activeEditor: Editor, title: string): ScenarioFile => {
+      let current = createScenarioFile(
         activeEditor,
         title,
         coverPageRef.current,
         commentsRef.current,
         coverPageHiddenRef.current,
-      ),
+        technicalImageAssetsRef.current,
+      );
+      if (!projectVersionsRef.current) {
+        const usedAssetIds = new Set(collectTechnicalImageAssetIds(current.content));
+        const retainedAssets = Object.fromEntries(Object.entries(current.technicalImageAssets ?? {})
+          .filter(([assetId]) => usedAssetIds.has(assetId)));
+        const { technicalImageAssets: _unusedAssets, ...withoutAssets } = current;
+        current = { ...withoutAssets, ...(Object.keys(retainedAssets).length
+          ? { technicalImageAssets: retainedAssets }
+          : {}) };
+        return current;
+      }
+      const project = captureVersion(projectVersionsRef.current, current);
+      projectVersionsRef.current = project;
+      return project;
+    },
     [],
   );
 
@@ -1009,16 +1165,18 @@ function AuthenticatedApp() {
 
   const replaceDocument = useCallback(
     (document: ScenarioFile, filePath: string | null, fromCloud = false) => {
-      if (!editor) {
+      if (!editor || (versionTransition.current && !fromCloud)) {
         return;
       }
-
       // A channel is bound to one scenario. Never send a newly opened local
       // file to the previous Studio through the existing editor subscription.
       if (!fromCloud) {
         void cloudProjectRuntime.close();
         editor.setEditable(true);
       }
+
+      projectVersionsRef.current = document.formatVersion === 2 ? ensureVersionedProject(document) : null;
+      setProjectVersions(projectVersionsRef.current);
 
       isReplacingDocument.current = true;
       smartTypeInteractionStarted.current = false;
@@ -1032,6 +1190,8 @@ function AuthenticatedApp() {
       setCoverPageHidden(document.coverPageHidden);
       commentsRef.current = document.comments;
       setComments(document.comments);
+      technicalImageAssetsRef.current = document.technicalImageAssets ?? {};
+      setTechnicalImageAssets(document.technicalImageAssets ?? {});
       setActiveCommentId(null);
       for (const thread of document.comments) {
         addCommentMark(editor, thread.id, thread.anchor);
@@ -1051,9 +1211,10 @@ function AuthenticatedApp() {
   );
 
   const showError = useCallback(async (error: unknown) => {
-    await message(error instanceof Error ? error.message : String(error), {
-      title: "senario",
-      kind: "error",
+    await showSenarioMessage({
+      title: 'Senario',
+      description: error instanceof Error ? error.message : String(error),
+      kind: 'error',
     });
   }, []);
 
@@ -1071,23 +1232,22 @@ function AuthenticatedApp() {
       return true;
     }
 
-    return confirm(
-      "Des modifications ne sont pas enregistrées. Continuer sans les enregistrer ?",
-      {
-        title: "senario",
-        kind: "warning",
-        okLabel: "Continuer",
-        cancelLabel: "Annuler",
-      },
-    );
+    return showSenarioConfirm({
+      title: 'Modifications non enregistrées',
+      description: 'Des modifications ne sont pas enregistrées. Continuer sans les enregistrer ?',
+      kind: 'warning',
+      confirmLabel: 'Continuer',
+      cancelLabel: 'Annuler',
+    });
   }, [documentState.isDirty]);
 
   const saveDocument = useCallback(
     async (saveAs = false): Promise<string | null> => {
-      if (!editor) {
+      if (!editor || versionTransition.current || documentSavePending.current || documentLoadPending.current) {
         return null;
       }
-
+      documentSavePending.current = true;
+      try {
       let path = documentState.filePath;
       if (saveAs || !path) {
         path = await chooseScenarioToSave(documentState.title);
@@ -1121,6 +1281,7 @@ function AuthenticatedApp() {
         await showError(error);
         return null;
       }
+      } finally { documentSavePending.current = false; }
     },
     [
       createDocument,
@@ -1132,6 +1293,98 @@ function AuthenticatedApp() {
       showError,
     ],
   );
+
+  useEffect(() => {
+    if (!editor || isTauri()) return;
+    const saveRecovery = () => {
+      const state = currentDocumentState.current;
+      if (!state.isDirty || versionTransition.current) return;
+      void persistRecovery(editor, state.title, state.filePath).catch(() => {
+        setDocumentState(previous => ({...previous,status:'Copie locale indisponible — téléchargez votre projet avant de fermer.'}));
+      });
+    };
+    const beforeUnload = (event: BeforeUnloadEvent) => {
+      const pending = versionCloudState.project ? cloudProjectRuntime.hasUnsyncedChanges() : currentDocumentState.current.isDirty;
+      if (!pending) return;
+      saveRecovery();
+      event.preventDefault();
+      event.returnValue = '';
+    };
+    const visibility = () => { if (document.visibilityState === 'hidden') saveRecovery(); };
+    window.addEventListener('beforeunload', beforeUnload);
+    document.addEventListener('visibilitychange', visibility);
+    return () => {
+      window.removeEventListener('beforeunload', beforeUnload);
+      document.removeEventListener('visibilitychange', visibility);
+    };
+  }, [editor, persistRecovery, versionCloudState.project]);
+
+  async function changeProjectVersion(action: string, name = '', sourceId = ''): Promise<boolean> {
+    if (!canUseProjectVersions && (!versionCloudState.project || ['duplicate','blank','rename','delete','restore'].includes(action))) {
+      setVersionError(featureLockedMessage('versionHistory'));
+      return false;
+    }
+    if (!editor || closeInProgress.current || versionTransition.current || documentSavePending.current || documentLoadPending.current || cloudVersionLocked || (cloudReadOnly && (!versionCloudState.project || ['duplicate','blank','rename','delete','restore'].includes(action)))
+      || aiBusy || pdfImportBusy || pdfExportBusy) return false;
+    // A conflicted/empty comment draft must not be unmounted and silently lost.
+    if (document.querySelector('.margin-note textarea')) {
+      setVersionError('Enregistrez ou annulez le commentaire en cours avant de changer de version.');
+      return false;
+    }
+    versionTransition.current = true; setVersionBusy(true); setVersionError('');
+    editor.setEditable(false);
+    try {
+      if (versionCloudState.project) {
+        await cloudProjectRuntime.changeVersion(action, name, sourceId);
+        return true;
+      }
+      const live = createDocument(editor, currentDocumentState.current.title);
+      const before = ensureVersionedProject(live);
+      const targetId = sourceId && sourceId !== 'initial' ? sourceId : before.activeVersionId;
+      const after = action === 'duplicate' ? addProjectVersion(before, name, sourceId || before.activeVersionId)
+        : action === 'blank' ? addProjectVersion(before, name, null)
+        : action === 'rename' ? renameProjectVersion(before, targetId, name)
+        : action === 'delete' ? deleteProjectVersion(before, targetId)
+        : selectProjectVersion(before, action);
+      after.savedAt = new Date().toISOString();
+      // Never switch the editor until both outgoing backup and complete new bundle are durable.
+      await writeBackup(JSON.stringify(before, null, 2));
+      await writeAutosave(serializeRecoveryFile(after, currentDocumentState.current.filePath));
+      const activeDocumentChanged = before.activeVersionId !== after.activeVersionId;
+      isReplacingDocument.current = activeDocumentChanged;
+      projectVersionsRef.current = after; setProjectVersions(after);
+      if (activeDocumentChanged) {
+        replaceEditorDocumentWithoutHistory(editor, after.content);
+        ensureScenarioBlockIds(editor);
+        coverPageRef.current = after.coverPage; setCoverPage(after.coverPage); setCoverDraft(after.coverPage);
+        coverPageHiddenRef.current = after.coverPageHidden; setCoverPageHidden(after.coverPageHidden);
+        commentsRef.current = after.comments; setComments(after.comments); setActiveCommentId(null);
+        syncProjectCommentMarks(editor, after.comments);
+        setSmartType(null); setAiTarget(null); setAiPromptMenuOpen(false); setTransitionMenuOpen(false);
+        setCommentEditingRequestId(null); setCoverMenuOpen(false);
+      }
+      const nextState = { ...currentDocumentState.current, isDirty: true, status: `Version « ${after.versions.find(v => v.id === after.activeVersionId)!.name} » — copie de récupération enregistrée` };
+      currentDocumentState.current = nextState; setDocumentState(nextState);
+      refreshEditorState(editor);
+      cloudProjectRuntime.metadataChanged();
+      return true;
+    } catch (error) {
+      setVersionError(error instanceof Error ? error.message : 'Changement impossible. La version actuelle est conservée.');
+      return false;
+    } finally {
+      isReplacingDocument.current = false; versionTransition.current = false; setVersionBusy(false);
+      if (!versionCloudState.project) editor.setEditable(!cloudReadOnly);
+    }
+  }
+
+  function nextAvailableVersionName(): string {
+    const current = projectVersionsRef.current;
+    if (versionCloudState.project) {
+      let n = 1; while (listedProjectVersions.some(v => !v.deletedAt && v.name.toLowerCase() === `version ${n}`)) n++;
+      return `Version ${n}`;
+    }
+    return current ? nextVersionName(current) : 'Version 2';
+  }
 
   const rememberCustomPdfLanguage = useCallback((value: string): string => {
     const language = normalizePdfLanguage(value);
@@ -1175,10 +1428,16 @@ function AuthenticatedApp() {
     );
   }, []);
 
-  const openPdfExport = useCallback(() => {
+  const openExportDialog = useCallback((format: ExportFormat) => {
+    if (['fdx', 'docx'].includes(format) && !canUseProfessionalFormats) {
+      openAccountForFeature('professionalExports');
+      return;
+    }
     setFileMenuOpen(false);
+    setFileSubmenu(null);
     setViewMenuOpen(false);
     setCoverMenuOpen(false);
+    setExportFormat(format);
     setPdfExportDraft({
       includeCoverPage: hasCoverPageContent(coverPage),
       includeSceneNumbers: true,
@@ -1187,18 +1446,49 @@ function AuthenticatedApp() {
       customTranslationLanguage: "",
     });
     setPdfExportOpen(true);
-  }, [coverPage]);
+  }, [canUseProfessionalFormats, coverPage, openAccountForFeature]);
 
-  const exportPdf = useCallback(async () => {
+  const openPdfExport = useCallback(() => {
+    openExportDialog("pdf");
+  }, [openExportDialog]);
+
+  const openWorkspacePdfExport = useCallback((kind: 'breakdown' | 'technical') => {
+    setFileMenuOpen(false);
+    setFileSubmenu(null);
+    setViewMenuOpen(false);
+    setCoverMenuOpen(false);
+    setWorkspacePdfExportKind(kind);
+  }, []);
+
+  const openCurrentPdfExport = useCallback(() => {
+    if (technicalBreakdownOpen) openWorkspacePdfExport('technical');
+    else if (breakdownOpen) openWorkspacePdfExport('breakdown');
+    else if (!cloudProjectsOpen && !whiteboardOpen) openPdfExport();
+  }, [breakdownOpen, cloudProjectsOpen, openPdfExport, openWorkspacePdfExport, technicalBreakdownOpen, whiteboardOpen]);
+
+  const exportCurrentFormat = useCallback(async () => {
     if (!editor) {
       return;
     }
 
     try {
+      if (versionTransition.current || documentSavePending.current || documentLoadPending.current) {
+        return;
+      }
+      if (['fdx', 'docx'].includes(exportFormat) && !canUseProfessionalFormats) {
+        setPdfExportOpen(false);
+        openAccountForFeature('professionalExports');
+        return;
+      }
       const selectedTranslationLanguage = pdfExportDraft.translationLanguage;
       const translationLanguage = selectedTranslationLanguage === "__custom__"
         ? pdfExportDraft.customTranslationLanguage.trim()
         : selectedTranslationLanguage;
+      if (translationLanguage && !canUseAi) {
+        setPdfExportOpen(false);
+        openAccountForFeature('artificialIntelligence');
+        return;
+      }
       if (selectedTranslationLanguage === "__custom__" && !translationLanguage) {
         throw new Error("Indique la langue dans laquelle traduire le scénario.");
       }
@@ -1206,13 +1496,16 @@ function AuthenticatedApp() {
         rememberCustomPdfLanguage(translationLanguage);
       }
 
-      const path = await choosePdfToSave(documentState.title);
-      if (!path) {
-        return;
+      let pdfPath: string | null = null;
+      if (exportFormat === "pdf") {
+        pdfPath = await choosePdfToSave(documentState.title);
+        if (!pdfPath) return;
       }
+
+      documentSavePending.current = true;
+      setPdfExportBusy(true);
       let document = createDocument(editor, documentState.title);
       if (translationLanguage) {
-        setPdfExportBusy(true);
         const translation = createPdfTranslationSegments(document.content);
         const translatedTexts = await translateScenario(
           translationLanguage,
@@ -1223,19 +1516,32 @@ function AuthenticatedApp() {
           content: applyPdfTranslations(document.content, translation.positions, translatedTexts),
         };
       }
-      const { createScenarioPdf } = await import("./document/pdfExport");
-      await writePdf(path, await createScenarioPdf(document, pdfExportDraft));
+
+      if (exportFormat === "pdf") {
+        const { createScenarioPdf } = await import("./document/pdfExport");
+        await writePdf(pdfPath!, await createScenarioPdf(document, pdfExportDraft));
+      } else {
+        const preparedDocument = applyPortableExportOptions(document, pdfExportDraft);
+        const contents = await exportInterchange(exportFormat, preparedDocument);
+        const path = await saveInterchangeFile(exportFormat, documentState.title, contents);
+        if (!path) return;
+      }
+
+      const formatLabel = getExportFormatLabel(exportFormat);
       setPdfExportOpen(false);
       setDocumentState((previous) => ({
         ...previous,
-        status: translationLanguage ? "PDF traduit et exporté" : "PDF exporté",
+        status: translationLanguage
+          ? `${formatLabel} traduit et exporté`
+          : `${formatLabel} exporté`,
       }));
     } catch (error) {
       await showError(error);
     } finally {
       setPdfExportBusy(false);
+      documentSavePending.current = false;
     }
-  }, [createDocument, documentState.title, editor, pdfExportDraft, rememberCustomPdfLanguage, showError]);
+  }, [canUseAi, canUseProfessionalFormats, createDocument, documentState.title, editor, exportFormat, openAccountForFeature, pdfExportDraft, rememberCustomPdfLanguage, showError]);
 
   const openFindReplace = useCallback(() => {
     setFileMenuOpen(false);
@@ -1326,6 +1632,10 @@ function AuthenticatedApp() {
   }, [editor, findMatchCase, findQuery, refreshEditorState, replaceQuery]);
 
   const openCommentComposer = useCallback(async () => {
+    if (!canUsePersonalComments) {
+      openAccountForFeature('personalComments');
+      return;
+    }
     if (!editor?.isEditable) {
       return;
     }
@@ -1334,20 +1644,11 @@ function AuthenticatedApp() {
     ensureScenarioBlockIds(editor);
     const anchor = getSelectionCommentAnchor(editor);
     if (!anchor) {
-      await message("Sélectionne une portion de texte dans un seul paragraphe avant d’ajouter un commentaire.", {
-        title: "Commentaires",
-        kind: "info",
+      await showSenarioMessage({
+        title: 'Commentaires',
+        description: 'Sélectionne une portion de texte dans un seul paragraphe avant d’ajouter un commentaire.',
+        kind: 'info',
       });
-      return;
-    }
-    setCommentAnchor(anchor);
-    setCommentDraft("");
-    setCommentComposerOpen(true);
-    requestAnimationFrame(() => commentInput.current?.focus());
-  }, [editor]);
-
-  const saveNewComment = useCallback(() => {
-    if (!editor?.isEditable || !commentAnchor || !commentDraft.trim()) {
       return;
     }
     const createdAt = new Date().toISOString();
@@ -1356,24 +1657,22 @@ function AuthenticatedApp() {
       status: "open",
       createdAt,
       resolvedAt: null,
-      anchor: commentAnchor,
-      messages: [{ id: createStableId("message"), text: commentDraft.trim(), createdAt, editedAt: null }],
+      anchor,
+      messages: [{ id: createStableId("message"), text: "", createdAt, editedAt: null }],
     };
-    if (editor) {
-      addCommentMark(editor, thread.id, thread.anchor);
-    }
+    addCommentMark(editor, thread.id, thread.anchor);
     setComments((previous) => [...previous, thread]);
-    setActiveCommentId(null);
-    setCommentComposerOpen(false);
-    setCommentAnchor(null);
-    setDocumentState((previous) => ({ ...previous, isDirty: true, status: "Commentaire ajouté" }));
-  }, [commentAnchor, commentDraft, editor]);
+    setActiveCommentId(thread.id);
+    setCommentEditingRequestId(thread.id);
+    setCommentActionTarget(null);
+    setDocumentState((previous) => ({ ...previous, isDirty: true, status: "Commentaire créé" }));
+  }, [canUsePersonalComments, editor, openAccountForFeature]);
 
   const updateCommentThread = useCallback((threadId: string, update: (thread: CommentThread) => CommentThread) => {
-    if (!editor?.isEditable) return;
+    if (!canUsePersonalComments || !editor?.isEditable) return;
     setComments((previous) => previous.map((thread) => thread.id === threadId ? update(thread) : thread));
     setDocumentState((previous) => ({ ...previous, isDirty: true, status: "Commentaires modifiés" }));
-  }, [editor]);
+  }, [canUsePersonalComments, editor]);
 
   const navigateToComment = useCallback((thread: CommentThread, toggle = false) => {
     if (!editor) {
@@ -1394,13 +1693,15 @@ function AuthenticatedApp() {
   }, [activeCommentId, editor]);
 
   const deleteCommentThread = useCallback(async (threadId: string) => {
-    if (!editor?.isEditable) return;
-    const shouldDelete = isTauri() ? await confirm("Supprimer ce commentaire et toutes ses réponses ?", {
-      title: "Commentaires",
-      kind: "warning",
-      okLabel: "Supprimer",
-      cancelLabel: "Annuler",
-    }) : window.confirm('Supprimer ce commentaire et toutes ses réponses ?');
+    if (!canUsePersonalComments || !editor?.isEditable) return;
+    const shouldDelete = await showSenarioConfirm({
+      title: 'Supprimer le commentaire',
+      description: 'Supprimer ce commentaire et toutes ses réponses ?',
+      kind: 'warning',
+      destructive: true,
+      confirmLabel: 'Supprimer',
+      cancelLabel: 'Annuler',
+    });
     if (!shouldDelete || !editor?.isEditable) {
       return;
     }
@@ -1411,9 +1712,13 @@ function AuthenticatedApp() {
     setComments((previous) => previous.filter((thread) => thread.id !== threadId));
     setActiveCommentId((previous) => previous === threadId ? null : previous);
     setDocumentState((previous) => ({ ...previous, isDirty: true, status: "Commentaire supprimé" }));
-  }, [editor]);
+  }, [canUsePersonalComments, editor]);
 
   const openAiSettings = useCallback(() => {
+    if (!canUseAi) {
+      openAccountForFeature('artificialIntelligence');
+      return;
+    }
     setFileMenuOpen(false);
     setViewMenuOpen(false);
     setCoverMenuOpen(false);
@@ -1422,7 +1727,7 @@ function AuthenticatedApp() {
       prompts: aiConfig.prompts,
     });
     setSelectedAiPromptId(aiConfig.prompts[0]?.id ?? null);
-  }, [aiConfig]);
+  }, [aiConfig, canUseAi, openAccountForFeature]);
 
   const openHelp = useCallback(() => {
     setFileMenuOpen(false);
@@ -1431,33 +1736,12 @@ function AuthenticatedApp() {
     setHelpOpen(true);
   }, []);
 
-  const toggleCoverMenu = useCallback(() => {
-    setFileMenuOpen(false);
-    setViewMenuOpen(false);
-    setCoverMenuOpen((isOpen) => {
-      if (!isOpen) {
-        setCoverDraft(coverPage);
-      }
-      return !isOpen;
-    });
-  }, [coverPage]);
-
-  const toggleFileMenu = useCallback(() => {
-    setViewMenuOpen(false);
-    setCoverMenuOpen(false);
-    setFileMenuOpen((isOpen) => !isOpen);
-  }, []);
-
-  const toggleViewMenu = useCallback(() => {
-    setFileMenuOpen(false);
-    setCoverMenuOpen(false);
-    setViewMenuOpen((isOpen) => !isOpen);
-  }, []);
-
   const closeTopMenus = useCallback(() => {
     setFileMenuOpen(false);
+    setFileSubmenu(null);
     setViewMenuOpen(false);
     setCoverMenuOpen(false);
+    setFindReplaceOpen(false);
   }, []);
 
   const addScenarioEnding = useCallback(() => {
@@ -1631,16 +1915,17 @@ function AuthenticatedApp() {
 
   const applyAiPrompt = useCallback(
     async (prompt: AiPrompt) => {
+      if (!canUseAi) {
+        openAccountForFeature('artificialIntelligence');
+        return;
+      }
       if (!editor || !aiTarget) {
         return;
       }
 
       const paragraphText = aiTarget.text.trim();
       if (!paragraphText) {
-        await message("Ce paragraphe est vide.", {
-          title: "IA",
-          kind: "info",
-        });
+        await showSenarioMessage({ title: 'IA', description: 'Ce paragraphe est vide.', kind: 'info' });
         return;
       }
 
@@ -1668,7 +1953,7 @@ function AuthenticatedApp() {
         setAiTarget(null);
       }
     },
-    [aiTarget, editor, refreshEditorState, showError],
+    [aiTarget, canUseAi, editor, openAccountForFeature, refreshEditorState, showError],
   );
 
   const insertTransition = useCallback(
@@ -1721,11 +2006,14 @@ function AuthenticatedApp() {
   );
 
   const createNewDocument = useCallback(async () => {
-    if (!editor || !(await askToDiscardChanges())) {
+    if (!editor || versionTransition.current || documentSavePending.current || documentLoadPending.current) {
       return;
     }
-
+    documentLoadPending.current = true;
+    try {
+    if (!(await askToDiscardChanges())) return;
     await cloudProjectRuntime.close();
+    projectVersionsRef.current = null; setProjectVersions(null);
     editor.setEditable(true);
 
     isReplacingDocument.current = true;
@@ -1759,14 +2047,16 @@ function AuthenticatedApp() {
     } catch {
       setDocumentState((previous) => ({ ...previous, status: "Autosave indisponible" }));
     }
+    } finally { documentLoadPending.current = false; }
   }, [askToDiscardChanges, createDocument, editor, refreshEditorState]);
 
   const openDocumentAtPath = useCallback(async (path: string) => {
-    if (!editor || !(await askToDiscardChanges())) {
+    if (!editor || versionTransition.current || documentSavePending.current || documentLoadPending.current) {
       return;
     }
-
+    documentLoadPending.current = true;
     try {
+      if (!(await askToDiscardChanges())) return;
       const document = parseScenarioFile(await readScenario(path));
       replaceDocument(document, path);
       await rememberRecentScenario(path);
@@ -1780,7 +2070,7 @@ function AuthenticatedApp() {
       }
     } catch (error) {
       await showError(error);
-    }
+    } finally { documentLoadPending.current = false; }
   }, [askToDiscardChanges, editor, persistRecovery, rememberRecentScenario, replaceDocument, showError]);
 
   const openDocument = useCallback(async () => {
@@ -1790,18 +2080,58 @@ function AuthenticatedApp() {
     }
   }, [openDocumentAtPath]);
 
+  const importPortableDocument = useCallback(async (format: InterchangeFormat) => {
+    if (!editor || versionTransition.current || documentSavePending.current || documentLoadPending.current) return;
+    documentLoadPending.current = true;
+    try {
+      const selected = await chooseInterchangeToOpen(format);
+      if (!selected) return;
+      const imported = await importInterchange(format, selected.bytes, selected.name);
+      if (!(await askToDiscardChanges())) return;
+      replaceDocument(imported, null);
+      setDocumentState(previous => ({
+        ...previous,
+        title: imported.title,
+        filePath: null,
+        isDirty: true,
+        status: `${INTERCHANGE_FORMATS[format].label} importé — enregistre le projet en .scenario`,
+      }));
+      try {
+        await writeAutosave(serializeRecoveryFile(imported, null));
+      } catch {
+        setDocumentState(previous => ({ ...previous, status: `${INTERCHANGE_FORMATS[format].label} importé (autosave indisponible)` }));
+      }
+    } catch (error) {
+      await showError(error);
+    } finally {
+      documentLoadPending.current = false;
+    }
+  }, [askToDiscardChanges, editor, replaceDocument, showError]);
+
   const openPdfDocument = useCallback(async () => {
+    if (!canUseAi) {
+      openAccountForFeature('artificialIntelligence');
+      return;
+    }
     setFileMenuOpen(false);
+    setFileSubmenu(null);
     setPdfImportError("");
     setPdfImportOpen(true);
-  }, []);
+  }, [canUseAi, openAccountForFeature]);
 
   const selectPdfForImport = useCallback(async () => {
-    const path = await choosePdfToOpen();
-    if (path) setPdfImportPath(path);
+    try {
+      const path = await choosePdfToOpen();
+      if (path) { setPdfImportPath(path); setPdfImportError(''); }
+    } catch (error) { setPdfImportError(error instanceof Error ? error.message : 'PDF indisponible.'); }
   }, []);
 
   const importSelectedPdf = useCallback(async () => {
+    if (!canUseAi) {
+      setPdfImportOpen(false);
+      openAccountForFeature('artificialIntelligence');
+      return;
+    }
     if (!editor || !(await askToDiscardChanges()) || !pdfImportPath) return;
     setPdfImportBusy(true);
     setPdfImportError("");
@@ -1825,7 +2155,7 @@ function AuthenticatedApp() {
     } finally {
       setPdfImportBusy(false);
     }
-  }, [askToDiscardChanges, editor, pdfImportPath, replaceDocument]);
+  }, [askToDiscardChanges, canUseAi, editor, openAccountForFeature, pdfImportPath, replaceDocument]);
 
   useEffect(() => {
     if (!editor || recoveryWasChecked.current) {
@@ -1842,12 +2172,17 @@ function AuthenticatedApp() {
         const recovery = parseRecoveryFile(contents);
         let documentToRestore = recovery.document;
 
-        // Un projet connu doit toujours être rouvert depuis son vrai fichier
-        // .scenario. La récupération ne sert que si ce fichier a disparu ou
-        // pour un nouveau document qui n'a encore jamais été enregistré.
+        // Never silently replace a newer recovery (including newly created
+        // versions) with an older manual save. Preserve both when identities differ.
         if (recovery.filePath) {
           try {
-            documentToRestore = parseScenarioFile(await readScenario(recovery.filePath));
+            const disk = parseScenarioFile(await readScenario(recovery.filePath));
+            const sameProject = recovery.document.projectId && disk.projectId
+              ? recovery.document.projectId === disk.projectId : recovery.document.title === disk.title;
+            if (!sameProject || !(Date.parse(recovery.document.savedAt) > Date.parse(disk.savedAt))) {
+              await writeBackup(JSON.stringify(recovery.document, null, 2));
+              documentToRestore = disk;
+            }
           } catch {
             // Le fichier peut avoir été déplacé ou supprimé : l'autosave reste
             // alors le meilleur moyen de restaurer le travail de l'auteur.
@@ -1855,6 +2190,9 @@ function AuthenticatedApp() {
         }
 
         replaceDocument(documentToRestore, recovery.filePath);
+        if (documentToRestore === recovery.document && recovery.filePath) {
+          setDocumentState(previous => ({ ...previous, isDirty: true, status: 'Récupération restaurée — enregistrez le projet' }));
+        }
       })
       .catch(() => {
         setDocumentState((previous) => ({
@@ -1906,6 +2244,7 @@ function AuthenticatedApp() {
     }
 
     const timeout = window.setTimeout(() => {
+      if (versionTransition.current) return;
       void persistRecovery(editor, documentState.title, documentState.filePath)
         .then(() => {
           setDocumentState((previous) => ({
@@ -1928,6 +2267,12 @@ function AuthenticatedApp() {
     documentState.title,
     editor,
     persistRecovery,
+    versionBusy,
+    projectVersions,
+    documentRevision,
+    comments,
+    coverPage,
+    coverPageHidden,
   ]);
 
   useEffect(() => {
@@ -1955,6 +2300,14 @@ function AuthenticatedApp() {
     }
   }, [editor, refreshPagination, zoom]);
 
+  useLayoutEffect(() => {
+    if (!editor || !initialRecoveryFinished || cloudProjectsOpen || whiteboardOpen || breakdownOpen || technicalBreakdownOpen) return;
+    // Les workspaces secondaires retirent l'éditeur du layout. Dès que le
+    // scénario redevient visible, mesurer au prochain frame évite de conserver
+    // les dimensions du workspace précédent dans le compteur de pages.
+    refreshPagination(editor);
+  }, [breakdownOpen, cloudProjectsOpen, editor, initialRecoveryFinished, refreshPagination, technicalBreakdownOpen, whiteboardOpen]);
+
   useEffect(() => {
     if (!editor) {
       return;
@@ -1975,7 +2328,12 @@ function AuthenticatedApp() {
   useEffect(() => {
     const closeMenusOutside = (event: MouseEvent) => {
       const target = event.target;
-      if (!(target instanceof Element) || !target.closest(".file-menu-container")) {
+      if (!(target instanceof Element) || !target.closest('.find-replace-container')) {
+        setFindReplaceOpen(false);
+      }
+      // Les menus de la bibliothèque sont portalisés hors de la barre : leur
+      // panneau reste une interaction interne, pas un clic extérieur.
+      if (!(target instanceof Element) || !target.closest(".file-menu-container, .ui-menu__panel")) {
         closeTopMenus();
       }
       if (!(target instanceof Element) || !target.closest(".scenario-context-menu")) {
@@ -1994,22 +2352,21 @@ function AuthenticatedApp() {
 
     let unlisten: (() => void) | undefined;
     void listen("scenario-close-requested", async () => {
-          if (closeInProgress.current) {
+          if (closeInProgress.current || versionTransition.current || documentSavePending.current || documentLoadPending.current) {
             return;
           }
 
           closeInProgress.current = true;
           let saveBeforeClosing: boolean;
           try {
-            saveBeforeClosing = await confirm(
-              "Voulez-vous enregistrer le projet avant de quitter ?",
-              {
-                title: "senario",
-                kind: "warning",
-                okLabel: "Oui, enregistrer",
-                cancelLabel: "Non, quitter",
-              },
-            );
+            saveBeforeClosing = await showSenarioConfirm({
+              title: 'Quitter Senario',
+              description: 'Voulez-vous enregistrer le projet avant de quitter ?',
+              kind: 'warning',
+              confirmLabel: 'Oui, enregistrer',
+              cancelLabel: 'Non, quitter',
+              dismissible: false,
+            });
           } catch {
             closeInProgress.current = false;
             return;
@@ -2051,10 +2408,11 @@ function AuthenticatedApp() {
               closeInProgress.current = false;
               return;
             }
-          } else if (currentDocumentState.current.filePath === null) {
-            // « Non, quitter » doit réellement abandonner un brouillon sans
-            // fichier, au lieu de le restaurer silencieusement au prochain lancement.
+          } else {
+            // An explicit discard must not be restored as a newer autosave.
+            // Keep a recoverable backup of all branches before clearing it.
             try {
+              await writeBackup(JSON.stringify(createDocument(editor, currentDocumentState.current.title), null, 2));
               await clearRecovery();
             } catch (error) {
               await showError(error);
@@ -2081,6 +2439,8 @@ function AuthenticatedApp() {
 
   useEffect(() => {
     const handleShortcut = (event: KeyboardEvent) => {
+      if (versionTransition.current) { event.preventDefault(); return; }
+      if (document.querySelector('[aria-label="Versions du projet"]')) return;
       if (event.ctrlKey && event.altKey && event.key.toLocaleLowerCase("fr-FR") === "m") {
         event.preventDefault();
         void openCommentComposer();
@@ -2109,17 +2469,18 @@ function AuthenticatedApp() {
       }
       if (key === "e" && event.shiftKey) {
         event.preventDefault();
-        openPdfExport();
+        openCurrentPdfExport();
       }
-      if (key === "+" || key === "=") {
+      const scenarioWorkspaceActive = !cloudProjectsOpen && !whiteboardOpen && !breakdownOpen && !technicalBreakdownOpen;
+      if (scenarioWorkspaceActive && (key === "+" || key === "=")) {
         event.preventDefault();
         changeZoom(ZOOM_STEP);
       }
-      if (key === "-") {
+      if (scenarioWorkspaceActive && key === "-") {
         event.preventDefault();
         changeZoom(-ZOOM_STEP);
       }
-      if (key === "0") {
+      if (scenarioWorkspaceActive && key === "0") {
         event.preventDefault();
         resetZoom();
       }
@@ -2129,18 +2490,22 @@ function AuthenticatedApp() {
     return () => window.removeEventListener("keydown", handleShortcut);
   }, [
     changeZoom,
+    cloudProjectsOpen,
     createNewDocument,
-    openPdfExport,
+    breakdownOpen,
+    openCurrentPdfExport,
     openFindReplace,
     openDocument,
     openCommentComposer,
     resetZoom,
     saveDocument,
+    technicalBreakdownOpen,
+    whiteboardOpen,
   ]);
 
   const acceptSuggestion = useCallback(
     (index: number) => {
-      if (!editor || !smartType) {
+      if (!editor || !editor.isEditable || !smartType) {
         return;
       }
 
@@ -2153,19 +2518,15 @@ function AuthenticatedApp() {
   );
 
   const selectSmartTypeSuggestion = useCallback((index: number) => {
-    if (editor) {
+    if (editor?.isEditable) {
       setSmartTypeSelection(editor, index);
     }
   }, [editor]);
 
   const runFileAction = useCallback((action: () => Promise<void>) => {
     setFileMenuOpen(false);
+    setFileSubmenu(null);
     void action();
-  }, []);
-
-  const runViewAction = useCallback((action: () => void) => {
-    setViewMenuOpen(false);
-    action();
   }, []);
 
   const openTextReplacements = useCallback(() => {
@@ -2228,6 +2589,297 @@ function AuthenticatedApp() {
     editor?.chain().focus().toggleUnderline().run();
   }, [editor]);
 
+  const navigateToScene = useCallback((sceneId: string) => {
+    if (!canUseSceneTimeline || !editor || editor.isDestroyed) return;
+    const scene = getScenarioScenes(editor.state.doc).find(item => item.id === sceneId);
+    if (!scene) return;
+    const heading = editor.view.nodeDOM(scene.from);
+    editor.view.focus();
+    editor.view.dispatch(
+      editor.state.tr.setSelection(TextSelection.create(editor.state.doc, scene.from + 1)),
+    );
+    setActiveSceneId(scene.id);
+    requestAnimationFrame(() => {
+      if (heading instanceof Element) {
+        heading.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
+      }
+    });
+  }, [canUseSceneTimeline, editor]);
+
+  const moveSceneFromTimeline = useCallback((sceneId: string, destinationBoundary: number) => {
+    if (!canUseSceneTimeline || !editor?.isEditable || versionTransition.current) return;
+    if (moveScenarioScene(editor, sceneId, destinationBoundary)) {
+      setActiveSceneId(sceneId);
+      setDocumentState(previous => ({
+        ...previous,
+        isDirty: true,
+        status: 'Scène déplacée',
+      }));
+    }
+  }, [canUseSceneTimeline, editor]);
+
+  const deleteSceneFromTimeline = useCallback(async (scene: ScenarioScene) => {
+    if (!canUseSceneTimeline || !editor?.isEditable || versionTransition.current) return;
+    const shouldDelete = await showSenarioConfirm({
+      title: 'Supprimer une scène',
+      description: `Supprimer la scène ${scene.index + 1} « ${scene.title} » et tout son contenu ?`,
+      kind: 'warning',
+      destructive: true,
+      confirmLabel: 'Supprimer',
+      cancelLabel: 'Annuler',
+    });
+    if (!shouldDelete || !editor?.isEditable) return;
+
+    const deletedBlockIds = new Set(scene.blockIds);
+    const previousComments = commentsRef.current;
+    const remainingComments = previousComments.filter(thread => !deletedBlockIds.has(thread.anchor.blockId));
+    // onTransaction must reconcile only surviving comments against the new
+    // document; comments inside the deleted scene disappear with that scene.
+    commentsRef.current = remainingComments;
+    if (!deleteScenarioScene(editor, scene.id)) {
+      commentsRef.current = previousComments;
+      return;
+    }
+    setComments(remainingComments);
+    setActiveCommentId(current => current && remainingComments.some(thread => thread.id === current) ? current : null);
+    setDocumentState(previous => ({
+      ...previous,
+      isDirty: true,
+      status: 'Scène supprimée',
+    }));
+  }, [canUseSceneTimeline, editor]);
+
+  const openWhiteboardView = useCallback(() => {
+    setViewMenuOpen(false);
+    if (!canUseWhiteboard) {
+      openAccountForFeature('whiteboard');
+      return;
+    }
+    setFileMenuOpen(false);
+    setCoverMenuOpen(false);
+    setAiPromptMenuOpen(false);
+    setTransitionMenuOpen(false);
+    setScenarioContextMenu(null);
+    setCommentActionTarget(null);
+    setCloudProjectsOpen(false);
+    setBreakdownOpen(false);
+    setTechnicalBreakdownOpen(false);
+    setWhiteboardOpen(true);
+  }, [canUseWhiteboard, openAccountForFeature]);
+
+  const openBreakdownView = useCallback(() => {
+    if (!canUseBreakdown) {
+      openAccountForFeature('breakdownWorkspace');
+      return;
+    }
+    setViewMenuOpen(false);
+    setFileMenuOpen(false);
+    setCoverMenuOpen(false);
+    setAiPromptMenuOpen(false);
+    setTransitionMenuOpen(false);
+    setScenarioContextMenu(null);
+    setCommentActionTarget(null);
+    setCloudProjectsOpen(false);
+    setWhiteboardOpen(false);
+    setTechnicalBreakdownOpen(false);
+    setBreakdownOpen(true);
+  }, [canUseBreakdown, openAccountForFeature]);
+
+  const openTechnicalBreakdownView = useCallback(() => {
+    if (!canUseTechnicalBreakdown) {
+      openAccountForFeature('technicalBreakdownWorkspace');
+      return;
+    }
+    setViewMenuOpen(false);
+    setFileMenuOpen(false);
+    setCoverMenuOpen(false);
+    setAiPromptMenuOpen(false);
+    setTransitionMenuOpen(false);
+    setScenarioContextMenu(null);
+    setCommentActionTarget(null);
+    setCloudProjectsOpen(false);
+    setWhiteboardOpen(false);
+    setBreakdownOpen(false);
+    setTechnicalBreakdownOpen(true);
+  }, [canUseTechnicalBreakdown, openAccountForFeature]);
+
+  const openCloudView = useCallback(() => {
+    if (!canUseCloudWorkspace) {
+      openAccountForFeature('cloudWorkspace');
+      return;
+    }
+    setViewMenuOpen(false);
+    setFileMenuOpen(false);
+    setCoverMenuOpen(false);
+    setAiPromptMenuOpen(false);
+    setTransitionMenuOpen(false);
+    setScenarioContextMenu(null);
+    setCommentActionTarget(null);
+    setWhiteboardOpen(false);
+    setBreakdownOpen(false);
+    setTechnicalBreakdownOpen(false);
+    setCloudProjectsOpen(true);
+  }, [canUseCloudWorkspace, openAccountForFeature]);
+
+  const updateSceneBreakdown = useCallback((sceneId: string, breakdown: SceneBreakdownData) => {
+    if (!canUseBreakdown || !editor?.isEditable || versionTransition.current) return;
+    if (updateScenarioBreakdown(editor, sceneId, breakdown)) {
+      setDocumentState(previous => ({ ...previous, isDirty: true, status: 'Dépouillement mis à jour' }));
+    }
+  }, [canUseBreakdown, editor]);
+
+  const updateSceneBreakdowns = useCallback((breakdowns: Record<string, SceneBreakdownData>) => {
+    if (!canUseBreakdown || !editor?.isEditable || versionTransition.current) return;
+    if (updateScenarioBreakdowns(editor, breakdowns)) {
+      setDocumentState(previous => ({ ...previous, isDirty: true, status: 'Dépouillement mis à jour' }));
+    }
+  }, [canUseBreakdown, editor]);
+
+  const updateProjectTechnicalBreakdown = useCallback((value: TechnicalBreakdownData) => {
+    if (!canUseTechnicalBreakdown || !editor?.isEditable || versionTransition.current) return;
+    if (updateTechnicalBreakdown(editor, value)) {
+      setDocumentState(previous => ({ ...previous, isDirty: true, status: 'Découpage technique mis à jour' }));
+    }
+  }, [canUseTechnicalBreakdown, editor]);
+
+  const registerTechnicalImageAsset = useCallback((asset: TechnicalImageAsset, markDirty: boolean) => {
+    if (!canUseTechnicalBreakdown) return;
+    if (technicalImageAssetsRef.current[asset.id]) return;
+    const next = { ...technicalImageAssetsRef.current, [asset.id]: asset };
+    technicalImageAssetsRef.current = next;
+    setTechnicalImageAssets(next);
+    if (markDirty) {
+      setDocumentState(previous => ({ ...previous, isDirty: true, status: 'Image de découpage optimisée' }));
+    }
+  }, [canUseTechnicalBreakdown]);
+  const resolveTechnicalImageAsset = useCallback(
+    (assetId: string) => cloudProjectRuntime.resolveImageAsset(assetId),
+    [],
+  );
+
+  useEffect(() => {
+    if ((!breakdownOpen && !technicalBreakdownOpen) || !editor) return;
+    const handleBreakdownUndo = (event: KeyboardEvent) => {
+      if (!(event.ctrlKey || event.metaKey) || event.altKey || event.key.toLocaleLowerCase() !== 'z') return;
+      const target = event.target as HTMLElement | null;
+      if (target?.closest('input, textarea, [contenteditable="true"]')) return;
+      event.preventDefault();
+      if (event.shiftKey) editor.commands.redo();
+      else editor.commands.undo();
+    };
+    window.addEventListener('keydown', handleBreakdownUndo);
+    return () => window.removeEventListener('keydown', handleBreakdownUndo);
+  }, [breakdownOpen, editor, technicalBreakdownOpen]);
+
+  const moveScenesFromWhiteboard = useCallback((
+    sceneIds: string[],
+    act: ScenarioAct,
+    destinationBoundary: number,
+  ) => {
+    if (!canUseSceneTimeline || !editor?.isEditable || versionTransition.current) return;
+    if (moveScenarioSceneGroup(editor, sceneIds, act, destinationBoundary)) {
+      setActiveSceneId(sceneIds[0] ?? null);
+      setDocumentState(previous => ({
+        ...previous,
+        isDirty: true,
+        status: sceneIds.length > 1 ? `${sceneIds.length} scènes déplacées` : 'Scène déplacée',
+      }));
+    }
+  }, [canUseSceneTimeline, editor]);
+
+  const updateSceneFromWhiteboard = useCallback((
+    sceneId: string,
+    metadata: SceneWhiteboardMetadata,
+  ): boolean => {
+    if (!canUseSceneTimeline || !editor?.isEditable || versionTransition.current) return false;
+    const updated = updateScenarioScene(editor, sceneId, metadata);
+    if (updated) {
+      setDocumentState(previous => ({
+        ...previous,
+        isDirty: true,
+        status: 'Carte de scène actualisée',
+      }));
+    }
+    return updated;
+  }, [canUseSceneTimeline, editor]);
+
+  const duplicateSceneFromWhiteboard = useCallback((sceneId: string) => {
+    if (!canUseSceneTimeline || !editor?.isEditable || versionTransition.current) return;
+    const duplicateId = duplicateScenarioScene(editor, sceneId);
+    if (!duplicateId) return;
+    setActiveSceneId(duplicateId);
+    setDocumentState(previous => ({
+      ...previous,
+      isDirty: true,
+      status: 'Scène dupliquée',
+    }));
+  }, [canUseSceneTimeline, editor]);
+
+  const addSceneFromWhiteboard = useCallback((act: ScenarioAct) => {
+    if (!canUseSceneTimeline || !editor?.isEditable || versionTransition.current) return;
+    const sceneId = addScenarioScene(editor, act);
+    if (!sceneId) return;
+    setActiveSceneId(sceneId);
+    setDocumentState(previous => ({ ...previous, isDirty: true, status: `Scène ajoutée à l’acte ${act}` }));
+  }, [canUseSceneTimeline, editor]);
+
+  const addActFromWhiteboard = useCallback(() => {
+    if (!canUseSceneTimeline || !editor?.isEditable || versionTransition.current) return;
+    if (addScenarioAct(editor)) {
+      setDocumentState(previous => ({
+        ...previous,
+        isDirty: true,
+        status: 'Acte ajouté',
+      }));
+    }
+  }, [canUseSceneTimeline, editor]);
+
+  const updateActDescriptionFromWhiteboard = useCallback((act: ScenarioAct, description: string) => {
+    if (!canUseSceneTimeline || !editor?.isEditable || versionTransition.current) return;
+    if (updateScenarioActDescription(editor, act, description)) {
+      setDocumentState(previous => ({
+        ...previous,
+        isDirty: true,
+        status: `Description de l’acte ${act} actualisée`,
+      }));
+    }
+  }, [canUseSceneTimeline, editor]);
+
+  const deleteActFromWhiteboard = useCallback(async (act: ScenarioAct) => {
+    if (!canUseSceneTimeline || !editor?.isEditable || versionTransition.current) return;
+    const affectedScenes = getScenarioScenes(editor.state.doc).filter(scene => scene.act === act).length;
+    const destination = act > 1 ? `l’acte ${act - 1}` : 'le nouvel acte 1';
+    const prompt = affectedScenes
+      ? `Supprimer l’acte ${act} ? Ses ${affectedScenes} scène${affectedScenes > 1 ? 's' : ''} seront conservées et rattachées à ${destination}.`
+      : `Supprimer l’acte ${act} ?`;
+    const shouldDelete = await showSenarioConfirm({
+      title: 'Supprimer un acte',
+      description: prompt,
+      kind: 'warning',
+      destructive: true,
+      confirmLabel: 'Supprimer l’acte',
+      cancelLabel: 'Annuler',
+    });
+    if (!shouldDelete || !editor.isEditable) return;
+    if (deleteScenarioAct(editor, act)) {
+      setDocumentState(previous => ({
+        ...previous,
+        isDirty: true,
+        status: affectedScenes ? 'Acte supprimé, scènes conservées' : 'Acte supprimé',
+      }));
+    }
+  }, [canUseSceneTimeline, editor]);
+
+  const openSceneFromWhiteboard = useCallback((sceneId: string) => {
+    setWhiteboardOpen(false);
+    requestAnimationFrame(() => navigateToScene(sceneId));
+  }, [navigateToScene]);
+
+  const openSceneFromBreakdown = useCallback((sceneId: string) => {
+    setBreakdownOpen(false);
+    requestAnimationFrame(() => navigateToScene(sceneId));
+  }, [navigateToScene]);
+
   const cloudEditor: CloudProjectEditor = {
     read: () => editor?.getJSON() ?? initialContent,
     readFile: () => {
@@ -2265,11 +2917,24 @@ function AuthenticatedApp() {
       collaborationListeners.current.add(listener);
       return () => { collaborationListeners.current.delete(listener); };
     },
-    setReadOnly: (value) => { editor?.setEditable(!value); setCloudReadOnly(value); },
+    setReadOnly: (value) => {
+      editor?.setEditable(!value);
+      if (value) {
+        smartTypeInteractionStarted.current = false;
+        setSmartType(null);
+      }
+      setCloudReadOnly(value);
+    },
   };
 
   const coverPagePresent = hasCoverPageContent(coverPage);
   const statistics = getDocumentStatistics(editor?.getJSON() ?? initialContent);
+  const timelineScenes = editor ? getScenarioScenes(editor.state.doc) : [];
+  const projectBreakdowns = editor ? getProjectBreakdowns(editor.state.doc) : {};
+  const projectTechnicalBreakdown = editor ? getTechnicalBreakdown(editor.state.doc) : { version: 1, columns: [], shots: [] } as TechnicalBreakdownData;
+  const scenarioCharacters = editor ? getScenarioCharacters(editor.state.doc) : [];
+  const scenarioActCount = editor ? getScenarioActCount(editor.state.doc) : 3;
+  const scenarioActDescriptions = editor ? getScenarioActDescriptions(editor.state.doc) : [];
   const coverPageVisible = coverPagePresent && !coverPageHidden;
   const documentSheetCount = pageCount + (coverPageVisible ? 1 : 0);
   // Feuille purement visuelle, toujours après le scénario : elle apporte de
@@ -2284,19 +2949,91 @@ function AuthenticatedApp() {
       )
     : textReplacementDrafts;
 
+  async function exportWorkspacePdf(request: WorkspacePdfExportRequest): Promise<void> {
+    if (request.kind === 'breakdown' && !canUseBreakdown) {
+      openAccountForFeature('breakdownWorkspace');
+      return;
+    }
+    if (request.kind === 'technical' && !canUseTechnicalBreakdown) {
+      openAccountForFeature('technicalBreakdownWorkspace');
+      return;
+    }
+    if (!editor || workspacePdfExportBusy || documentSavePending.current || versionTransition.current) return;
+    documentSavePending.current = true;
+    setWorkspacePdfExportBusy(true);
+    try {
+      const workspace = request.kind === 'breakdown' ? 'depouillement' : 'decoupage-technique';
+      const path = await chooseWorkspacePdfToSave(documentState.title, workspace);
+      if (!path) return;
+      const { createBreakdownPdf, createTechnicalBreakdownPdf } = await import('./document/workspacePdfExport');
+      const contents = request.kind === 'breakdown'
+        ? await createBreakdownPdf(documentState.title, timelineScenes, projectBreakdowns, request.options)
+        : await createTechnicalBreakdownPdf(
+            documentState.title,
+            timelineScenes,
+            hydrateTechnicalBreakdownImages(projectTechnicalBreakdown, technicalImageAssetsRef.current),
+            request.options,
+          );
+      await writePdf(path, contents);
+      setWorkspacePdfExportKind(null);
+      setDocumentState(previous => ({
+        ...previous,
+        status: request.kind === 'breakdown' ? 'Dépouillement PDF exporté' : 'Découpage technique PDF exporté',
+      }));
+    } catch (error) {
+      await showError(error);
+    } finally {
+      setWorkspacePdfExportBusy(false);
+      documentSavePending.current = false;
+    }
+  }
+
+  useEffect(() => {
+    if (!canUseWhiteboard) setWhiteboardOpen(false);
+    if (!canUseBreakdown) setBreakdownOpen(false);
+    if (!canUseTechnicalBreakdown) setTechnicalBreakdownOpen(false);
+    if (!canUseCloudWorkspace) setCloudProjectsOpen(false);
+    if (!canUseAi) { setAiSettingsOpen(false); setAiPromptMenuOpen(false); }
+  }, [canUseAi, canUseBreakdown, canUseCloudWorkspace, canUseTechnicalBreakdown, canUseWhiteboard]);
+
+  if (!initialRecoveryFinished) {
+    return <div className="app-shell theme-dark initial-recovery-shell" role="status" aria-live="polite">
+      <div className="initial-recovery-screen">
+        <img src="/senario-logo.png" alt="" width="34" height="34" />
+        <span>Restauration du projet…</span>
+      </div>
+    </div>;
+  }
+
   return (
     <div
       ref={appShellRef}
-      className="app-shell theme-dark"
+      className={`app-shell theme-dark${cloudProjectsOpen || breakdownOpen || technicalBreakdownOpen ? ' has-no-workspace-toolbar' : ''}`}
+      onContextMenu={event => event.preventDefault()}
+      onKeyDownCapture={event => { if (versionTransition.current) { event.preventDefault(); event.stopPropagation(); } }}
       onMouseMove={(event) => {
+        // Les événements React d'un portail remontent dans l'arbre logique même
+        // lorsque sa cible DOM vit hors de l'app-shell. Ils ne doivent pas être
+        // interprétés comme un nouveau survol du document.
+        if (!(event.target instanceof Node) || !event.currentTarget.contains(event.target)) {
+          aiPointerPosition.current = null;
+          return;
+        }
         aiPointerPosition.current = {
           clientX: event.clientX,
           clientY: event.clientY,
         };
+        // Une fois un menu contextuel ouvert, son UiPopover gère le couloir
+        // pointeur complet. Le fond de l'éditeur ne doit plus recalculer la
+        // cible pendant ce trajet.
+        if (aiPromptMenuOpen || transitionMenuOpen) return;
         refreshAiTarget(event.target, event.clientX, event.clientY);
       }}
       onMouseLeave={() => {
         aiPointerPosition.current = null;
+        // Les panneaux IA et Transition sont portalisés dans document.body.
+        // Quitter l'app-shell pour les atteindre ne doit pas détruire leur cible.
+        if (aiPromptMenuOpen || transitionMenuOpen) return;
         setAiPromptMenuOpen(false);
         setTransitionMenuOpen(false);
         setCustomTransitionOpen(false);
@@ -2311,86 +3048,162 @@ function AuthenticatedApp() {
         </div>
         <nav aria-label="Menu principal">
           <div className="file-menu-container">
-            <button
-              className="menu-button"
-              type="button"
-              aria-expanded={fileMenuOpen}
-              onClick={toggleFileMenu}
+            <UiMenu
+              open={fileMenuOpen}
+              onOpenChange={(isOpen) => {
+                setViewMenuOpen(false);
+                setCoverMenuOpen(false);
+                setFileSubmenu(null);
+                setFileMenuOpen(isOpen);
+              }}
+              trigger={<UiButton variant="ghost" className="menu-button">Fichier</UiButton>}
+              panelClassName="file-menu"
+              withSubmenus
+              ariaLabel="Fichier"
             >
-              Fichier
-            </button>
-            {fileMenuOpen && (
-              <div className="file-menu" role="menu">
-                <button type="button" role="menuitem" onClick={() => runFileAction(createNewDocument)}>
+                <UiMenuItem onClick={() => runFileAction(createNewDocument)}>
                   Nouveau <kbd>Ctrl+N</kbd>
-                </button>
-                <button type="button" role="menuitem" onClick={() => runFileAction(openDocument)}>
+                </UiMenuItem>
+                <UiMenuItem onClick={() => runFileAction(openDocument)}>
                   Ouvrir… <kbd>Ctrl+O</kbd>
-                </button>
-                <hr />
-                <button type="button" role="menuitem" onClick={() => runFileAction(async () => { await saveDocument(); })}>
+                </UiMenuItem>
+                <UiMenuSeparator />
+                <UiMenuItem onClick={() => runFileAction(async () => { await saveDocument(); })}>
                   Enregistrer <kbd>Ctrl+S</kbd>
-                </button>
-                <button type="button" role="menuitem" onClick={() => runFileAction(async () => { await saveDocument(true); })}>
+                </UiMenuItem>
+                <UiMenuItem onClick={() => runFileAction(async () => { await saveDocument(true); })}>
                   Enregistrer sous… <kbd>Ctrl+Maj+S</kbd>
-                </button>
-                <button type="button" role="menuitem" onClick={() => { setFileMenuOpen(false); setCloudProjectsOpen(true); }}>
-                  Projets cloud…
-                </button>
-                <hr />
-                <button type="button" role="menuitem" onClick={openPdfExport}>
-                  Exporter en PDF… <kbd>Ctrl+Maj+E</kbd>
-                </button>
-                <button type="button" role="menuitem" onClick={() => runFileAction(openPdfDocument)}>
-                  Importer un PDF…
-                </button>
+                </UiMenuItem>
+                <UiMenuSeparator />
+                {!cloudProjectsOpen && !whiteboardOpen && <UiMenuSubmenu
+                  className="file-menu-branch"
+                  panelClassName="file-submenu"
+                  ariaLabel="Formats d’export"
+                  label={<><span>Exporter</span><UiIcon name="chevron" /></>}
+                  open={fileSubmenu === "export"}
+                  onOpenChange={isOpen => setFileSubmenu(isOpen ? "export" : null)}
+                >
+                      <UiMenuItem onClick={openCurrentPdfExport}>
+                        Exporter en PDF <kbd>Ctrl+Maj+E</kbd>
+                      </UiMenuItem>
+                      {!breakdownOpen && !technicalBreakdownOpen && <>
+                        <UiMenuItem data-ui-locked={!canUseProfessionalFormats || undefined} title={!canUseProfessionalFormats ? featureLockedMessage('professionalExports') : undefined} onClick={() => canUseProfessionalFormats ? openExportDialog("fdx") : openAccountForFeature('professionalExports')}>
+                          <span>Final Draft (FDX)</span>{!canUseProfessionalFormats && <span className="studio-feature-badge">{featureOfferLabel('professionalExports')}</span>}
+                        </UiMenuItem>
+                        <UiMenuItem onClick={() => openExportDialog("fountain")}>
+                          <span>Fountain</span>
+                        </UiMenuItem>
+                        <UiMenuItem data-ui-locked={!canUseProfessionalFormats || undefined} title={!canUseProfessionalFormats ? featureLockedMessage('professionalExports') : undefined} onClick={() => canUseProfessionalFormats ? openExportDialog("docx") : openAccountForFeature('professionalExports')}>
+                          <span>Word (DOCX)</span>{!canUseProfessionalFormats && <span className="studio-feature-badge">{featureOfferLabel('professionalExports')}</span>}
+                        </UiMenuItem>
+                      </>}
+                </UiMenuSubmenu>}
+                {!cloudProjectsOpen && !whiteboardOpen && !breakdownOpen && !technicalBreakdownOpen && <UiMenuSubmenu
+                  className="file-menu-branch"
+                  panelClassName="file-submenu"
+                  ariaLabel="Formats d’import"
+                  label={<><span>Importer</span><UiIcon name="chevron" /></>}
+                  open={fileSubmenu === "import"}
+                  onOpenChange={isOpen => setFileSubmenu(isOpen ? "import" : null)}
+                >
+                      <UiMenuItem onClick={() => runFileAction(openPdfDocument)}>PDF</UiMenuItem>
+                      <UiMenuItem onClick={() => runFileAction(() => importPortableDocument("fdx"))}>Final Draft (FDX)</UiMenuItem>
+                      <UiMenuItem onClick={() => runFileAction(() => importPortableDocument("fountain"))}>Fountain</UiMenuItem>
+                      <UiMenuItem onClick={() => runFileAction(() => importPortableDocument("docx"))}>Word (DOCX)</UiMenuItem>
+                </UiMenuSubmenu>}
                 {recentScenarios.length > 0 && (
                   <>
-                    <hr />
+                    <UiMenuSeparator />
                     <p className="recent-scenarios-heading">Projets récents</p>
                     {recentScenarios.map((recent) => (
-                      <button
+                      <UiMenuItem
                         key={recent.path}
-                        type="button"
-                        role="menuitem"
                         title={recent.path}
                         onClick={() => runFileAction(() => openDocumentAtPath(recent.path))}
                       >
                         <span className="recent-scenario-title">{recent.title}</span>
-                      </button>
+                      </UiMenuItem>
                     ))}
                   </>
                 )}
-              </div>
-            )}
+            </UiMenu>
           </div>
-          <div className="file-menu-container">
-            <button className="menu-button" type="button" onClick={openFindReplace}>
+          <div className="file-menu-container find-replace-container">
+            <UiButton variant="ghost" className="menu-button" aria-expanded={findReplaceOpen} onClick={openFindReplace}>
               Rechercher
-            </button>
+            </UiButton>
+            {findReplaceOpen && <section
+              className="find-replace-panel find-replace-dropdown"
+              role="dialog"
+              aria-modal="false"
+              aria-label="Rechercher et remplacer"
+            >
+              <header>
+                <div>
+                  <h2>Rechercher et remplacer</h2>
+                  <p>{findQuery ? `${findMatchTotal} occurrence${findMatchTotal > 1 ? "s" : ""}` : "Saisis le texte à rechercher."}</p>
+                </div>
+                <UiIconButton className="panel-close-button" label="Fermer" onClick={() => setFindReplaceOpen(false)}><UiIcon name="x"/></UiIconButton>
+              </header>
+              <div className="find-replace-fields">
+                <UiField label="Rechercher"
+                  ref={findInput}
+                  value={findQuery}
+                  onChange={(event) => {
+                    setFindQuery(event.target.value);
+                    setFindMatchIndex(-1);
+                    setFindMatchTotal(findTextMatches(editor!, event.target.value, findMatchCase).length);
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      moveFindMatch(event.shiftKey ? -1 : 1);
+                    }
+                  }}
+                />
+                <UiField label="Remplacer par" value={replaceQuery} onChange={(event) => setReplaceQuery(event.target.value)} />
+              </div>
+              <UiSwitch
+                className="find-match-case"
+                checked={findMatchCase}
+                onCheckedChange={(matchCase) => {
+                  setFindMatchCase(matchCase);
+                  setFindMatchIndex(-1);
+                  setFindMatchTotal(findTextMatches(editor!, findQuery, matchCase).length);
+                }}
+              >Respecter les majuscules / minuscules</UiSwitch>
+              <footer>
+                <div><UiButton onClick={() => moveFindMatch(-1)}>Précédent</UiButton><UiButton onClick={() => moveFindMatch(1)}>Suivant</UiButton></div>
+                <div><UiButton onClick={replaceCurrentMatch}>Remplacer</UiButton><UiButton variant="primary" className="primary-button" onClick={replaceAllMatches}>Tout remplacer</UiButton></div>
+              </footer>
+            </section>}
           </div>
           <div className="file-menu-container">
-            <button
+            <UiButton
+              variant="ghost"
               className="menu-button"
-              type="button"
               aria-expanded={textReplacementsOpen}
               onClick={openTextReplacements}
             >
               Raccourcis
-            </button>
+            </UiButton>
           </div>
           <div className="file-menu-container">
-            <button
-              className="menu-button"
-              type="button"
-              aria-expanded={coverMenuOpen}
-              onClick={toggleCoverMenu}
+            <UiPopover
+              open={coverMenuOpen}
+              onOpenChange={(open) => {
+                setFileMenuOpen(false);
+                setFileSubmenu(null);
+                setViewMenuOpen(false);
+                if (open) setCoverDraft(coverPage);
+                setCoverMenuOpen(open);
+              }}
+              align="start"
+              contentClassName="cover-menu"
+              ariaLabel="Page de garde"
+              trigger={<UiButton variant="ghost" className="menu-button">Page de garde</UiButton>}
             >
-              Page de garde
-            </button>
-            {coverMenuOpen && (
               <form
-                className="file-menu cover-menu"
                 onSubmit={(event) => {
                   event.preventDefault();
                   saveCoverPage();
@@ -2399,63 +3212,24 @@ function AuthenticatedApp() {
                 <h2>Page de garde</h2>
                 {cloudReadOnly && <p role="status">Ce projet est en lecture seule.</p>}
                 <fieldset disabled={cloudReadOnly} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>
-                <label>
-                  Nom du projet
-                  <input
-                    autoFocus
-                    value={coverDraft.projectName}
-                    onChange={(event) => updateCoverDraft("projectName", event.target.value)}
-                  />
-                </label>
+                <UiField label="Nom du projet" autoFocus value={coverDraft.projectName}
+                  onChange={(event) => updateCoverDraft("projectName", event.target.value)} />
                 <div className="cover-menu-grid">
-                  <label>
-                    Scénariste
-                    <input value={coverDraft.screenwriter} onChange={(event) => updateCoverDraft("screenwriter", event.target.value)} />
-                  </label>
-                  <label>
-                    Réalisateur
-                    <input value={coverDraft.director} onChange={(event) => updateCoverDraft("director", event.target.value)} />
-                  </label>
-                  <label>
-                    Production
-                    <input value={coverDraft.production} onChange={(event) => updateCoverDraft("production", event.target.value)} />
-                  </label>
-                  <label>
-                    Durée
-                    <input placeholder="ex. 1 h 30" value={coverDraft.duration} onChange={(event) => updateCoverDraft("duration", event.target.value)} />
-                  </label>
-                  <label>
-                    Version
-                    <input value={coverDraft.version} onChange={(event) => updateCoverDraft("version", event.target.value)} />
-                  </label>
-                  <label>
-                    Date
-                    <input value={coverDraft.date} onChange={(event) => updateCoverDraft("date", event.target.value)} />
-                  </label>
-                  <label>
-                    Droits
-                    <input value={coverDraft.rights} onChange={(event) => updateCoverDraft("rights", event.target.value)} />
-                  </label>
+                  <UiField label="Scénariste" value={coverDraft.screenwriter} onChange={(event) => updateCoverDraft("screenwriter", event.target.value)} />
+                  <UiField label="Réalisateur" value={coverDraft.director} onChange={(event) => updateCoverDraft("director", event.target.value)} />
+                  <UiField label="Production" value={coverDraft.production} onChange={(event) => updateCoverDraft("production", event.target.value)} />
+                  <UiField label="Durée" placeholder="ex. 1 h 30" value={coverDraft.duration} onChange={(event) => updateCoverDraft("duration", event.target.value)} />
+                  <UiField label="Version" value={coverDraft.version} onChange={(event) => updateCoverDraft("version", event.target.value)} />
+                  <UiField label="Date" value={coverDraft.date} onChange={(event) => updateCoverDraft("date", event.target.value)} />
+                  <UiField label="Droits" value={coverDraft.rights} onChange={(event) => updateCoverDraft("rights", event.target.value)} />
                 </div>
                 <h3>Contact</h3>
-                <label>
-                  Nom et prénom
-                  <input value={coverDraft.contactName} onChange={(event) => updateCoverDraft("contactName", event.target.value)} />
-                </label>
+                <UiField label="Nom et prénom" value={coverDraft.contactName} onChange={(event) => updateCoverDraft("contactName", event.target.value)} />
                 <div className="cover-menu-grid">
-                  <label>
-                    Mail
-                    <input type="email" value={coverDraft.contactEmail} onChange={(event) => updateCoverDraft("contactEmail", event.target.value)} />
-                  </label>
-                  <label>
-                    Téléphone
-                    <input type="tel" value={coverDraft.contactPhone} onChange={(event) => updateCoverDraft("contactPhone", event.target.value)} />
-                  </label>
+                  <UiField label="Mail" type="email" value={coverDraft.contactEmail} onChange={(event) => updateCoverDraft("contactEmail", event.target.value)} />
+                  <UiField label="Téléphone" type="tel" value={coverDraft.contactPhone} onChange={(event) => updateCoverDraft("contactPhone", event.target.value)} />
                 </div>
-                <label>
-                  Site internet
-                  <input value={coverDraft.contactWebsite} onChange={(event) => updateCoverDraft("contactWebsite", event.target.value)} />
-                </label>
+                <UiField label="Site internet" value={coverDraft.contactWebsite} onChange={(event) => updateCoverDraft("contactWebsite", event.target.value)} />
                 <label className="cover-visibility-toggle">
                   <input
                     type="checkbox"
@@ -2469,88 +3243,106 @@ function AuthenticatedApp() {
                 </label>
                 </fieldset>
                 <footer>
-                  <button type="button" onClick={() => setCoverMenuOpen(false)}>Fermer</button>
-                  <button className="primary-button" type="submit" disabled={cloudReadOnly}>Appliquer</button>
+                  <UiButton onClick={() => setCoverMenuOpen(false)}>Fermer</UiButton>
+                  <UiButton variant="primary" className="primary-button" type="submit" disabled={cloudReadOnly}>Appliquer</UiButton>
                 </footer>
               </form>
-            )}
+            </UiPopover>
           </div>
-          <div className="file-menu-container">
-            <button
-              className="menu-button"
-              type="button"
-              aria-expanded={viewMenuOpen}
-              onClick={toggleViewMenu}
+          {!cloudProjectsOpen && !whiteboardOpen && !breakdownOpen && !technicalBreakdownOpen && <div className="file-menu-container">
+            <UiMenu
+              open={viewMenuOpen}
+              onOpenChange={(isOpen) => {
+                setFileMenuOpen(false);
+                setFileSubmenu(null);
+                setCoverMenuOpen(false);
+                setViewMenuOpen(isOpen);
+              }}
+              trigger={<UiButton variant="ghost" className="menu-button">Affichage</UiButton>}
             >
-              Affichage
-            </button>
-            {viewMenuOpen && (
-              <div className="file-menu view-menu" role="menu">
-                <button type="button" role="menuitem" onClick={() => runViewAction(() => changeZoom(ZOOM_STEP))}>
-                  Zoom avant <kbd>Ctrl++</kbd>
-                </button>
-                <button type="button" role="menuitem" onClick={() => runViewAction(() => changeZoom(-ZOOM_STEP))}>
-                  Zoom arrière <kbd>Ctrl+-</kbd>
-                </button>
-                <button type="button" role="menuitem" onClick={() => runViewAction(resetZoom)}>
-                  Taille réelle ({zoom} %) <kbd>Ctrl+0</kbd>
-                </button>
-              </div>
-            )}
-          </div>
+              <UiMenuItem onClick={() => { setViewMenuOpen(false); changeZoom(ZOOM_STEP); }}>Zoom avant <kbd>Ctrl++</kbd></UiMenuItem>
+              <UiMenuItem onClick={() => { setViewMenuOpen(false); changeZoom(-ZOOM_STEP); }}>Zoom arrière <kbd>Ctrl+-</kbd></UiMenuItem>
+              <UiMenuItem onClick={() => { setViewMenuOpen(false); resetZoom(); }}>Taille réelle ({zoom} %) <kbd>Ctrl+0</kbd></UiMenuItem>
+            </UiMenu>
+          </div>}
           <div className="file-menu-container">
-            <button
+            <UiButton
+              variant="ghost"
               className="menu-button"
-              type="button"
               aria-haspopup="dialog"
+              title={!canUseAi ? featureLockedMessage('artificialIntelligence') : undefined}
               onClick={openAiSettings}
             >
-              IA
-            </button>
+              IA {!canUseAi && <span className="studio-feature-badge">{featureOfferLabel('artificialIntelligence')}</span>}
+            </UiButton>
           </div>
           <div className="file-menu-container">
-            <button
+            <UiButton
+              variant="ghost"
               className="menu-button"
-              type="button"
               aria-haspopup="dialog"
               onClick={() => setAccountPanelOpen(true)}
             >
               Compte
-            </button>
+            </UiButton>
           </div>
           <div className="file-menu-container">
-            <button className="menu-button" type="button" onClick={openHelp}>
+            <UiButton variant="ghost" className="menu-button" onClick={openHelp}>
               Aide
-            </button>
+            </UiButton>
+          </div>
+          <div id="audio-menu-slot" />
+          <div className="menu-version-control">
+            <ProjectVersionControl
+              versions={listedProjectVersions.length
+                ? listedProjectVersions.filter(version => !version.deletedAt).map(version => ({ id: version.id, name: version.name }))
+                : [{ id: 'initial', name: 'Version 1' }]}
+              activeId={listedActiveVersionId ?? 'initial'}
+              title={!canUseProjectVersions ? featureLockedMessage('versionHistory') : cloudVersionLocked ? 'Chargement des versions cloud…' : 'Choisir une version de ce projet'}
+              disabled={versionBusy || (cloudReadOnly && !versionCloudState.project) || cloudVersionLocked || aiBusy || pdfExportBusy || pdfImportBusy || Boolean(commentEditingRequestId)}
+              canCreate={canUseProjectVersions && !cloudReadOnly}
+              canRename={canUseProjectVersions && !cloudReadOnly}
+              canDelete={canUseProjectVersions && !cloudReadOnly && (!versionCloudState.project || versionCloudState.project.role === 'owner') && listedProjectVersions.filter(version => !version.deletedAt).length >= 2}
+              locked={!canUseProjectVersions && !versionCloudState.project}
+              onLocked={() => openAccountForFeature('versionHistory')}
+              onSelect={id => changeProjectVersion(id)}
+              onDuplicate={() => changeProjectVersion('duplicate', nextAvailableVersionName(), listedActiveVersionId ?? '')}
+              onBlank={() => changeProjectVersion('blank', nextAvailableVersionName())}
+              onRename={(id, name) => changeProjectVersion('rename', name, id)}
+              onDelete={id => changeProjectVersion('delete', '', id)}
+            />
           </div>
         </nav>
       </header>
 
+      {!cloudProjectsOpen && !whiteboardOpen && !breakdownOpen && !technicalBreakdownOpen ? (
       <div className="formatting-toolbar" role="toolbar" aria-label="Mise en forme">
-        <button
+        <UiIconButton
+          label="Mettre en gras"
           className={editor?.isActive("bold") ? "is-active" : ""}
-          type="button"
-          aria-label="Mettre en gras"
-          title="Gras (Ctrl+B)"
+          disabled={cloudReadOnly}
+          aria-pressed={editor?.isActive("bold") ?? false}
+          tooltip="Gras (Ctrl+B)"
           onMouseDown={(event) => event.preventDefault()}
           onClick={toggleBold}
         >
           <UiIcon name="bold"/>
-        </button>
-        <button className={editor?.isActive('italic') ? 'is-active' : ''} type="button"
-          disabled={cloudReadOnly} aria-label="Mettre en italique" aria-pressed={editor?.isActive('italic') ?? false}
-          title="Italique (Ctrl+I)" onMouseDown={event => event.preventDefault()}
-          onClick={() => editor?.chain().focus().toggleItalic().run()}><UiIcon name="italic"/></button>
-        <button
+        </UiIconButton>
+        <UiIconButton label="Mettre en italique" className={editor?.isActive('italic') ? 'is-active' : ''}
+          disabled={cloudReadOnly} aria-pressed={editor?.isActive('italic') ?? false}
+          tooltip="Italique (Ctrl+I)" onMouseDown={event => event.preventDefault()}
+          onClick={() => editor?.chain().focus().toggleItalic().run()}><UiIcon name="italic"/></UiIconButton>
+        <UiIconButton
+          label="Souligner"
           className={editor?.isActive("underline") ? "is-active" : ""}
-          type="button"
-          aria-label="Souligner"
-          title="Souligné (Ctrl+U)"
+          disabled={cloudReadOnly}
+          aria-pressed={editor?.isActive("underline") ?? false}
+          tooltip="Souligné (Ctrl+U)"
           onMouseDown={(event) => event.preventDefault()}
           onClick={toggleUnderline}
         >
           <UiIcon name="underline"/>
-        </button>
+        </UiIconButton>
         <span className="toolbar-divider" aria-hidden="true" />
         <span className="document-title" title={documentState.title}>
           {documentState.title}{documentState.isDirty ? " *" : ""}
@@ -2564,18 +3356,53 @@ function AuthenticatedApp() {
             }
           }}>{SCENARIO_ELEMENT_TYPES.map(type => <option value={type} key={type}>{getScenarioElementLabel(type)}</option>)}</UiSelect>
         <div className="document-status">
-          <CloudProjectStatus onOpen={() => setCloudProjectsOpen(true)} />
+          <CloudProjectStatus onOpen={openCloudView} />
           <span className="document-save-status" title={documentState.status}>{documentState.status}</span>
           <span>Page {currentPage + (coverPageVisible ? 1 : 0)}/{documentSheetCount}</span>
-          <button className="zoom-reset" type="button" onClick={resetZoom} title="Taille réelle (Ctrl+0)" aria-label={`Zoom ${zoom} %, rétablir la taille réelle`}>{zoom} %</button>
+          <UiButton
+            variant="ghost"
+            className="zoom-reset"
+            onClick={resetZoom}
+            title="Taille réelle (Ctrl+0)"
+            aria-label={`Zoom ${zoom} %, rétablir la taille réelle`}
+          >
+            {zoom} %
+          </UiButton>
         </div>
       </div>
+      ) : whiteboardOpen ? (
+        <div className="whiteboard-mode-toolbar" aria-label="Vue Whiteboard active">
+          <UiIcon name="whiteboard" />
+          <span className="document-title" title={documentState.title}>{documentState.title}{documentState.isDirty ? " *" : ""}</span>
+          <UiButton
+            variant="ghost"
+            className="whiteboard-add-act"
+            disabled={!editor?.isEditable || scenarioActCount >= MAX_SCENARIO_ACT_COUNT}
+            onClick={addActFromWhiteboard}
+          ><UiIcon name="plus" /> Ajouter un acte</UiButton>
+          <div className="whiteboard-mode-actions">
+            <UiButton variant="ghost" disabled={!editor?.can().undo() || !editor?.isEditable} onClick={() => editor?.commands.undo()}>Annuler <kbd>Ctrl+Z</kbd></UiButton>
+            <UiButton variant="ghost" disabled={!editor?.can().redo() || !editor?.isEditable} onClick={() => editor?.commands.redo()}>Rétablir <kbd>Ctrl+Maj+Z</kbd></UiButton>
+          </div>
+          <div className="document-status">
+            <CloudProjectStatus onOpen={openCloudView} />
+            <span className="document-save-status" title={documentState.status}>{documentState.status}</span>
+          </div>
+        </div>
+      ) : null}
 
-      {commentActionTarget && !commentComposerOpen && !cloudReadOnly && (
+      <UiDialog open={Boolean(versionError)} onOpenChange={(open) => { if (!open) setVersionError(''); }}
+        className="version-error-dialog" backdropClassName="theme-dark" destructive
+        title="Version inchangée" footer={<UiButton onClick={() => setVersionError('')}>Fermer</UiButton>}>
+        <UiFeedback tone="danger">{versionError}</UiFeedback>
+      </UiDialog>
+
+      {canUsePersonalComments && commentActionTarget && !commentEditingRequestId && !cloudReadOnly && !cloudProjectsOpen && !whiteboardOpen && !breakdownOpen && !technicalBreakdownOpen && (
         <button
           className="comment-inline-button"
           type="button"
           aria-label="Ajouter un commentaire"
+          disabled={editor?.state.selection.$from.parent !== editor?.state.selection.$to.parent}
           title="Ajouter un commentaire"
           style={{ left: commentActionTarget.left, top: commentActionTarget.top }}
           onMouseDown={(event) => event.preventDefault()}
@@ -2584,10 +3411,9 @@ function AuthenticatedApp() {
           <UiIcon name="message"/>
         </button>
       )}
-
-
+      <div className="workspace-page-stack">
       <main
-        className="workspace"
+        className={`workspace has-scene-timeline${cloudProjectsOpen || whiteboardOpen || breakdownOpen || technicalBreakdownOpen ? ' is-workspace-page-hidden' : ''}`}
         aria-label="Editeur de scenario"
         onMouseDown={(event) => {
           setCommentActionTarget(null);
@@ -2630,9 +3456,27 @@ function AuthenticatedApp() {
         onWheel={handleWorkspaceWheel}
         onContextMenu={openScenarioContextMenu}
       >
+        {canUseSceneTimeline ? (
+          <SceneTimeline
+            scenes={timelineScenes}
+            activeSceneId={activeSceneId}
+            readOnly={!editor?.isEditable || versionBusy || versionTransition.current}
+            onNavigate={navigateToScene}
+            onMove={moveSceneFromTimeline}
+            onDelete={scene => void deleteSceneFromTimeline(scene)}
+          />
+        ) : (
+          <UiPanel className="scene-timeline scene-timeline-locked" aria-label={`Timeline des scènes — offre ${featureOfferLabel('timeline')}`}
+            title={<><div><h2>Timeline</h2></div><span className="studio-feature-badge">{featureOfferLabel('timeline')}</span></>}>
+            <UiEmptyState className="scene-timeline-lock-message" title="Timeline indisponible"
+              description={featureLockedMessage('timeline')}
+              action={<UiButton onClick={() => openAccountForFeature('timeline')}>Voir mon compte</UiButton>} />
+          </UiPanel>
+        )}
         <div className={`editor-stage ${comments.length ? 'has-comment-margin' : ''}`}>
-        {editor && <CommentMargin editor={editor} threads={comments} readOnly={cloudReadOnly}
+        {editor && <CommentMargin editor={editor} threads={comments} readOnly={cloudReadOnly || !canUsePersonalComments}
           activeId={activeCommentId} onActivate={(thread) => navigateToComment(thread, true)} onDeactivate={() => setActiveCommentId(null)} zoom={zoom}
+          startEditingId={commentEditingRequestId} onStartEditingHandled={() => setCommentEditingRequestId(null)}
           onUpdate={updateCommentThread} onDelete={id => void deleteCommentThread(id)} />}
         <div
           className="document-zoom"
@@ -2681,16 +3525,133 @@ function AuthenticatedApp() {
         </div>
         </div>
       </main>
-      <footer className="editor-statistics" aria-label="Statistiques du scénario">
-        <OfflineLicenseStatus />
-        <span><strong>{statistics.words}</strong> mots</span>
-        <span title="Estimation indicative : une page de scénario correspond à environ une minute à l’écran.">Temps estimé : <strong>≈ {statistics.words ? pageCount : 0} min</strong></span>
-        <span><strong>{documentSheetCount}</strong> pages</span>
-        <span><strong>{statistics.scenes}</strong> scènes</span>
-        <span><strong>{statistics.locations}</strong> décors</span>
+      {cloudProjectsOpen && canUseCloudWorkspace && <CloudProjectsPanel
+        embedded
+        apiFactory={() => createRuntimeCommercialApi(async () => {
+          await cloudProjectRuntime.close();
+          await invalidateRuntimeSession();
+          setCloudProjectsOpen(false);
+          setAccountPanelOpen(true);
+        })}
+        editor={cloudEditor}
+        onClose={() => setCloudProjectsOpen(false)}
+        onSignIn={() => {
+          setCloudProjectsOpen(false);
+          setAccountPanelOpen(true);
+        }}
+      />}
+      {whiteboardOpen && canUseWhiteboard && (
+        <SceneWhiteboard
+          document={editor!.state.doc}
+          scenes={timelineScenes}
+          actCount={scenarioActCount}
+          actDescriptions={scenarioActDescriptions}
+          readOnly={!editor?.isEditable || versionBusy || versionTransition.current}
+          canUndo={Boolean(editor?.can().undo())}
+          canRedo={Boolean(editor?.can().redo())}
+          onOpen={openSceneFromWhiteboard}
+          onMove={moveScenesFromWhiteboard}
+          onUpdate={updateSceneFromWhiteboard}
+          onDuplicate={duplicateSceneFromWhiteboard}
+          onAddScene={addSceneFromWhiteboard}
+          onDelete={scene => void deleteSceneFromTimeline(scene)}
+          onDeleteAct={act => void deleteActFromWhiteboard(act)}
+          onUpdateActDescription={updateActDescriptionFromWhiteboard}
+          onUndo={() => { editor?.commands.undo(); }}
+          onRedo={() => { editor?.commands.redo(); }}
+        />
+      )}
+      {breakdownOpen && canUseBreakdown && (
+        <SceneBreakdown
+          scenes={timelineScenes}
+          document={editor.state.doc}
+          breakdowns={projectBreakdowns}
+          activeSceneId={activeSceneId}
+          readOnly={!editor?.isEditable || versionBusy || versionTransition.current}
+          onOpenScene={openSceneFromBreakdown}
+          onChange={updateSceneBreakdown}
+          onChangeMany={updateSceneBreakdowns}
+        />
+      )}
+      {technicalBreakdownOpen && canUseTechnicalBreakdown && (
+        <TechnicalBreakdown
+          scenes={timelineScenes}
+          document={editor.state.doc}
+          breakdown={projectTechnicalBreakdown}
+          characters={scenarioCharacters}
+          activeSceneId={activeSceneId}
+          readOnly={!editor?.isEditable || versionBusy || versionTransition.current}
+          canUndo={Boolean(editor?.can().undo())}
+          canRedo={Boolean(editor?.can().redo())}
+          imageAssets={technicalImageAssets}
+          onImageAsset={registerTechnicalImageAsset}
+          resolveImageAsset={resolveTechnicalImageAsset}
+          onChange={updateProjectTechnicalBreakdown}
+          onUndo={() => { editor?.commands.undo(); }}
+          onRedo={() => { editor?.commands.redo(); }}
+        />
+      )}
+      </div>
+      <div id="audio-player-slot" />
+      <AudioWorkspace editor={editor} documentKey={String(listedActiveVersionId ?? '')} enabled={canUseVoiceReading} onLocked={() => openAccountForFeature('voiceReading')} screenplayVisible={!cloudProjectsOpen && !whiteboardOpen && !breakdownOpen && !technicalBreakdownOpen}
+        selectionPosition={!commentEditingRequestId ? commentActionTarget : null} />
+      <footer className="application-bottom-bar">
+        <div className="bottom-license-status"><OfflineLicenseStatus /></div>
+        <UiTabs
+          className="workspace-page-navigation"
+          ariaLabel="Pages de l’application"
+          activationMode="manual"
+          value={cloudProjectsOpen ? 'cloud' : whiteboardOpen ? 'whiteboard' : breakdownOpen ? 'breakdown' : technicalBreakdownOpen ? 'technical' : 'scenario'}
+          tabs={[
+            {
+              value: 'cloud',
+              accessibleLabel: !canUseCloudWorkspace ? `Cloud — ${featureLockedMessage('cloudWorkspace')}` : 'Cloud',
+              title: !canUseCloudWorkspace ? featureLockedMessage('cloudWorkspace') : undefined,
+              locked: !canUseCloudWorkspace,
+              label: <><UiIcon name="folder" /><span>Cloud</span>{!canUseCloudWorkspace && <span className="studio-feature-badge">{featureOfferLabel('cloudWorkspace')}</span>}</>,
+            },
+            {
+              value: 'whiteboard',
+              accessibleLabel: !canUseWhiteboard ? `Whiteboard — ${featureLockedMessage('whiteboard')}` : 'Whiteboard',
+              title: !canUseWhiteboard ? featureLockedMessage('whiteboard') : undefined,
+              locked: !canUseWhiteboard,
+              label: <><UiIcon name="whiteboard" /><span>Whiteboard</span>{!canUseWhiteboard && <span className="studio-feature-badge">{featureOfferLabel('whiteboard')}</span>}</>,
+            },
+            { value: 'scenario', accessibleLabel: 'Scénario', label: <><UiIcon name="screenplay" /><span>Scénario</span></> },
+            {
+              value: 'breakdown',
+              accessibleLabel: !canUseBreakdown ? `Dépouillement — ${featureLockedMessage('breakdownWorkspace')}` : 'Dépouillement',
+              title: !canUseBreakdown ? featureLockedMessage('breakdownWorkspace') : undefined,
+              locked: !canUseBreakdown,
+              label: <><UiIcon name="breakdown" /><span>Dépouillement</span>{!canUseBreakdown && <span className="studio-feature-badge">{featureOfferLabel('breakdownWorkspace')}</span>}</>,
+            },
+            {
+              value: 'technical',
+              accessibleLabel: !canUseTechnicalBreakdown ? `Découpage technique — ${featureLockedMessage('technicalBreakdownWorkspace')}` : 'Découpage technique',
+              title: !canUseTechnicalBreakdown ? featureLockedMessage('technicalBreakdownWorkspace') : undefined,
+              locked: !canUseTechnicalBreakdown,
+              label: <><UiIcon name="list" /><span>Découpage technique</span>{!canUseTechnicalBreakdown && <span className="studio-feature-badge">{featureOfferLabel('technicalBreakdownWorkspace')}</span>}</>,
+            },
+          ]}
+          onValueChange={page => {
+            if (page === 'cloud') openCloudView();
+            else if (page === 'whiteboard') openWhiteboardView();
+            else if (page === 'breakdown') openBreakdownView();
+            else if (page === 'technical') openTechnicalBreakdownView();
+            else { setCloudProjectsOpen(false); setWhiteboardOpen(false); setBreakdownOpen(false); setTechnicalBreakdownOpen(false); }
+          }}
+        />
+        <div className="editor-statistics" aria-label="Statistiques du scénario">
+          <div id="workspace-bottom-actions" className="workspace-bottom-actions" />
+          <span><strong>{statistics.words}</strong> mots</span>
+          <span title="Estimation indicative : une page de scénario correspond à environ une minute à l’écran.">Temps : <strong>≈ {statistics.words ? pageCount : 0} min</strong></span>
+          <span><strong>{documentSheetCount}</strong> pages</span>
+          <span><strong>{statistics.scenes}</strong> scènes</span>
+          <span><strong>{statistics.locations}</strong> décors</span>
+        </div>
       </footer>
 
-      {smartType && (
+      {!cloudProjectsOpen && !whiteboardOpen && !breakdownOpen && !technicalBreakdownOpen && editor?.isEditable && smartType && (
         <div
           className="smart-type"
           role="listbox"
@@ -2721,7 +3682,7 @@ function AuthenticatedApp() {
         </div>
       )}
 
-      {aiTarget && (
+      {!cloudProjectsOpen && !whiteboardOpen && !breakdownOpen && !technicalBreakdownOpen && aiTarget && (
         <>
           <div
             className="ai-paragraph-highlight"
@@ -2733,89 +3694,91 @@ function AuthenticatedApp() {
               height: aiTarget.highlightHeight,
             }}
           />
-          <div
-            className={`paragraph-action-cluster ai-action-cluster ${aiPromptMenuOpen ? "is-open" : ""}`}
-            style={{
-              left: aiTarget.left,
-              top: aiTarget.top - 16,
-              "--ai-scale": zoom / 100,
-            } as CSSProperties}
-            onMouseLeave={() => setAiPromptMenuOpen(false)}
-          >
-            <button
-              className={`ai-inline-button ${aiBusy ? "is-busy" : ""}`}
-              type="button"
-              aria-label="Actions IA"
-              title="Actions IA"
-              aria-expanded={aiPromptMenuOpen}
-              disabled={aiBusy}
-              onMouseDown={(event) => event.preventDefault()}
-              onClick={() => {
-                setTransitionMenuOpen(false);
-                setCustomTransitionOpen(false);
-                setCustomTransitionText("");
-                setAiPromptMenuOpen((isOpen) => !isOpen);
-              }}
+          {canUseAi && <div
+              className="paragraph-action-cluster ai-action-cluster"
+              style={{
+                left: aiTarget.left,
+                top: aiTarget.top - 16,
+                "--ai-scale": zoom / 100,
+              } as CSSProperties}
             >
-              <UiIcon name="star"/>
-            </button>
-            {aiPromptMenuOpen && (
-              <div
-                className="ai-popover"
+              <UiPopover
+                open={aiPromptMenuOpen}
+                onOpenChange={(open) => {
+                  setAiPromptMenuOpen(open);
+                  if (!open && !aiPointerPosition.current && !aiBusy) setAiTarget(null);
+                }}
+                contentClassName="ai-popover"
+                pointerSafe
                 role="menu"
-                onMouseDown={(event) => event.preventDefault()}
+                ariaLabel="Actions IA"
+                trigger={<UiIconButton
+                  className="ai-inline-button"
+                  label={aiBusy ? "Action IA en cours" : "Actions IA"}
+                  tooltip="Actions IA"
+                  loading={aiBusy}
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={() => {
+                    setTransitionMenuOpen(false);
+                    setCustomTransitionOpen(false);
+                    setCustomTransitionText("");
+                  }}
+                >
+                  <UiIcon name="star"/>
+                </UiIconButton>}
               >
-                <div className="ai-popover-heading">
-                  <span>IA</span>
-                  <small>{getScenarioElementLabel(aiTarget.type)}</small>
-                </div>
-                {aiConfig.prompts.map((prompt) => (
-                  <button
-                    type="button"
-                    role="menuitem"
-                    key={prompt.id}
-                    onClick={() => void applyAiPrompt(prompt)}
-                  >
-                    {prompt.name}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
+                  <div className="ai-popover-heading">
+                    <span>IA</span>
+                    <small>{getScenarioElementLabel(aiTarget.type)}</small>
+                  </div>
+                  {aiConfig.prompts.map((prompt) => (
+                    <button
+                      type="button"
+                      role="menuitem"
+                      key={prompt.id}
+                      onClick={() => void applyAiPrompt(prompt)}
+                    >
+                      {prompt.name}
+                    </button>
+                  ))}
+              </UiPopover>
+            </div>}
           <div
-            className={`paragraph-action-cluster transition-action-cluster ${transitionMenuOpen ? "is-open" : ""}`}
+            className="paragraph-action-cluster transition-action-cluster"
             style={{
               left: aiTarget.transitionLeft,
               top: aiTarget.top - 16,
               "--ai-scale": zoom / 100,
             } as CSSProperties}
-            onMouseLeave={() => {
-              setTransitionMenuOpen(false);
-              setCustomTransitionOpen(false);
-              setCustomTransitionText("");
-            }}
           >
-            <button
-              className="transition-inline-button"
-              type="button"
-              aria-label="Ajouter une transition"
-              title="Ajouter une transition"
-              aria-expanded={transitionMenuOpen}
-              onMouseDown={(event) => event.preventDefault()}
-              onClick={() => {
-                setAiPromptMenuOpen(false);
-                setCustomTransitionOpen(false);
-                setTransitionMenuOpen((isOpen) => !isOpen);
+            <UiPopover
+              open={transitionMenuOpen}
+              onOpenChange={(open) => {
+                setTransitionMenuOpen(open);
+                if (!open) {
+                  setCustomTransitionOpen(false);
+                  setCustomTransitionText("");
+                  if (!aiPointerPosition.current && !aiBusy) setAiTarget(null);
+                }
               }}
-            >
-              Transition
-            </button>
-            {transitionMenuOpen && (
-              <div
-                className="transition-popover"
-                role="menu"
+              contentClassName="transition-popover"
+              pointerSafe
+              role="menu"
+              ariaLabel="Ajouter une transition"
+              trigger={<UiButton
+                variant="ghost"
+                className="transition-inline-button"
+                aria-label="Ajouter une transition"
+                title="Ajouter une transition"
                 onMouseDown={(event) => event.preventDefault()}
+                onClick={() => {
+                  setAiPromptMenuOpen(false);
+                  setCustomTransitionOpen(false);
+                }}
               >
+                Transition
+              </UiButton>}
+            >
                 <div className="transition-popover-heading">Transition</div>
                 {STANDARD_PARAGRAPH_TRANSITIONS.map((transition) => (
                   <button
@@ -2853,22 +3816,15 @@ function AuthenticatedApp() {
                     <button type="submit" disabled={!customTransitionText.trim()}>Ajouter</button>
                   </form>
                 )}
-              </div>
-            )}
+            </UiPopover>
           </div>
         </>
       )}
 
       {helpOpen && (
-        <div className="modal-backdrop" role="presentation" onMouseDown={() => setHelpOpen(false)}>
-          <section className="help-panel" role="dialog" aria-modal="true" aria-label="Aide" onMouseDown={(event) => event.stopPropagation()}>
-            <header>
-              <div>
-                <h2>Bien démarrer avec senario</h2>
-                <p>Les gestes essentiels pour écrire ton scénario.</p>
-              </div>
-              <button className="panel-close-button" type="button" aria-label="Fermer" onClick={() => setHelpOpen(false)}><UiIcon name="x"/></button>
-            </header>
+          <UiDialog open onOpenChange={setHelpOpen} className="help-panel" backdropClassName="theme-dark" bodyClassName="help-panel-body"
+            title="Bien démarrer avec senario" description="Les gestes essentiels pour écrire ton scénario."
+            headerAction={<UiIconButton label="Fermer" tooltip="Fermer" onClick={() => setHelpOpen(false)}><UiIcon name="x"/></UiIconButton>}>
 
             <section>
               <h3>Écrire et changer de type de paragraphe</h3>
@@ -2903,145 +3859,53 @@ function AuthenticatedApp() {
               <p>Aucune clé de fournisseur IA n’est demandée ni conservée par l’application.</p>
             </section>
             <ReleaseInfo />
-          </section>
-        </div>
+            {import.meta.env.DEV && <div className="ui-catalog-launch">
+              <UiButton onClick={() => { setHelpOpen(false); setUiCatalogOpen(true); }}>Ouvrir le catalogue UI interne</UiButton>
+            </div>}
+          </UiDialog>
       )}
+
+      <UiCatalog open={uiCatalogOpen} onOpenChange={setUiCatalogOpen} />
 
       {accountPanelOpen && (
         <AccountLicensePanel
           onClose={() => setAccountPanelOpen(false)}
-          onOpenCloud={() => { setAccountPanelOpen(false); setCloudProjectsOpen(true); }}
+          onOpenCloud={() => { setAccountPanelOpen(false); openCloudView(); }}
         />
       )}
 
-      {cloudProjectsOpen && <CloudProjectsPanel
-        apiFactory={() => createRuntimeCommercialApi(async () => {
-          await cloudProjectRuntime.close();
-          authenticatedOperations.stop();
-          await sessions.invalidate();
-          setCloudProjectsOpen(false);
-          setAccountPanelOpen(true);
-        })}
-        editor={cloudEditor}
-        onClose={() => setCloudProjectsOpen(false)}
-        onSignIn={() => {
-          setCloudProjectsOpen(false);
-          setAccountPanelOpen(true);
-        }}
-      />}
-
-      {commentComposerOpen && (
-        <div className="modal-backdrop" role="presentation" onMouseDown={() => setCommentComposerOpen(false)}>
-          <section className="comment-composer" role="dialog" aria-modal="true" aria-label="Ajouter un commentaire" onMouseDown={(event) => event.stopPropagation()}>
-            <h2>Ajouter un commentaire</h2>
-            <p>« {commentAnchor?.originalText} »</p>
-            <UiTextarea
-              ref={commentInput}
-              placeholder="Écrire un commentaire…"
-              maxLength={16384}
-              disabled={cloudReadOnly}
-              value={commentDraft}
-              onChange={(event) => setCommentDraft(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.ctrlKey && event.key === "Enter") {
-                  event.preventDefault();
-                  saveNewComment();
-                }
-                if (event.key === "Escape") {
-                  setCommentComposerOpen(false);
-                }
-              }}
-            />
-            <footer>
-              <button type="button" onClick={() => setCommentComposerOpen(false)}>Annuler</button>
-              <button className="primary-button" type="button" onClick={saveNewComment}>Commenter</button>
-            </footer>
-          </section>
-        </div>
-      )}
-
-      {findReplaceOpen && (
-        <div className="modal-backdrop" role="presentation" onMouseDown={() => setFindReplaceOpen(false)}>
-          <section
-            className="find-replace-panel"
-            role="dialog"
-            aria-modal="true"
-            aria-label="Rechercher et remplacer"
-            onMouseDown={(event) => event.stopPropagation()}
-          >
-            <header>
-              <div>
-                <h2>Rechercher et remplacer</h2>
-                <p>{findQuery ? `${findMatchTotal} occurrence${findMatchTotal > 1 ? "s" : ""}` : "Saisis le texte à rechercher."}</p>
-              </div>
-              <button className="panel-close-button" type="button" aria-label="Fermer" onClick={() => setFindReplaceOpen(false)}><UiIcon name="x"/></button>
-            </header>
-            <label>
-              Rechercher
-              <input
-                ref={findInput}
-                value={findQuery}
-                onChange={(event) => {
-                  setFindQuery(event.target.value);
-                  setFindMatchIndex(-1);
-                  setFindMatchTotal(findTextMatches(editor!, event.target.value, findMatchCase).length);
-                }}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter") {
-                    event.preventDefault();
-                    moveFindMatch(event.shiftKey ? -1 : 1);
-                  }
-                }}
-              />
-            </label>
-            <label>
-              Remplacer par
-              <input value={replaceQuery} onChange={(event) => setReplaceQuery(event.target.value)} />
-            </label>
-            <label className="find-match-case">
-              <input
-                type="checkbox"
-                checked={findMatchCase}
-                onChange={(event) => {
-                  const matchCase = event.target.checked;
-                  setFindMatchCase(matchCase);
-                  setFindMatchIndex(-1);
-                  setFindMatchTotal(findTextMatches(editor!, findQuery, matchCase).length);
-                }}
-              />
-              Respecter les majuscules / minuscules
-            </label>
-            <footer>
-              <div>
-                <button type="button" onClick={() => moveFindMatch(-1)}>Précédent</button>
-                <button type="button" onClick={() => moveFindMatch(1)}>Suivant</button>
-              </div>
-              <div>
-                <button type="button" onClick={replaceCurrentMatch}>Remplacer</button>
-                <button className="primary-button" type="button" onClick={replaceAllMatches}>Tout remplacer</button>
-              </div>
-            </footer>
-          </section>
-        </div>
+      {workspacePdfExportKind && (
+        <WorkspacePdfExportDialog
+          key={workspacePdfExportKind}
+          kind={workspacePdfExportKind}
+          scenes={timelineScenes}
+          breakdowns={projectBreakdowns}
+          technicalBreakdown={projectTechnicalBreakdown}
+          busy={workspacePdfExportBusy}
+          onClose={() => { if (!workspacePdfExportBusy) setWorkspacePdfExportKind(null); }}
+          onExport={request => { void exportWorkspacePdf(request); }}
+        />
       )}
 
       {pdfExportOpen && (
-        <div className="modal-backdrop" role="presentation" onMouseDown={() => !pdfExportBusy && setPdfExportOpen(false)}>
-          <section className="pdf-export-panel" role="dialog" aria-modal="true" aria-label="Options d’export PDF" onMouseDown={(event) => event.stopPropagation()}>
-            <header>
-              <div>
-                <h2>Exporter en PDF</h2>
-                <p>Choisis ce qui doit apparaître dans le document final.</p>
-              </div>
-              <button className="panel-close-button" type="button" aria-label="Fermer" disabled={pdfExportBusy} onClick={() => setPdfExportOpen(false)}><UiIcon name="x"/></button>
-            </header>
+          <UiDialog open onOpenChange={(open) => { if (!open && !pdfExportBusy) setPdfExportOpen(false); }}
+            className="pdf-export-panel" backdropClassName="theme-dark" bodyClassName="pdf-export-body"
+            title={`Exporter en ${getExportFormatLabel(exportFormat)}`}
+            description="Choisis ce qui doit apparaître dans le document final."
+            dismissible={!pdfExportBusy}
+            headerAction={<UiIconButton label="Fermer" tooltip="Fermer" disabled={pdfExportBusy} onClick={() => setPdfExportOpen(false)}><UiIcon name="x"/></UiIconButton>}
+            footer={<><UiButton disabled={pdfExportBusy} onClick={() => setPdfExportOpen(false)}>Annuler</UiButton><UiButton variant="primary" loading={pdfExportBusy} onClick={() => void exportCurrentFormat()}>{pdfExportBusy ? "Préparation de l’export…" : "Exporter"}</UiButton></>}>
             <fieldset>
-              <legend>Contenu du PDF</legend>
+              <legend>Contenu du fichier {getExportFormatLabel(exportFormat)}</legend>
               <label><input type="checkbox" checked={pdfExportDraft.includeCoverPage} onChange={(event) => setPdfExportDraft((draft) => ({ ...draft, includeCoverPage: event.target.checked }))} /> Page de garde</label>
-              <label><input type="checkbox" checked={pdfExportDraft.includeSceneNumbers} onChange={(event) => setPdfExportDraft((draft) => ({ ...draft, includeSceneNumbers: event.target.checked }))} /> Numérotation de scène</label>
-              <label><input type="checkbox" checked={pdfExportDraft.includePageNumbers} onChange={(event) => setPdfExportDraft((draft) => ({ ...draft, includePageNumbers: event.target.checked }))} /> Pagination</label>
+              {exportFormat !== "docx" && (
+                <label><input type="checkbox" checked={pdfExportDraft.includeSceneNumbers} onChange={(event) => setPdfExportDraft((draft) => ({ ...draft, includeSceneNumbers: event.target.checked }))} /> Numérotation de scène</label>
+              )}
+              {exportFormat === "pdf" && (
+                <label><input type="checkbox" checked={pdfExportDraft.includePageNumbers} onChange={(event) => setPdfExportDraft((draft) => ({ ...draft, includePageNumbers: event.target.checked }))} /> Pagination</label>
+              )}
             </fieldset>
-            <label className="pdf-translation-field">
+            {canUseAi ? <label className="pdf-translation-field">
               Traduction du scénario
               <UiSelect aria-label="Langue de traduction" value={pdfExportDraft.translationLanguage} onChange={(event) => setPdfExportDraft((draft) => ({ ...draft, translationLanguage: event.target.value }))}>
                 <option value="">Aucune traduction</option>
@@ -3065,7 +3929,7 @@ function AuthenticatedApp() {
                       }
                     }}
                   />
-                  <button type="button" onClick={addCustomPdfLanguage}>Ajouter</button>
+                  <UiButton variant="primary" onClick={addCustomPdfLanguage}>Ajouter</UiButton>
                 </div>
               )}
               {customPdfLanguages.length > 0 && (
@@ -3075,129 +3939,90 @@ function AuthenticatedApp() {
                     {customPdfLanguages.map((language) => (
                       <span className="pdf-language-chip" key={language}>
                         {displayPdfLanguage(language)}
-                        <button type="button" aria-label={`Retirer ${language}`} title={`Retirer ${language}`} onClick={() => removeCustomPdfLanguage(language)}><UiIcon name="x"/></button>
+                        <UiIconButton label={`Retirer ${language}`} tooltip={`Retirer ${language}`} onClick={() => removeCustomPdfLanguage(language)}><UiIcon name="x"/></UiIconButton>
                       </span>
                     ))}
                   </div>
                 </div>
               )}
-              <small>La traduction est utilisée uniquement pour ce PDF ; ton fichier .scenario n’est pas modifié.</small>
-            </label>
-            <footer>
-              <button type="button" disabled={pdfExportBusy} onClick={() => setPdfExportOpen(false)}>Annuler</button>
-              <button className="primary-button" type="button" disabled={pdfExportBusy} onClick={() => void exportPdf()}>
-                {pdfExportBusy ? "Traduction en cours…" : "Exporter"}
-              </button>
-            </footer>
-          </section>
-        </div>
+              <small>La traduction est utilisée uniquement pour cet export ; ton fichier .scenario n’est pas modifié.</small>
+            </label> : <div className="pdf-translation-field">
+              <span>Traduction du scénario <span className="studio-feature-badge">{featureOfferLabel('artificialIntelligence')}</span></span>
+              <small>{featureLockedMessage('artificialIntelligence')}</small>
+              <UiButton onClick={() => openAccountForFeature('artificialIntelligence')}>Voir mon compte</UiButton>
+            </div>}
+          </UiDialog>
       )}
 
       {pdfImportOpen && (
-        <div className="modal-backdrop" role="presentation" onMouseDown={() => !pdfImportBusy && setPdfImportOpen(false)}>
-          <section className="pdf-export-panel pdf-import-panel" role="dialog" aria-modal="true" aria-label="Importer un PDF" onMouseDown={(event) => event.stopPropagation()}>
-            <header>
-              <div>
-                <h2>Importer un PDF</h2>
-                <p>L’IA convertit ton PDF en scénario structuré.</p>
-              </div>
-              <button className="panel-close-button" type="button" aria-label="Fermer" disabled={pdfImportBusy} onClick={() => setPdfImportOpen(false)}><UiIcon name="x"/></button>
-            </header>
+          <UiDialog open onOpenChange={(open) => { if (!open && !pdfImportBusy) setPdfImportOpen(false); }}
+            className="pdf-export-panel pdf-import-panel" backdropClassName="theme-dark" bodyClassName="pdf-export-body"
+            title="Importer un PDF" description="L’IA convertit ton PDF en scénario structuré."
+            dismissible={!pdfImportBusy}
+            headerAction={<UiIconButton label="Fermer" tooltip="Fermer" disabled={pdfImportBusy} onClick={() => setPdfImportOpen(false)}><UiIcon name="x"/></UiIconButton>}
+            footer={<><UiButton disabled={pdfImportBusy} onClick={() => setPdfImportOpen(false)}>Annuler</UiButton><UiButton variant="primary" loading={pdfImportBusy} disabled={!pdfImportPath} onClick={() => void importSelectedPdf()}>{pdfImportBusy ? "Conversion IA en cours…" : "Importer"}</UiButton></>}>
             <div
               className={`pdf-import-dropzone${pdfImportPath ? " has-file" : ""}`}
               onDragOver={(event) => event.preventDefault()}
               onDrop={(event) => {
                 event.preventDefault();
-                const file = event.dataTransfer.files[0] as (File & { path?: string }) | undefined;
-                if (file?.path?.toLocaleLowerCase().endsWith(".pdf")) setPdfImportPath(file.path);
-                else setPdfImportError("Dépose un fichier PDF depuis l’explorateur Windows.");
+                const file = event.dataTransfer.files[0];
+                try {
+                  if (file) setPdfImportPath(registerBrowserPdf(file));
+                  else throw new Error('Dépose un fichier PDF ou utilise « Rechercher dans les fichiers ».');
+                  setPdfImportError('');
+                } catch (error) { setPdfImportError(error instanceof Error ? error.message : 'PDF indisponible.'); }
               }}
             >
               <strong>{pdfImportPath ? getFileTitle(pdfImportPath) : "Dépose ton PDF ici"}</strong>
               <span>ou</span>
-              <button type="button" onClick={() => void selectPdfForImport()}>Rechercher dans les fichiers</button>
+              <UiButton onClick={() => void selectPdfForImport()}>Rechercher dans les fichiers</UiButton>
             </div>
             <div className="pdf-import-manual-help">
               <strong>Compte et appareil requis</strong>
               <p>L’import passe par l’API senario. Le serveur vérifie la session, la version, l’appareil et le quota PDF.</p>
             </div>
-            {pdfImportError && <p className="form-error" role="alert">{pdfImportError}</p>}
-            <footer>
-              <button type="button" disabled={pdfImportBusy} onClick={() => setPdfImportOpen(false)}>Annuler</button>
-              <button className="primary-button" type="button" disabled={pdfImportBusy || !pdfImportPath} onClick={() => void importSelectedPdf()}>
-                {pdfImportBusy ? "Conversion IA en cours…" : "Importer"}
-              </button>
-            </footer>
-          </section>
-        </div>
+            {pdfImportError && <UiFeedback className="form-error" tone="danger">{pdfImportError}</UiFeedback>}
+          </UiDialog>
       )}
 
       {aiSettingsOpen && (
-        <div
-          className="modal-backdrop"
-          role="presentation"
-          onMouseDown={() => setAiSettingsOpen(false)}
-        >
-          <section
-            className="ai-settings-panel"
-            role="dialog"
-            aria-modal="true"
-            aria-label="Réglages IA"
-            onMouseDown={(event) => event.stopPropagation()}
-          >
-            <header>
-              <div>
-                <h2>IA</h2>
-                <p>Les modèles et l’accès sont gérés par le serveur senario.</p>
-              </div>
-              <button
-                className="panel-close-button"
-                type="button"
-                aria-label="Fermer"
-                onClick={() => setAiSettingsOpen(false)}
-              ><UiIcon name="x"/></button>
-            </header>
-
+          <UiDialog open onOpenChange={setAiSettingsOpen} className="ui-settings-dialog ai-settings-panel" backdropClassName="theme-dark" bodyClassName="ai-settings-body"
+            title="IA" description="Les modèles et l’accès sont gérés par le serveur senario."
+            initialFocus="dialog"
+            headerAction={<UiIconButton label="Fermer" tooltip="Fermer" onClick={() => setAiSettingsOpen(false)}><UiIcon name="x"/></UiIconButton>}
+            footer={<><UiButton onClick={() => setAiSettingsOpen(false)}>Annuler</UiButton><UiButton variant="primary" onClick={() => void saveAiSettings()}>Enregistrer</UiButton></>}>
             <AiBudgetUsage />
             <div className="prompt-editor-heading">
               <div>
                 <span>Prompts enregistrés</span>
                 <small>Choisis un prompt pour le modifier.</small>
               </div>
-              <button type="button" onClick={addAiPrompt}>
+              <UiButton onClick={addAiPrompt}>
                 Ajouter
-              </button>
+              </UiButton>
             </div>
 
             <div className="prompt-editor">
-              <div className="prompt-editor-list" role="list" aria-label="Prompts enregistrés">
+              <div className="prompt-editor-list" role="listbox" aria-label="Prompts enregistrés">
                 {aiDraft.prompts.map((prompt) => (
-                  <button
-                    className={`prompt-editor-list-item${prompt.id === selectedAiPromptId ? " is-selected" : ""}`}
+                  <UiListItem
+                    className="prompt-editor-list-item"
                     key={prompt.id}
-                    type="button"
-                    role="listitem"
+                    role="option"
+                    selected={prompt.id === selectedAiPromptId}
                     onClick={() => setSelectedAiPromptId(prompt.id)}
                   >
                     <strong>{prompt.name.trim() || "Prompt sans nom"}</strong>
                     <span>{prompt.instruction.trim() || "Aucune instruction"}</span>
-                  </button>
+                  </UiListItem>
                 ))}
               </div>
               {aiDraft.prompts.map((prompt) =>
                 prompt.id === selectedAiPromptId ? (
                   <article className="prompt-editor-item" key={prompt.id}>
-                    <label>
-                      Nom du prompt
-                      <input
-                        type="text"
-                        value={prompt.name}
-                        aria-label="Nom du prompt"
-                        onChange={(event) =>
-                          updateAiPrompt(prompt.id, "name", event.target.value)
-                        }
-                      />
-                    </label>
+                    <UiField label="Nom du prompt" value={prompt.name}
+                      onChange={(event) => updateAiPrompt(prompt.id, "name", event.target.value)} />
                     <div className="prompt-instruction-editor">
                       <label className="prompt-instruction-field">
                         Instruction envoyée à l’IA
@@ -3213,47 +4038,28 @@ function AuthenticatedApp() {
                             </span>
                           )}
                       </label>
-                      <button
-                        className={`response-only-toggle${prompt.responseOnly ? " is-active" : ""}`}
-                        type="button"
-                        aria-pressed={prompt.responseOnly}
-                        onClick={() =>
-                          setAiPromptResponseOnly(prompt.id, !prompt.responseOnly)
-                        }
+                      <UiSwitch
+                        className="response-only-toggle"
+                        checked={prompt.responseOnly}
+                        onCheckedChange={(checked) => setAiPromptResponseOnly(prompt.id, checked)}
                       >
-                        <span className="response-only-toggle-track" aria-hidden="true"><span className="response-only-toggle-thumb" /></span>
                         Réponse uniquement
-                      </button>
+                      </UiSwitch>
                     </div>
-                    <button type="button" onClick={() => removeAiPrompt(prompt.id)}>
+                    <UiButton variant="danger" onClick={() => removeAiPrompt(prompt.id)}>
                       Supprimer ce prompt
-                    </button>
+                    </UiButton>
                   </article>
                 ) : null,
               )}
             </div>
 
-            <footer>
-              <button type="button" onClick={() => setAiSettingsOpen(false)}>
-                Annuler
-              </button>
-              <button className="primary-button" type="button" onClick={() => void saveAiSettings()}>
-                Enregistrer
-              </button>
-            </footer>
-          </section>
-        </div>
+          </UiDialog>
       )}
 
-      {scenarioContextMenu && (
-        <div
-          className="scenario-context-menu"
-          role="menu"
-          style={{ left: scenarioContextMenu.left, top: scenarioContextMenu.top }}
-        >
-          <button
-            type="button"
-            role="menuitem"
+      <UiContextMenu open={Boolean(scenarioContextMenu)} x={scenarioContextMenu?.left ?? 0} y={scenarioContextMenu?.top ?? 0}
+        onOpenChange={(open) => { if (!open) setScenarioContextMenu(null); }} className="scenario-context-menu" ariaLabel="Actions du scénario">
+          <UiMenuItem
             onMouseDown={(event) => {
               event.preventDefault();
               if (editor && scenarioHasEnding(editor)) {
@@ -3264,65 +4070,51 @@ function AuthenticatedApp() {
             }}
           >
             {editor && scenarioHasEnding(editor) ? "Retirer FIN" : "FIN"}
-          </button>
-        </div>
-      )}
+          </UiMenuItem>
+      </UiContextMenu>
 
       {textReplacementsOpen && (
-        <div
-          className="modal-backdrop"
-          role="presentation"
-          onMouseDown={() => setTextReplacementsOpen(false)}
-        >
-          <section
-            className="text-replacements-panel"
-            role="dialog"
-            aria-modal="true"
-            aria-label="Raccourcis de texte"
-            onMouseDown={(event) => event.stopPropagation()}
-          >
-            <header>
-              <div>
-                <h2>Raccourcis de texte</h2>
-                <p>Comme sur iPhone : écris le raccourci puis espace ou Entrée.</p>
-              </div>
-              <button
-                className={`shortcut-toggle ${textReplacementsEnabled ? "is-enabled" : ""}`}
-                type="button"
+          <UiDialog open onOpenChange={setTextReplacementsOpen} className="ui-settings-dialog text-replacements-panel" backdropClassName="theme-dark" bodyClassName="text-replacements-body"
+            title="Raccourcis de texte" description="Comme sur iPhone : écris le raccourci puis espace ou Entrée."
+            headerAction={<div className="text-replacements-header-actions">
+              <UiSwitch
+                className="shortcut-toggle"
                 aria-label="Activer les raccourcis"
-                aria-pressed={textReplacementsEnabled}
-                onClick={() => setTextReplacementsEnabled((enabled) => !enabled)}
+                checked={textReplacementsEnabled}
+                onCheckedChange={setTextReplacementsEnabled}
               >
                 <span>Activer</span>
-                <span className="shortcut-toggle-track" aria-hidden="true"><span className="shortcut-toggle-thumb" /></span>
-              </button>
-              <button
-                className="panel-close-button"
-                type="button"
-                aria-label="Fermer"
+              </UiSwitch>
+              <UiIconButton
+                label="Fermer"
+                tooltip="Fermer"
                 onClick={() => setTextReplacementsOpen(false)}
-              ><UiIcon name="x"/></button>
-            </header>
+              ><UiIcon name="x"/></UiIconButton>
+            </div>}
+            footer={<><UiButton onClick={() => setTextReplacementsOpen(false)}>Annuler</UiButton><UiButton variant="primary" onClick={saveTextReplacements}>Enregistrer</UiButton></>}>
             <div className="text-replacement-toolbar">
-              <input
-                type="search"
+              <UiSearchField
+                className="text-replacement-search"
+                label="Rechercher"
                 value={textReplacementQuery}
                 placeholder="Rechercher un raccourci…"
-                aria-label="Rechercher un raccourci"
                 onChange={(event) => setTextReplacementQuery(event.target.value)}
+                onClear={() => setTextReplacementQuery("")}
               />
-              <button className="add-text-replacement" type="button" onClick={addTextReplacement}>
-                + Ajouter
-              </button>
+              <UiButton className="add-text-replacement" onClick={addTextReplacement}>
+                <UiIcon name="plus" /> Ajouter
+              </UiButton>
             </div>
             {textReplacementError && (
-              <p className="text-replacement-error" role="alert">{textReplacementError}</p>
+              <UiFeedback className="text-replacement-error" tone="danger">{textReplacementError}</UiFeedback>
             )}
             <div className="text-replacement-list">
               {textReplacementDrafts.length === 0 ? (
-                <p className="empty-text-replacements">Aucun raccourci pour le moment.</p>
+                <UiEmptyState className="empty-text-replacements" title="Aucun raccourci"
+                  description="Ajoute un raccourci pour développer automatiquement du texte." />
               ) : visibleTextReplacementDrafts.length === 0 ? (
-                <p className="empty-text-replacements">Aucun raccourci ne correspond à cette recherche.</p>
+                <UiEmptyState className="empty-text-replacements" title="Aucun résultat"
+                  description="Aucun raccourci ne correspond à cette recherche." />
               ) : (
                 <>
                   <div className="text-replacement-columns" aria-hidden="true">
@@ -3332,35 +4124,30 @@ function AuthenticatedApp() {
                   </div>
                   {visibleTextReplacementDrafts.map((item) => (
                     <article className="text-replacement-item" key={item.id}>
-                      <input
+                      <UiField
+                        className="text-replacement-field"
+                        label="Raccourci"
                         placeholder="ex. adr"
-                        aria-label="Raccourci"
                         value={item.shortcut}
                         onChange={(event) => updateTextReplacement(item.id, "shortcut", event.target.value)}
                       />
-                      <input
+                      <UiField
+                        className="text-replacement-field"
+                        label="Remplacer par"
                         placeholder="ex. 12 rue des Lilas"
-                        aria-label="Remplacer par"
                         value={item.replacement}
                         onChange={(event) => updateTextReplacement(item.id, "replacement", event.target.value)}
                       />
-                      <button type="button" aria-label={`Supprimer ${item.shortcut || "ce raccourci"}`} title="Supprimer" onClick={() => removeTextReplacement(item.id)}><UiIcon name="x"/></button>
+                      <UiIconButton label={`Supprimer ${item.shortcut || "ce raccourci"}`} tooltip="Supprimer"
+                        onClick={() => removeTextReplacement(item.id)}><UiIcon name="x"/></UiIconButton>
                     </article>
                   ))}
                 </>
               )}
             </div>
-            <footer>
-              <button type="button" onClick={() => setTextReplacementsOpen(false)}>
-                Annuler
-              </button>
-              <button className="primary-button" type="button" onClick={saveTextReplacements}>
-                Enregistrer
-              </button>
-            </footer>
-          </section>
-        </div>
+          </UiDialog>
       )}
+      <SenarioDialogHost />
     </div>
   );
 }
@@ -3399,7 +4186,7 @@ function applyPdfTranslations(
   translatedTexts: string[],
 ): JSONContent {
   if (positions.length !== translatedTexts.length) {
-    throw new Error("La traduction est incomplète. Le PDF n'a pas été exporté.");
+    throw new Error("La traduction est incomplète. Le fichier n’a pas été exporté.");
   }
   const nodes = [...(content.content ?? [])];
   positions.forEach((position, index) => {
@@ -3413,6 +4200,29 @@ function applyPdfTranslations(
     };
   });
   return { ...content, content: nodes };
+}
+
+function getExportFormatLabel(format: ExportFormat): string {
+  return format === "pdf" ? "PDF" : INTERCHANGE_FORMATS[format].label;
+}
+
+function applyPortableExportOptions(document: ScenarioFile, draft: PdfExportDraft): ScenarioFile {
+  const content = draft.includeSceneNumbers
+    ? document.content
+    : {
+        ...document.content,
+        content: (document.content.content ?? []).map((node) => {
+          if (node.type !== "paragraph" || !node.attrs?.sceneNumber) return node;
+          const attrs = { ...node.attrs };
+          delete attrs.sceneNumber;
+          return { ...node, attrs };
+        }),
+      };
+  return {
+    ...document,
+    content,
+    coverPageHidden: !draft.includeCoverPage,
+  };
 }
 
 function getPdfExportNodeText(node: JSONContent): string {

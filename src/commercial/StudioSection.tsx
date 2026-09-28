@@ -1,4 +1,5 @@
 import { UiSelect } from '../ui/UiSelect';
+import { UiEmptyState, UiFeedback, UiTabs, type UiFeedbackMessage } from '../ui';
 import { useEffect, useState, type FormEvent } from "react";
 import type { AuthenticatedCommercialApi } from "./authenticatedApi";
 import type { ScenarioEditorBridge } from "./collaborationClient";
@@ -53,7 +54,7 @@ export function StudioSection({
   const [detail, setDetail] = useState<StudioDetailResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
-  const [message, setMessage] = useState("");
+  const [message, setMessage] = useState<UiFeedbackMessage | null>(null);
   const [joinConfirmation, setJoinConfirmation] = useState(false);
   const [localCopyConfirmed, setLocalCopyConfirmed] = useState(false);
   const [collaboration, setCollaboration] = useState<RuntimeCollaborationState | null>(null);
@@ -79,7 +80,7 @@ export function StudioSection({
       })
       .catch((error) => {
         if (!active) return;
-        setMessage(error instanceof Error ? error.message : "Studio indisponible.");
+        setMessage({ text: error instanceof Error ? error.message : "Studio indisponible.", tone: 'danger' });
         setLoading(false);
       });
     return () => {
@@ -91,7 +92,7 @@ export function StudioSection({
     if (!detail || !editorBridge) return;
     const joiningDocument = JSON.stringify(editorBridge.read());
     setBusy(true);
-    setMessage("");
+    setMessage(null);
     try {
       const versions = await api.listCloudVersions(detail.studio.scenarioId);
       const root = selectStudioRoot(versions.versions, detail.studio.scenarioId);
@@ -106,9 +107,9 @@ export function StudioSection({
         editor: editorBridge,
         loadBase: (signal) => loadStudioBase(api, root, signal),
       });
-      setMessage("Demande de connexion envoyée.");
+      setMessage({ text: "Demande de connexion envoyée.", tone: 'success' });
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Canal Studio indisponible.");
+      setMessage({ text: error instanceof Error ? error.message : "Canal Studio indisponible.", tone: 'danger' });
     } finally {
       setBusy(false);
     }
@@ -133,15 +134,15 @@ export function StudioSection({
   }
   async function run(action: () => Promise<unknown>, success: string) {
     setBusy(true);
-    setMessage("");
+    setMessage(null);
     try {
       await action();
       await refresh();
-      setMessage(success);
+      setMessage({ text: success, tone: 'success' });
     } catch (error) {
       const code = (error as { code?: string }).code;
-      setMessage(
-        code === "invitation_expired"
+      setMessage({
+        text: code === "invitation_expired"
           ? "Invitation expirée."
           : code === "invitation_not_pending"
             ? "Invitation déjà utilisée ou révoquée."
@@ -150,7 +151,8 @@ export function StudioSection({
               : error instanceof Error
                 ? error.message
                 : "Studio temporairement indisponible.",
-      );
+        tone: 'danger',
+      });
     } finally {
       setBusy(false);
     }
@@ -174,7 +176,7 @@ export function StudioSection({
   }
 
   return (
-    <section className="account-license-section studio-section" aria-label="Studios">
+    <section className="account-license-section studio-section" aria-label="Studios" aria-busy={loading || busy || undefined}>
       <div className="studio-section-heading">
         <div>
           <h3>Votre Studio</h3>
@@ -184,33 +186,26 @@ export function StudioSection({
       </div>
 
       {loading ? (
-        <p>Chargement du Studio…</p>
+        <UiEmptyState className="studio-empty-state" title="Chargement du Studio…" />
       ) : studios.length === 0 ? (
-        <div className="studio-empty-state">
-          <strong>Aucun Studio accessible</strong>
-          <span>Une invitation acceptée apparaîtra ici.</span>
-        </div>
+        <UiEmptyState className="studio-empty-state" title="Aucun Studio accessible"
+          description="Une invitation acceptée apparaîtra ici." />
       ) : studios.length > 1 ? (
-        <div className="studio-switcher" role="list" aria-label="Choisir un Studio">
-          {studios.map((studio) => (
-            <button
-              key={studio.id}
-              type="button"
-              role="listitem"
-              className={detail?.studio.id === studio.id ? "is-active" : ""}
-              disabled={busy}
-              onClick={() =>
-                void run(
-                  async () => setDetail(await api.getStudio(studio.id)),
-                  `${studio.name} ouvert.`,
-                )
-              }
-            >
-              <strong>{studio.name}</strong>
-              <span>{ROLE_LABEL[studio.role]}</span>
-            </button>
-          ))}
-        </div>
+        <UiTabs
+          className="studio-switcher"
+          ariaLabel="Choisir un Studio"
+          value={detail?.studio.id ?? studios[0].id}
+          tabs={studios.map(studio => ({
+            value: studio.id,
+            disabled: busy,
+            label: <><strong>{studio.name}</strong><span>{ROLE_LABEL[studio.role]}</span></>,
+          }))}
+          onValueChange={studioId => {
+            const studio = studios.find(candidate => candidate.id === studioId);
+            if (!studio || studio.id === detail?.studio.id) return;
+            void run(async () => setDetail(await api.getStudio(studio.id)), `${studio.name} ouvert.`);
+          }}
+        />
       ) : null}
 
       {received.length > 0 && (
@@ -332,7 +327,7 @@ export function StudioSection({
               {activeCollaboration?.status === "read_only" && (
                 <p>Votre accès distant est désormais en lecture seule. Le fichier local est intact.</p>
               )}
-              {(activeCollaboration?.conflict || activeCollaboration?.status === "recovery_required") && (
+              {(activeCollaboration?.conflict || activeCollaboration?.status === "recovery_required") && detail.studio.role !== "viewer" && (
                 <div className="studio-conflict" role="alert">
                   <p>Un conflit doit être résolu avant de poursuivre.</p>
                   <button type="button" onClick={downloadRecoveryCopy}>
@@ -476,11 +471,7 @@ export function StudioSection({
           )}
         </div>
       )}
-      {message && (
-        <p className="studio-message" role="status">
-          {message}
-        </p>
-      )}
+      {message && <UiFeedback className="studio-message" tone={message.tone}>{message.text}</UiFeedback>}
     </section>
   );
 }

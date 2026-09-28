@@ -14,6 +14,15 @@ export interface AiTokenBudgets {
   blocked: boolean;
   updatedAt: string;
 }
+
+export function shouldRequestAiTokenUsage(
+  authenticated: boolean,
+  online: boolean,
+  hidden: boolean,
+): boolean {
+  return authenticated && online && !hidden;
+}
+
 export function parseAiTokenBudgets(value: unknown): AiTokenBudgets {
   if (!value || typeof value !== 'object') throw new Error('Budgets IA indisponibles.');
   const data = value as Record<string, unknown>;

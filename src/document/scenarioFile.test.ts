@@ -7,6 +7,26 @@ import {
 } from "./scenarioFile";
 
 describe("format .scenario", () => {
+  it('refuses truncated JSON and invalid node trees without modifying the input', () => {
+    for (const raw of ['{"formatVersion":1', 'null', '[]', '{"formatVersion":1,"content":{"type":"doc","content":"broken"}}']) {
+      expect(() => parseScenarioFile(raw)).toThrow();
+    }
+    const deep: { type: string; content?: unknown[] } = { type: 'doc' };
+    let current = deep;
+    for (let depth = 0; depth < 130; depth++) {
+      const child = { type: 'paragraph' };
+      current.content = [child]; current = child;
+    }
+    expect(() => parseScenarioFile(JSON.stringify({ formatVersion: 1, content: deep }))).toThrow('complexe');
+  });
+
+  it('opens a Windows UTF-8 BOM and the compact V24 image catalogue', () => {
+    const id = 'a'.repeat(64);
+    const asset = { id, contentType: 'image/png', sizeBytes: 4, width: 1, height: 1, dataUrl: 'data:image/png;base64,AQIDBA==' };
+    const raw = JSON.stringify({ formatVersion: 1, title: 'Récupéré', content: { type: 'doc', content: [] }, technicalImageAssets: { [id]: asset } });
+    expect(parseScenarioFile('\uFEFF' + raw).technicalImageAssets?.[id]).toEqual(asset);
+    expect(parseScenarioFile(JSON.stringify(parseScenarioFile(raw))).technicalImageAssets?.[id]).toEqual(asset);
+  });
   it("lit un document compatible et garde ses métadonnées", () => {
     const parsed = parseScenarioFile(
       JSON.stringify({

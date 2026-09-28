@@ -2,6 +2,8 @@ import { describe, expect, it, vi } from "vitest";
 import type { AuthenticatedCommercialApi } from "./authenticatedApi";
 import { CommercialHttpError } from "./authenticatedApi";
 import { CloudSyncQueue, type SyncQueueStorage } from "./syncQueue";
+import { createEmptyCoverPage } from '../document/scenarioFile';
+import { technicalImageAssetFromBytes, technicalImageReference } from '../editor/technicalImageAssets';
 
 function memoryStorage(): SyncQueueStorage & { value: string | null } {
   return {
@@ -57,6 +59,32 @@ function response(input: Parameters<AuthenticatedCommercialApi["syncCloudScenari
 }
 
 describe("file de synchronisation v6", () => {
+  it('envoie les images séparément et ne les duplique jamais dans la version cloud', async () => {
+    const asset = await technicalImageAssetFromBytes(new Uint8Array([9, 8, 7]), 'image/webp', 320, 180);
+    const reference = technicalImageReference(asset.id);
+    const content = JSON.stringify({
+      formatVersion: 1, title: 'Film image',
+      content: { type: 'doc', content: [{ type: 'paragraph', attrs: {
+        scenarioType: 'SCENE_HEADING',
+        technicalBreakdownData: JSON.stringify({ version: 1, shots: [{ values: { image: reference, duplicate: reference } }] }),
+      } }] },
+      characters: [], locations: [], times: [], coverPage: createEmptyCoverPage(), coverPageHidden: false,
+      comments: [], savedAt: new Date().toISOString(), technicalImageAssets: { [asset.id]: asset },
+    });
+    const storage = memoryStorage();
+    const syncCloudScenario = vi.fn(async input => response(input));
+    const ensureCloudImageAsset = vi.fn(async () => asset);
+    const queue = new CloudSyncQueue(storage, () => ({
+      syncCloudScenario,
+      ensureCloudImageAsset,
+    }) as unknown as AuthenticatedCommercialApi, async () => content);
+    await queue.enqueue('film-image.scenario', 'Film image');
+    await queue.process();
+    expect(ensureCloudImageAsset).toHaveBeenCalledOnce();
+    expect(syncCloudScenario.mock.calls[0][0].content).toContain(reference);
+    expect(syncCloudScenario.mock.calls[0][0].content).not.toContain(asset.dataUrl);
+  });
+
   it("persiste les états sans contenu ni jeton et déduplique le traitement concurrent", async () => {
     const storage = memoryStorage();
     const syncCloudScenario = vi.fn(async (input) => response(input));
@@ -136,5 +164,31 @@ describe("file de synchronisation v6", () => {
     expect((await queue.list())[0]).toMatchObject({ state: "pending", parentVersionId: null });
     await queue.pauseAndForgetAccount();
     expect(await queue.list()).toEqual([]);
+  });
+
+  it("ne réécrit jamais une ancienne file après logout ou changement de compte", async () => {
+    const storage = memoryStorage();
+    let finish!: (value: ReturnType<typeof response>) => void;
+    const syncCloudScenario = vi.fn((_input: Parameters<AuthenticatedCommercialApi['syncCloudScenario']>[0]) =>
+      new Promise<ReturnType<typeof response>>(resolve => {
+        finish = resolve;
+      }),
+    );
+    const queue = new CloudSyncQueue(
+      storage,
+      () => ({ syncCloudScenario }) as unknown as AuthenticatedCommercialApi,
+      async () => JSON.stringify({ formatVersion: 1, content: { type: 'doc' } }),
+    );
+    await queue.bindAccount('account-a');
+    await queue.enqueue('a.scenario', 'A');
+    const processing = queue.process();
+    await vi.waitFor(() => expect(finish).toBeTypeOf('function'));
+    await queue.pauseAndForgetAccount();
+    await queue.bindAccount('account-b');
+    finish(response(syncCloudScenario.mock.calls[0][0]));
+    await processing;
+
+    expect(await queue.list()).toEqual([]);
+    expect(JSON.parse(storage.value ?? '{}').ownerAccountId).toBe('account-b');
   });
 });

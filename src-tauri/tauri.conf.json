@@ -1,12 +1,12 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "senario",
-  "version": "0.1.12",
+  "version": "0.1.17",
   "identifier": "fr.orepi.scenario",
   "build": {
-    "beforeDevCommand": "npm run dev",
+    "beforeDevCommand": "npm run audio:prepare && npm run dev",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "npm run build",
+    "beforeBuildCommand": "npm run audio:prepare && npm run build",
     "frontendDist": "../dist"
   },
   "app": {
@@ -17,19 +17,24 @@
         "backgroundColor": "#080b10",
         "width": 800,
         "height": 600,
-        "maximized": true
+        "maximized": true,
+        "dragDropEnabled": false
       }
     ],
     "security": {
-      "csp": "default-src 'self'; connect-src ipc: http://ipc.localhost; img-src 'self' asset: http://asset.localhost data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'"
+      "csp": "default-src 'self'; connect-src ipc: http://ipc.localhost https://scenario-commercial-api-production.ore-picard.workers.dev wss://scenario-commercial-api-production.ore-picard.workers.dev https://rtqlsnwfbtnscilfdirv.supabase.co wss://rtqlsnwfbtnscilfdirv.supabase.co; img-src 'self' asset: http://asset.localhost data: blob:; media-src 'self' blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; object-src 'none'; base-uri 'none'"
     }
   },
   "bundle": {
     "active": true,
     "createUpdaterArtifacts": true,
-    "targets": "all",
+    "targets": ["nsis"],
     "resources": {
-      "icons/scenario-file-icon.ico": "scenario-file-icon.ico"
+      "icons/scenario-file-icon.ico": "scenario-file-icon.ico",
+      "audio-runtime/": "audio-runtime/",
+      "../licenses/audio/": "licenses/audio/",
+      "../THIRD_PARTY_NOTICES_AUDIO.txt": "THIRD_PARTY_NOTICES_AUDIO.txt",
+      "../THIRD_PARTY_NOTICES": "THIRD_PARTY_NOTICES"
     },
     "fileAssociations": [
       {

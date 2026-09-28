@@ -2,6 +2,14 @@ import { expect, it, vi } from 'vitest';
 import type { Update } from '@tauri-apps/plugin-updater';
 import { createAutomaticUpdater } from './automaticUpdater';
 
+it('closes a rejected signature or failed download without installing it', async () => {
+  const update = { version: '0.1.18', download: vi.fn(async () => { throw new Error('Invalid signature'); }), install: vi.fn(), close: vi.fn(async () => undefined) } as unknown as Update;
+  const updater = createAutomaticUpdater({ isSafeToInstall: () => true, onStatus: vi.fn(), checkForUpdate: vi.fn(async () => update) });
+  await updater.checkNow();
+  expect(update.install).not.toHaveBeenCalled();
+  expect(update.close).toHaveBeenCalledOnce();
+});
+
 it('downloads an update but waits for a saved document before installing it', async () => {
   let safe = false;
   const statuses: string[] = [];

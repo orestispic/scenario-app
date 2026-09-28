@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { CloudProjectRuntime, fileIdentity, type CloudProjectEditor } from './cloudProjectRuntime';
+import { CloudProjectRuntime, cloudSyncRequest, fileIdentity, type CloudProjectEditor } from './cloudProjectRuntime';
+import { ensureVersionedProject } from '../document/projectVersions';
 import type { CloudProjectStore, CloudWorkingCopy } from './cloudProjectStore';
 import { CollaborationRuntime } from './collaborationRuntime';
 import type { AuthenticatedCommercialApi } from './authenticatedApi';
@@ -12,6 +13,11 @@ const projectId = '80000000-0000-4000-8000-000000000001';
 const project: CloudProject = { id: projectId, title: 'Privé', role: 'owner', sharing: 'private', memberCount: 1, canShare: true, realtimeStudioId: null, realtimeBaseVersionId: null, currentVersionId: 'v1', deletedAt: null, createdAt: '', updatedAt: '' };
 const file = (text: string): ScenarioFile => ({ formatVersion: 1, title: 'Privé', content: { type: 'doc', content: [{ type: 'paragraph', attrs: {blockId: 'one'}, content: [{type: 'text', text}] }] }, characters: [], locations: [], times: [], coverPage: createEmptyCoverPage(), coverPageHidden: false, comments: [], savedAt: '' });
 const active: CloudProjectRuntime[] = [];
+it('refuse explicitement l’aplatissement d’un fichier multiversion lors de son import cloud', async () => {
+  const bundle = ensureVersionedProject(file('Version locale'));
+  await expect(cloudSyncRequest(bundle, projectId, null)).rejects.toThrow('plusieurs versions');
+  expect(bundle.versions[0].document.content).toEqual(file('Version locale').content);
+});
 afterEach(async () => { for (const r of active.splice(0)) await r.close(); vi.restoreAllMocks(); });
 function fixture() {
   let document = file('Local original');
@@ -23,7 +29,15 @@ function fixture() {
     setReadOnly: vi.fn(), subscribe: (listener) => { const callback = () => listener(document.content); listeners.add(callback); return () => {listeners.delete(callback);}; },
   };
   const copies = new Map<string, CloudWorkingCopy>();
-  const store: CloudProjectStore = { read: async (account,id) => copies.get(`${account}:${id}`) ?? null, write: async (copy) => { copies.set(`${copy.accountId}:${copy.projectId}`, structuredClone(copy)); }, backup: vi.fn(async () => undefined), list: async (account) => [...copies.values()].filter((c) => c.accountId === account) };
+  const store: CloudProjectStore = {
+    read: async (account,id) => copies.get(`${account}:${id}`) ?? null,
+    write: async (copy) => { copies.set(`${copy.accountId}:${copy.projectId}`, structuredClone(copy)); },
+    backup: vi.fn(async () => undefined),
+    list: async (account) => [...copies.values()].filter((c) => c.accountId === account),
+    deleteAccount: async (account) => {
+      for (const [key, copy] of copies) if (copy.accountId === account) copies.delete(key);
+    },
+  };
   let serverProject = structuredClone(project);
   let remote = file('Cloud original');
   const sync = vi.fn(async (body) => {
@@ -40,6 +54,73 @@ function fixture() {
 }
 
 describe('cloud project lifecycle', () => {
+  it('purges every working copy for the closed account and preserves other accounts', async () => {
+    const f = fixture();
+    const copy = (accountId: string, id: string, downloadAllowed: boolean): CloudWorkingCopy => ({
+      accountId,
+      projectId: id,
+      parentVersionId: null,
+      file: file(id),
+      pending: true,
+      downloadAllowed,
+      savedAt: new Date().toISOString(),
+    });
+    await f.store.write(copy('account-a', 'owned', true));
+    await f.store.write(copy('account-a', 'viewer', false));
+    await f.store.write(copy('account-b', 'other', true));
+
+    expect(await f.runtime.hasRecoverableUnsyncedCopies('account-a')).toBe(true);
+    f.copies.delete('account-a:owned');
+    expect(await f.runtime.hasRecoverableUnsyncedCopies('account-a')).toBe(false);
+    await f.store.write(copy('account-a', 'owned', true));
+
+    await f.runtime.deleteAccount('account-a');
+
+    expect(await f.store.list('account-a')).toEqual([]);
+    expect((await f.store.list('account-b')).map((entry) => entry.projectId)).toEqual(['other']);
+  });
+  it('a reader without Studio sees current shared content and recovers after a polling outage without any writes', async () => {
+    const f = fixture(); f.setProject({role:'viewer',sharing:'shared',memberCount:2,canShare:false});
+    const current = vi.fn(async () => file('Current shared text'));
+    f.api.readCurrentProjectDocument = current;
+    await f.runtime.open(f.api, 'guest', projectId, f.editor);
+    expect(f.editor.readFile()).toEqual(file('Current shared text'));
+    expect(f.editor.setReadOnly).toHaveBeenLastCalledWith(true);
+    current.mockRejectedValueOnce(new TypeError('offline'));
+    await f.runtime.flush();
+    expect(f.editor.readFile()).toEqual(file('Current shared text'));
+    current.mockResolvedValue(file('New shared text'));
+    await f.runtime.flush();
+    expect(f.editor.readFile()).toEqual(file('New shared text'));
+    current.mockRejectedValueOnce(Object.assign(new Error('Revoked'), {status:403}));
+    await f.runtime.flush();
+    expect(f.editor.setReadOnly).toHaveBeenLastCalledWith(true);
+    expect(f.editor.readFile()).toEqual(file('New shared text'));
+    expect(f.sync).not.toHaveBeenCalled();
+    expect(f.createLive).not.toHaveBeenCalled();
+  });
+  it('the last open wins even while a previous close is waiting for local persistence', async () => {
+    const f = fixture(); await f.runtime.open(f.api, 'account-a', projectId, f.editor);
+    let release!: () => void;
+    const pending = new Promise<void>(resolve => { release = resolve; });
+    const write = f.store.write;
+    f.store.write = async copy => { await pending; await write(copy); };
+    const first = f.runtime.open(f.api, 'account-a', projectId, f.editor);
+    const second = f.runtime.open(f.api, 'account-b', projectId, f.editor);
+    release(); await Promise.all([first, second]);
+    f.edit('Account B only'); await f.runtime.flush();
+    expect(f.copies.get(`account-b:${projectId}`)?.file).toEqual(file('Account B only'));
+    expect(f.copies.get(`account-a:${projectId}`)?.file).not.toEqual(file('Account B only'));
+  });
+  it('a failed local backup blocks opening another project before it replaces the editor', async () => {
+    const f = fixture(); await f.runtime.open(f.api, 'account-a', projectId, f.editor);
+    f.edit('Keep my work');
+    const write = f.store.write;
+    f.store.write = async () => { throw new Error('Disk full'); };
+    await expect(f.runtime.open(f.api, 'account-b', projectId, f.editor)).rejects.toThrow('Disk full');
+    expect(f.editor.readFile()).toEqual(file('Keep my work'));
+    f.store.write = write;
+  });
   it('backs up the current file before opening a private project and never connects a channel', async () => {
     const f = fixture(); await f.runtime.open(f.api, 'account-a', projectId, f.editor);
     expect(f.store.backup).toHaveBeenCalledWith('account-a', file('Local original'));
@@ -54,6 +135,18 @@ describe('cloud project lifecycle', () => {
     await f.runtime.open(f.api, 'account-a', projectId, f.editor);
     expect(f.createLive).toHaveBeenCalledWith(expect.objectContaining({studioId: 'studio-a', scenarioId: projectId, actorId: 'account-a'}));
     await f.runtime.flush(); expect(f.sync).not.toHaveBeenCalled();
+  });
+  it('ne republie pas le même statut cloud à chaque vérification périodique', async () => {
+    const f = fixture();
+    f.setProject({ sharing: 'shared', memberCount: 2, realtimeStudioId: 'studio-a', realtimeBaseVersionId: 'v1' });
+    const states: string[] = [];
+    f.runtime.subscribe((state) => states.push(`${state.status}:${state.message}`));
+    await f.runtime.open(f.api, 'account-a', projectId, f.editor);
+    await f.runtime.flush();
+    const publishedAfterFirstCheck = states.length;
+    await f.runtime.flush();
+    expect(states).toHaveLength(publishedAfterFirstCheck);
+    expect(states[states.length - 1]).toBe('realtime:Commentaires et premières pages à jour.');
   });
   it('sharing uses the frozen latest private version, not the original empty root', async () => {
     const f = fixture(); f.setProject({currentVersionId: 'v2', realtimeStudioId: 'studio-a', realtimeBaseVersionId: 'v2'});

@@ -2,6 +2,13 @@ import { describe, expect, it } from 'vitest';
 import { presentEntitlements } from './entitlementPresentation';
 
 describe('présentation des droits du compte', () => {
+  it('classe les fonctionnalités par leur première offre et non par leur activation', () => {
+    const rights = presentEntitlements([{ code: 'studio_collaboration', enabled: true, value: null }]);
+    const ranks = rights.map(right => ({ Gratuite: 0, Auteur: 1, Studio: 2 })[right.offer!]);
+    expect(ranks).toEqual([...ranks].sort((a, b) => a - b));
+    expect(rights.find(r => r.id === 'artificialIntelligence')?.offer).toBe('Auteur');
+    expect(rights.find(r => r.id === 'sharingAndCollaboration')?.offer).toBe('Studio');
+  });
   it('regroupe les alias techniques et affiche aussi les fonctions inactives', () => {
     const rights = presentEntitlements([
       { code: 'local.edit', enabled: true, value: null },
@@ -9,13 +16,13 @@ describe('présentation des droits du compte', () => {
       { code: 'ai.actions', enabled: false, value: null },
     ]);
 
-    expect(rights.find((right) => right.id === 'local-writing')).toMatchObject({
-      label: 'Écriture et fichiers locaux',
+    expect(rights.find((right) => right.id === 'localScenarios')).toMatchObject({
+      label: 'Scénarios locaux et pages illimités',
       enabled: true,
     });
-    expect(rights.find((right) => right.id === 'cloud-sync')?.enabled).toBe(true);
-    expect(rights.find((right) => right.id === 'ai-writing')?.enabled).toBe(false);
-    expect(rights.filter((right) => right.id === 'cloud-sync')).toHaveLength(1);
+    expect(rights.find((right) => right.id === 'cloudWorkspace')?.enabled).toBe(false);
+    expect(rights.find((right) => right.id === 'artificialIntelligence')?.enabled).toBe(false);
+    expect(rights.filter((right) => right.id === 'cloudWorkspace')).toHaveLength(1);
   });
 
   it('conserve un droit serveur inconnu avec un libellé lisible', () => {

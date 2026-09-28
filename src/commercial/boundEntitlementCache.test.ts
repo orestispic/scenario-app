@@ -31,7 +31,13 @@ it("authenticates the complete snapshot, owner, dates, expiration and offline re
         issuedAt: snapshot.issuedAt,
         expiresAt: snapshot.offlineValidUntil,
         contractVersion: "2026-09-v4",
-        snapshotJson: JSON.stringify(snapshot),
+        // PostgreSQL jsonb is free to return object members in a different
+        // order from the client parser. Member order must not invalidate an
+        // otherwise identical signed entitlement.
+        snapshotJson: JSON.stringify({
+          ...snapshot,
+          entitlements: [{ code: "fixture", value: null, enabled: false }],
+        }),
       }),
     ),
   );

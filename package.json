@@ -1,14 +1,20 @@
 {
   "name": "scenario-app",
   "private": true,
-  "version": "0.1.12",
+  "version": "0.1.17",
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "tsc && vite build",
-    "build:beta": "tauri build --config src-tauri/tauri.preproduction.conf.json --bundles nsis",
-    "test": "vitest run",
-    "preview": "vite preview",
+    "audio:prepare": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/prepare-audio.ps1",
+    "dev": "vite --config vite.config.ts --configLoader runner",
+    "build": "tsc && vite build --config vite.config.ts --configLoader runner",
+    "build:web:beta": "tsc && vite build --config vite.config.ts --configLoader runner --mode phase9",
+    "deploy:web:beta": "npm run build:web:beta && wrangler pages deploy dist --project-name senario-app-preproduction --branch main --commit-dirty=true",
+    "build:beta": "tauri build --config src-tauri/tauri.preproduction-local.conf.json --bundles nsis",
+    "release:production:check": "node scripts/verify-production-release-config.mjs",
+    "release:review": "node scripts/verify-release-review.mjs",
+    "test": "vitest run --configLoader runner",
+    "test:ui": "node scripts/ui-visual-regression.mjs",
+    "preview": "vite preview --config vite.config.ts --configLoader runner",
     "phase9:preflight": "node scripts/phase9-client-preflight.mjs",
     "tauri": "tauri"
   },
@@ -20,6 +26,7 @@
     "@tiptap/extension-placeholder": "^3.30.5",
     "@tiptap/react": "^3.30.5",
     "@tiptap/starter-kit": "^3.30.5",
+    "fflate": "^0.8.3",
     "jspdf": "^4.2.1",
     "pdfjs-dist": "^6.3.289",
     "react": "^19.1.0",
@@ -32,6 +39,7 @@
     "@vitejs/plugin-react": "^4.6.0",
     "typescript": "~5.8.3",
     "vite": "^7.0.4",
-    "vitest": "^4.1.11"
+    "vitest": "^4.1.11",
+    "wrangler": "^4.132.0"
   }
 }

@@ -1,0 +1,46 @@
+name: Recette Windows jetable sans publication
+
+on:
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  native:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    env:
+      VITE_SCENARIO_API_BASE_URL: https://scenario-commercial-api-production.ore-picard.workers.dev
+      VITE_SCENARIO_ENVIRONMENT: production
+      VITE_SCENARIO_AUTH_MODE: supabase
+      VITE_SUPABASE_URL: https://rtqlsnwfbtnscilfdirv.supabase.co
+      VITE_SUPABASE_ANON_KEY: ${{ vars.VITE_SUPABASE_ANON_KEY_PRODUCTION }}
+      VITE_SCENARIO_BILLING_RETURN_URL: https://senario.app/
+      VITE_SCENARIO_PUBLIC_APP_URL: https://senario.app/
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - run: npm ci
+      - run: npm test -- --run
+      - run: npm run audio:prepare
+      - run: node scripts/build-windows-candidate.mjs
+      - name: Installer, relire les fichiers et réinstaller dans le runner jetable
+        shell: pwsh
+        run: |
+          $taskVersion = (Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json).version
+          ./scripts/phase14-windows-lifecycle.ps1 -Installer "src-tauri/target/release/bundle/nsis/senario_${taskVersion}_x64-setup.exe"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-internal-unsigned-evidence
+          path: |
+            outputs/windows-candidate/
+            ${{ runner.temp }}/senario-phase14/
+          retention-days: 7
+          if-no-files-found: error

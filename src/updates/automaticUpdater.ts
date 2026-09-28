@@ -55,8 +55,10 @@ export function createAutomaticUpdater({
   const checkNow = async () => {
     if (stopped || checking || installing || downloaded) return;
     checking = true;
+    let candidate: Update | null = null;
     try {
       const update = await checkForUpdate({ timeout: 15_000 });
+      candidate = update;
       if (!update || stopped) {
         await update?.close().catch(() => undefined);
         return;
@@ -71,6 +73,7 @@ export function createAutomaticUpdater({
       await installWhenSafe();
     } catch {
       // An absent network or release server must never interrupt local writing.
+      await candidate?.close().catch(() => undefined);
     } finally {
       checking = false;
     }

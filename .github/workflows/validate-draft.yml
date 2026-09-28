@@ -1,51 +1,49 @@
-name: Valider le brouillon Windows existant
+name: Construire la préproduction Windows
+
 on:
   workflow_dispatch:
+    inputs:
+      native_windows:
+        description: Run the isolated native installer test instead of the beta build
+        type: boolean
+        default: false
+
 permissions:
-  contents: write
+  contents: read
+
 jobs:
+  native:
+    if: inputs.native_windows == true
+    uses: ./.github/workflows/validate-windows-native.yml
   windows:
+    if: inputs.native_windows != true
+    name: Candidat interne non publié
     runs-on: windows-latest
     env:
       VITE_SCENARIO_API_BASE_URL: https://scenario-commercial-api-preproduction.ore-picard.workers.dev
+      VITE_SCENARIO_ENVIRONMENT: staging
+      VITE_SCENARIO_AUTH_MODE: supabase
       VITE_SUPABASE_URL: https://zblnsdyaoljnezxdidtx.supabase.co
-      VITE_SUPABASE_ANON_KEY: sb_publishable_tAI1UPbu2UnelkOeuI1WNg_hPegJP4Y
+      VITE_SUPABASE_ANON_KEY: ${{ vars.VITE_SUPABASE_ANON_KEY_PREPRODUCTION }}
+      VITE_SCENARIO_BILLING_RETURN_URL: https://senario-app-preproduction.pages.dev/
+      VITE_SCENARIO_PUBLIC_APP_URL: https://senario-app-preproduction.pages.dev/
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
       - uses: dtolnay/rust-toolchain@stable
-      - run: npm ci
-      - run: npm run build -- --mode phase9
-      - name: Télécharger le candidat signé sans le reconstruire
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        shell: pwsh
-        run: |
-          git diff --exit-code v0.1.12 -- src src-tauri package.json package-lock.json
-          if ($LASTEXITCODE -ne 0) { throw 'Application sources differ from the signed candidate' }
-          $taskDraft = gh release view v0.1.12 --json isDraft --jq .isDraft
-          if ($taskDraft -ne 'true') { throw 'This recovery workflow only accepts the unpublished 0.1.12 draft' }
-          gh release download v0.1.12 --pattern 'Scenario-Setup.exe*' --dir candidate
-          if ($LASTEXITCODE -ne 0) { throw 'Draft download failed' }
-          New-Item -ItemType Directory -Path 'src-tauri/target/release/bundle/nsis' -Force | Out-Null
-          Copy-Item candidate/Scenario-Setup.exe 'src-tauri/target/release/bundle/nsis/senario Beta_0.1.12_x64-setup.exe'
-          Copy-Item candidate/Scenario-Setup.exe.sig 'src-tauri/target/release/bundle/nsis/senario Beta_0.1.12_x64-setup.exe.sig'
-          node scripts/verify-updater-release.mjs
-      - name: Vérifier installation, mise à jour et réinstallation
-        shell: pwsh
-        run: ./scripts/phase14-windows-lifecycle.ps1 -Installer candidate/Scenario-Setup.exe
-      - name: Diagnostics en cas d'échec
-        if: failure()
-        shell: pwsh
-        run: |
-          Get-CimInstance Win32_Process | Where-Object { $_.Name -match 'scenario|msedgewebview' } | Select-Object Name,ProcessId,CommandLine | Format-List
-          Get-ChildItem 'C:/Program Files (x86)/Microsoft/EdgeWebView/Application' -ErrorAction SilentlyContinue
-      - name: Publier après tous les contrôles
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release edit v0.1.12 --draft=false --latest
+      - name: Installer les dépendances
+        run: npm ci
+      - name: Vérifier l’application
+        run: npm test -- --run
+      - name: Construire le candidat préproduction
+        run: npm run build:beta
+      - name: Conserver le candidat comme artefact interne
+        uses: actions/upload-artifact@v4
+        with:
+          name: senario-preproduction-windows
+          path: src-tauri/target/release/bundle/nsis/senario Beta_*_x64-setup.exe
+          if-no-files-found: error
+          retention-days: 7

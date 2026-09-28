@@ -35,6 +35,9 @@ try {
   await page.getByRole('button', { name: 'studio', exact: true }).click();
   await account.getByText('Fonctionnalités de votre offre', { exact: true }).waitFor();
   await account.getByText('Budget journalier utilisé : 12,34 %', { exact: true }).waitFor();
+  await account.getByText('Budget mensuel utilisé : 5,67 %', { exact: true }).waitFor();
+  assert.equal(await account.getByRole('progressbar', { name: 'Budget mensuel', exact: true }).count(), 0);
+  assert.equal(await account.getByRole('slider').count(), 0);
   assert.ok(await account.locator('.account-rights-grid li.is-enabled').count(), 'Active rights must be visible');
   assert.ok(await account.locator('.account-rights-grid li.is-disabled').count(), 'Inactive rights must be visible');
   assert.equal(await account.getByText(/tokens/i).count(), 0, 'Account UI must not expose token counts');

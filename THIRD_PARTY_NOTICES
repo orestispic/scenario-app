@@ -1,0 +1,9 @@
+Senario — additional third-party notices
+
+Local speech synthesis: see THIRD_PARTY_NOTICES_AUDIO.txt.
+Full accompanying licences: licenses/audio/Apache-2.0.txt and GPL-3.0.txt.
+Native runtime licences and corresponding eSpeak NG source:
+audio-runtime/ONNX-RUNTIME-LICENSE.txt, audio-runtime/ThirdPartyNotices.txt,
+audio-runtime/espeak/COPYING.txt and audio-runtime/espeak-ng-1.52.0-source.zip.
+
+These notices supplement, and do not replace, the notices of Senario's other dependencies.

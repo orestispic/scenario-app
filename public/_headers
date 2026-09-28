@@ -1,0 +1,6 @@
+/*
+  Content-Security-Policy: default-src 'self'; connect-src 'self' https://scenario-commercial-api-preproduction.ore-picard.workers.dev https://zblnsdyaoljnezxdidtx.supabase.co wss://scenario-commercial-api-preproduction.ore-picard.workers.dev wss://zblnsdyaoljnezxdidtx.supabase.co; img-src 'self' data: blob: https://zblnsdyaoljnezxdidtx.supabase.co; style-src 'self' 'unsafe-inline'; script-src 'self'; worker-src 'self' blob:; font-src 'self' data:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: no-referrer
+  Permissions-Policy: camera=(), microphone=(), geolocation=()
+  X-Robots-Tag: noindex, nofollow

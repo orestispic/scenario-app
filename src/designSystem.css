@@ -104,20 +104,18 @@
   .app-shell.theme-dark .scenario-editor p[data-scenario-type=SCENE_HEADING]::after { color: var(--ui-muted); }
 
   /* Dialog surfaces; preserve each feature's layout and overlay coordinates. */
-  .app-shell.theme-dark :is(.account-license-panel, .cloud-project-panel, .project-comments-panel,
-    .help-panel, .pdf-export-panel, .ai-settings-panel, .ai-missing-key-panel,
-    .text-replacements-panel, .find-replace-panel, .comment-composer, .comments-panel) {
+  .app-shell.theme-dark :is(.account-license-panel, .cloud-project-panel, .ai-missing-key-panel,
+    .find-replace-panel, .comment-composer, .comments-panel) {
     color: var(--ui-text); background: var(--ui-panel); border: 1px solid var(--ui-border);
     border-radius: 12px; box-shadow: var(--ui-shadow); font-family: var(--ui-font);
     max-height: calc(100dvh - 32px); overscroll-behavior: contain;
   }
-  .app-shell.theme-dark :is(.help-panel, .pdf-export-panel, .ai-settings-panel, .ai-missing-key-panel,
-    .text-replacements-panel, .find-replace-panel, .comment-composer) { overflow-y: auto; }
+  .app-shell.theme-dark :is(.ai-missing-key-panel, .find-replace-panel, .comment-composer) { overflow-y: auto; }
   .app-shell.theme-dark .modal-backdrop { background: #080b10bb; padding: 16px; }
   .app-shell.theme-dark .cloud-project-panel { padding: 24px; font-size: 14px; }
   .app-shell.theme-dark .account-license-panel { width: min(600px, 100%); padding: 24px; }
   .app-shell.theme-dark .comments-panel { width: min(296px, calc(100vw - 24px)); top: 100px; }
-  .app-shell.theme-dark :is(.file-menu, .smart-type, .scenario-context-menu, .ai-popover,
+  .app-shell.theme-dark :is(.file-menu, .smart-type, .ai-popover,
     .transition-popover, .cover-menu, .studio-member-menu > div) {
     color: var(--ui-text); background: var(--ui-floating); border: 1px solid var(--ui-border);
     border-radius: 8px; box-shadow: var(--ui-shadow);
@@ -139,15 +137,11 @@
   .app-shell.theme-dark :is(.modal-backdrop, .comments-panel, .cover-menu) button {
     min-height: 34px; background: var(--ui-floating); border: 1px solid var(--ui-border);
   }
-  .app-shell.theme-dark :is(.file-menu, .smart-type, .scenario-context-menu, .ai-popover, .transition-popover) > button {
+  .app-shell.theme-dark :is(.file-menu, .smart-type, .ai-popover, .transition-popover) > button {
     color: var(--ui-text); background: transparent; min-height: 34px;
   }
-  .app-shell.theme-dark button:hover:not(:disabled) { color: var(--ui-text); background: var(--ui-hover); border-color: var(--ui-disabled); }
-  .app-shell.theme-dark button:active:not(:disabled) { background: var(--ui-selected); }
-  .app-shell.theme-dark :is(button, input, textarea, select, summary, a, .prompt-instruction-input):focus-visible {
-    outline: 2px solid var(--ui-primary); outline-offset: 2px;
-  }
-  .app-shell.theme-dark :is(button, input, textarea, select):disabled { opacity: .5; cursor: not-allowed; }
+  /* Hover, pressed, focus, selected and disabled are defined once in
+     blocksApplication.css and src/ui/primitives.css. */
   .app-shell.theme-dark :is(input:not([type=checkbox]):not([type=radio]), textarea, select, .prompt-instruction-input) {
     color: var(--ui-text); background: var(--ui-background); border: 1px solid var(--ui-border);
     border-radius: 6px; padding: 8px 10px; font-family: var(--ui-font); font-size: 13px; min-height: 36px;
@@ -155,11 +149,6 @@
   .app-shell.theme-dark textarea { line-height: 1.5; resize: vertical; }
   .app-shell.theme-dark select option { color: var(--ui-text); background: var(--ui-floating); }
   .app-shell.theme-dark :is(input[type=checkbox], input[type=radio]) { accent-color: var(--ui-primary); }
-  .app-shell.theme-dark :is(.cloud-project-filters [aria-pressed=true], .comments-filters .is-active, .account-auth-tabs .is-active,
-    .smart-type .is-selected, .formatting-toolbar .is-active, .shortcut-toggle.is-enabled,
-    .response-only-toggle.is-active, .prompt-editor-list-item.is-selected) {
-    color: var(--ui-text); background: var(--ui-selected); border-color: var(--ui-primary);
-  }
   .app-shell.theme-dark button.primary-button { background: var(--ui-secondary); border-color: var(--ui-primary); font-weight: 600; }
   .app-shell.theme-dark button.primary-button:hover:not(:disabled) { background: var(--ui-primary); }
   .app-shell.theme-dark button.primary-button:active:not(:disabled) { background: var(--ui-secondary); }

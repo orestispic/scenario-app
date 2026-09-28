@@ -1,9 +1,10 @@
+mod audio;
 mod session_vault;
 use serde::{Deserialize, Serialize};
 use std::{
     env,
     fs::{self, OpenOptions},
-    io::Write,
+    io::{Read, Write},
     path::{Path, PathBuf},
     sync::Mutex,
     time::{SystemTime, UNIX_EPOCH},
@@ -12,6 +13,7 @@ use tauri::{AppHandle, Emitter, Manager, State, WindowEvent};
 
 const MAX_SCENARIO_SIZE: u64 = 32 * 1024 * 1024;
 const MAX_PDF_SIZE: u64 = 64 * 1024 * 1024;
+const MAX_INTERCHANGE_SIZE: u64 = 64 * 1024 * 1024;
 const MAX_BACKUP_FILES: usize = 30;
 
 #[derive(Default)]
@@ -86,15 +88,26 @@ struct AiConfigView {
 
 #[tauri::command]
 fn read_scenario(path: String) -> Result<String, String> {
-    let path = PathBuf::from(path);
-    let metadata = fs::metadata(&path)
-        .map_err(|error| format!("Impossible d’ouvrir le scénario : {error}"))?;
-    if metadata.len() > MAX_SCENARIO_SIZE {
-        return Err(
-            "Ce fichier .scenario est trop volumineux pour être ouvert en sécurité.".to_string(),
-        );
-    }
-    fs::read_to_string(path).map_err(|error| format!("Impossible d’ouvrir le scénario : {error}"))
+    let bytes = read_bounded_file(Path::new(&path), MAX_SCENARIO_SIZE)?;
+    String::from_utf8(bytes).map_err(|_| "Le scénario contient du texte UTF-8 invalide. Le fichier reste inchangé.".to_string())
+}
+
+// Use one handle and cap the actual read, including when a file grows after
+// metadata inspection. Never allocate according to untrusted file metadata.
+fn read_bounded_file(path: &Path, limit: u64) -> Result<Vec<u8>, String> {
+    let file = fs::File::open(path).map_err(|error| format!("Impossible d’ouvrir le fichier : {error}"))?;
+    let metadata = file.metadata().map_err(|error| error.to_string())?;
+    if !metadata.is_file() { return Err("Le chemin sélectionné n’est pas un fichier.".into()); }
+    if metadata.len() > limit { return Err(format!("Le fichier dépasse la limite de {} Mio. Le fichier reste inchangé.", limit / 1024 / 1024)); }
+    read_bounded(file, limit)
+}
+
+fn read_bounded(reader: impl Read, limit: u64) -> Result<Vec<u8>, String> {
+    let mut bytes = Vec::new();
+    reader.take(limit + 1).read_to_end(&mut bytes).map_err(|error| format!("Impossible de lire le fichier : {error}"))?;
+    if bytes.len() as u64 > limit { return Err("Le fichier a dépassé la taille maximale pendant sa lecture. Le fichier reste inchangé.".into()); }
+    if bytes.is_empty() { return Err("Le fichier sélectionné est vide.".into()); }
+    Ok(bytes)
 }
 
 #[tauri::command]
@@ -111,7 +124,40 @@ fn read_pdf(path: String) -> Result<Vec<u8>, String> {
     if metadata.len() > MAX_PDF_SIZE {
         return Err("Ce PDF est trop volumineux pour être importé en sécurité.".to_string());
     }
-    fs::read(path).map_err(|error| format!("Impossible de lire le PDF : {error}"))
+    read_bounded_file(&path, MAX_PDF_SIZE)
+}
+
+fn is_supported_interchange_path(path: &Path) -> bool {
+    path.extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| {
+            matches!(
+                extension.to_ascii_lowercase().as_str(),
+                "fdx" | "fountain" | "docx"
+            )
+        })
+}
+
+#[tauri::command]
+fn read_interchange_file(path: String) -> Result<Vec<u8>, String> {
+    let path = PathBuf::from(path);
+    if !is_supported_interchange_path(&path) {
+        return Err(
+            "Seuls les fichiers FDX, Fountain et DOCX peuvent être importés ici.".to_string(),
+        );
+    }
+    let metadata = fs::metadata(&path)
+        .map_err(|error| format!("Impossible d’ouvrir le fichier à importer : {error}"))?;
+    if !metadata.is_file() {
+        return Err("Le chemin sélectionné n’est pas un fichier.".to_string());
+    }
+    if metadata.len() == 0 {
+        return Err("Le fichier sélectionné est vide.".to_string());
+    }
+    if metadata.len() > MAX_INTERCHANGE_SIZE {
+        return Err("Ce fichier dépasse la taille maximale autorisée de 64 Mo.".to_string());
+    }
+    read_bounded_file(&path, MAX_INTERCHANGE_SIZE)
 }
 
 #[tauri::command]
@@ -164,7 +210,27 @@ fn record_recent_scenario(app: AppHandle, path: String) -> Result<Vec<RecentScen
 
 #[tauri::command]
 fn write_pdf(path: String, contents: Vec<u8>) -> Result<(), String> {
+    if contents.is_empty() || contents.len() as u64 > MAX_PDF_SIZE {
+        return Err("Le PDF doit être non vide et ne pas dépasser 64 Mio.".into());
+    }
     write_bytes_atomically(PathBuf::from(path), &contents, "le PDF")
+}
+
+#[tauri::command]
+fn write_interchange_file(path: String, contents: Vec<u8>) -> Result<(), String> {
+    let path = PathBuf::from(path);
+    if !is_supported_interchange_path(&path) {
+        return Err("L’export doit utiliser l’extension .fdx, .fountain ou .docx.".to_string());
+    }
+    if contents.is_empty() {
+        return Err("Le document exporté est vide.".to_string());
+    }
+    if contents.len() as u64 > MAX_INTERCHANGE_SIZE {
+        return Err(
+            "Le document exporté dépasse la taille maximale autorisée de 64 Mo.".to_string(),
+        );
+    }
+    write_bytes_atomically(path, &contents, "le document exporté")
 }
 
 #[tauri::command]
@@ -205,9 +271,7 @@ fn read_recovery(app: AppHandle) -> Result<Option<String>, String> {
         );
     }
 
-    fs::read_to_string(path)
-        .map(Some)
-        .map_err(|error| format!("Impossible de lire la sauvegarde automatique : {error}"))
+    read_scenario(path.to_string_lossy().into_owned()).map(Some)
 }
 
 #[tauri::command]
@@ -333,7 +397,7 @@ fn write_scenario_safely(path: PathBuf, contents: String) -> Result<(), String> 
 
     if path.exists() {
         let backup = path.with_file_name(format!("{filename}.bak"));
-        let previous_contents = fs::read(&path)
+        let previous_contents = read_bounded_file(&path, MAX_SCENARIO_SIZE)
             .map_err(|error| format!("Impossible de lire la version à sauvegarder : {error}"))?;
         write_bytes_atomically(backup, &previous_contents, "la copie .bak")?;
     }
@@ -475,27 +539,41 @@ fn normalize_prompts(prompts: Vec<AiPrompt>) -> Vec<AiPrompt> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .manage(std::sync::Arc::new(audio::AudioState::default()))
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(ClosePermission::default())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
+            audio::audio_status,
+            audio::audio_install,
+            audio::audio_cancel_install,
+            audio::audio_new_generation,
+            audio::audio_remove,
+            audio::audio_synthesize,
             session_vault::read_refresh_token,
             session_vault::write_refresh_token,
             session_vault::clear_refresh_token,
             session_vault::read_device_identity,
             session_vault::write_device_identity,
             session_vault::get_or_create_device_identity,
+            session_vault::read_device_keypair,
+            session_vault::write_device_keypair,
             session_vault::read_offline_trust,
             session_vault::write_offline_trust,
             session_vault::clear_offline_trust,
+            session_vault::read_pending_account_closure,
+            session_vault::write_pending_account_closure,
+            session_vault::clear_pending_account_closure,
             launched_scenario_path,
             read_scenario,
             read_pdf,
+            read_interchange_file,
             write_scenario,
             read_recent_scenarios,
             record_recent_scenario,
             write_pdf,
+            write_interchange_file,
             write_autosave,
             write_backup,
             read_recovery,
@@ -530,6 +608,40 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn bounded_reader_rejects_growth_empty_and_preserves_utf8() {
+        assert_eq!(read_bounded("écriture".as_bytes(), 9).unwrap(), "écriture".as_bytes());
+        assert!(read_bounded(&b""[..], 8).is_err());
+        assert!(read_bounded(&b"123456789"[..], 8).is_err());
+    }
+
+    #[test]
+    fn oversized_existing_file_is_never_overwritten_or_backed_up_in_memory() {
+        let directory = std::env::temp_dir().join(format!("senario-size-test-{}-{}", std::process::id(), unix_millis().unwrap()));
+        fs::create_dir_all(&directory).unwrap();
+        let path = directory.join("large.scenario");
+        let file = fs::File::create(&path).unwrap();
+        file.set_len(MAX_SCENARIO_SIZE + 1).unwrap();
+        drop(file);
+        assert!(read_scenario(path.to_string_lossy().into_owned()).unwrap_err().contains("32 Mio"));
+        assert!(write_scenario(path.to_string_lossy().into_owned(), "replacement".into()).is_err());
+        assert_eq!(fs::metadata(&path).unwrap().len(), MAX_SCENARIO_SIZE + 1);
+        assert!(!directory.join("large.scenario.bak").exists());
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn native_read_rejects_invalid_utf8_and_roundtrips_recovery_images() {
+        let directory = std::env::temp_dir().join(format!("senario-image-test-{}-{}", std::process::id(), unix_millis().unwrap()));
+        fs::create_dir_all(&directory).unwrap();
+        let path = directory.join("images.scenario");
+        let contents = r#"{"formatVersion":1,"title":"Récupération","content":{"type":"doc","content":[]},"technicalImageAssets":{"test":{"dataUrl":"data:image/png;base64,AQIDBA=="}}}"#;
+        write_scenario(path.to_string_lossy().into_owned(), contents.into()).unwrap();
+        assert_eq!(read_scenario(path.to_string_lossy().into_owned()).unwrap(), contents);
+        fs::write(&path, [0xff, 0xfe]).unwrap();
+        assert!(read_scenario(path.to_string_lossy().into_owned()).unwrap_err().contains("UTF-8"));
+        fs::remove_dir_all(directory).unwrap();
+    }
     #[test]
     fn replaces_a_scenario_and_preserves_the_previous_version() {
         let directory = std::env::temp_dir().join(format!(
@@ -595,5 +707,14 @@ mod tests {
     fn enforces_the_same_size_limit_for_every_scenario_save() {
         assert!(ensure_scenario_size(MAX_SCENARIO_SIZE as usize, "testé").is_ok());
         assert!(ensure_scenario_size(MAX_SCENARIO_SIZE as usize + 1, "testé").is_err());
+    }
+
+    #[test]
+    fn accepts_only_supported_interchange_extensions() {
+        assert!(is_supported_interchange_path(Path::new("film.fdx")));
+        assert!(is_supported_interchange_path(Path::new("film.FOUNTAIN")));
+        assert!(is_supported_interchange_path(Path::new("film.docx")));
+        assert!(!is_supported_interchange_path(Path::new("film.docm")));
+        assert!(!is_supported_interchange_path(Path::new("film.exe")));
     }
 }

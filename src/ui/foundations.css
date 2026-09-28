@@ -1,0 +1,62 @@
+/*
+ * Application-level semantic tokens.
+ *
+ * `tokens.css` is imported verbatim from the approved UI Blocks reference.
+ * This file is the stable extension point for shared UI primitives: new
+ * components must consume these aliases rather than introduce local values.
+ */
+:root {
+  /* Semantic colour aliases. */
+  --ui-color-canvas: var(--bg);
+  --ui-color-surface: var(--surface-1);
+  --ui-color-surface-raised: var(--surface-2);
+  --ui-color-surface-floating: var(--surface-3);
+  --ui-color-interactive-hover: var(--surface-hover);
+  --ui-color-interactive-pressed: var(--surface-pressed);
+  --ui-color-interactive-selected: var(--surface-selected);
+  --ui-color-text: var(--text);
+  --ui-color-text-muted: var(--text-2);
+  --ui-color-text-subtle: var(--text-3);
+  --ui-color-text-disabled: var(--text-disabled);
+  --ui-color-border: var(--border);
+  --ui-color-divider: var(--divider);
+  --ui-color-focus: var(--focus);
+  --ui-color-primary: var(--accent);
+  --ui-color-primary-hover: var(--accent-hover);
+  --ui-color-primary-pressed: var(--accent-pressed);
+  --ui-color-success: var(--success);
+  --ui-color-warning: var(--amber);
+  --ui-color-danger: var(--error);
+
+  /* Shared interaction geometry. */
+  --ui-control-height: 32px;
+  --ui-control-height-compact: 28px;
+  --ui-control-height-field: 34px;
+  --ui-target-min: 32px;
+  --ui-target-touch-min: 44px;
+  --ui-menu-gap: 6px;
+  --ui-overlay-inset: var(--space-4);
+  --ui-focus-outline: 2px solid var(--ui-color-focus);
+  --ui-focus-offset: 2px;
+  --ui-disabled-opacity: .38;
+
+  /* Shared stacking levels for future primitives. */
+  --ui-z-base: 1;
+  --ui-z-floating: 100;
+  --ui-z-menu: 400;
+  --ui-z-modal: 600;
+  --ui-z-toast: 700;
+
+  /* Named responsive thresholds. Use the literal values in media queries:
+     CSS custom properties cannot currently be used by standard media queries. */
+  --ui-breakpoint-compact: 799px;
+  --ui-breakpoint-narrow: 479px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --fast: 0ms;
+    --menu: 0ms;
+    --modal: 0ms;
+  }
+}

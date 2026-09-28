@@ -29,3 +29,9 @@ src-tauri/target
 .env.local
 .env.phase9.local
 /outputs/
+/src-tauri/audio-runtime/
+
+# Generated TypeScript configuration output; vite.config.ts is authoritative.
+*.tsbuildinfo
+/vite.config.js
+/vite.config.d.ts

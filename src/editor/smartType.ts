@@ -1,4 +1,5 @@
 import type { Editor } from "@tiptap/core";
+import type { Node as ProseMirrorNode } from "@tiptap/pm/model";
 import { TextSelection } from "@tiptap/pm/state";
 import { toScenarioElementType } from "./scenarioTypes";
 
@@ -30,7 +31,9 @@ export interface SmartTypeContext {
   signature: string;
 }
 
-type SmartTypeCandidates = Pick<SmartTypeContext, "kind" | "items">;
+export type SmartTypeCandidates = Pick<SmartTypeContext, "kind" | "items">;
+export type SceneHeadingSmartTypeKind = Extract<SmartTypeKind, "SCENE_INTRO" | "LOCATION" | "TIME">;
+export type SceneHeadingSmartTypeCandidates = Omit<SmartTypeCandidates, "kind"> & { kind: SceneHeadingSmartTypeKind };
 
 const selectionByEditor = new WeakMap<
   Editor,
@@ -47,6 +50,10 @@ interface SceneHeadingAnalysis {
 }
 
 export function getSmartTypeContext(editor: Editor): SmartTypeContext | null {
+  // Un lecteur d'un projet partagé peut déplacer son curseur pour consulter
+  // le scénario, mais SmartType ne doit ni lui être proposé ni modifier le
+  // document. `isEditable` est la garde commune appliquée par le runtime Cloud.
+  if (!editor.isEditable) return null;
   const candidates = getSmartTypeCandidates(editor);
   if (!candidates) {
     return null;
@@ -132,7 +139,14 @@ export function dismissSmartType(editor: Editor): boolean {
 }
 
 function getSmartTypeCandidates(editor: Editor): SmartTypeCandidates | null {
-  const { $from } = editor.state.selection;
+  const { $from, empty } = editor.state.selection;
+
+  // SmartType completes what is being typed at a cursor. A text selection can
+  // start in a scene heading and end in another block; treating its `$from` as
+  // an editable heading would replace the selection on Tab.
+  if (!empty) {
+    return null;
+  }
 
   if ($from.parent.type.name !== "paragraph") {
     return null;
@@ -143,27 +157,11 @@ function getSmartTypeCandidates(editor: Editor): SmartTypeCandidates | null {
   const currentParagraphPosition = $from.before($from.depth);
 
   if (type === "SCENE_HEADING") {
-    const analysis = analyzeSceneHeading(text, $from.parentOffset);
-
-    if (analysis.part === "INTRO") {
-      return makeContext("SCENE_INTRO", SCENE_INTROS, analysis.query);
-    }
-
-    if (analysis.part === "LOCATION") {
-      return makeContext(
-        "LOCATION",
-        collectKnownValues(editor, "LOCATION", currentParagraphPosition),
-        analysis.query,
-      );
-    }
-
-    return makeContext(
-      "TIME",
-      uniqueValues([
-        ...STANDARD_TIMES,
-        ...collectKnownValues(editor, "TIME", currentParagraphPosition),
-      ]),
-      analysis.query,
+    return getSceneHeadingSmartTypeCandidates(
+      editor.state.doc,
+      text,
+      $from.parentOffset,
+      currentParagraphPosition,
     );
   }
 
@@ -195,6 +193,7 @@ export function acceptSmartTypeSuggestion(
   kind: SmartTypeKind,
   suggestion: string,
 ): boolean {
+  if (!editor.isEditable) return false;
   const { $from } = editor.state.selection;
 
   if ($from.parent.type.name !== "paragraph") {
@@ -206,14 +205,8 @@ export function acceptSmartTypeSuggestion(
   const currentType = toScenarioElementType($from.parent.attrs.scenarioType);
   let replacement = suggestion;
 
-  if (kind === "SCENE_INTRO") {
-    replacement = `${suggestion} `;
-  } else if (kind === "LOCATION") {
-    const analysis = analyzeSceneHeading(text, $from.parentOffset);
-    replacement = `${analysis.intro} ${suggestion} - `;
-  } else if (kind === "TIME") {
-    const analysis = analyzeSceneHeading(text, $from.parentOffset);
-    replacement = `${analysis.intro} ${analysis.location} - ${suggestion}`;
+  if (kind === "SCENE_INTRO" || kind === "LOCATION" || kind === "TIME") {
+    replacement = applySceneHeadingSmartTypeSuggestion(text, kind, suggestion, $from.parentOffset);
   }
 
   const transaction = editor.state.tr.insertText(
@@ -268,11 +261,49 @@ export function analyzeSceneHeading(
   };
 }
 
-function makeContext(
-  kind: SmartTypeKind,
+/** Même source de suggestions pour l'éditeur principal et le Whiteboard. */
+export function getSceneHeadingSmartTypeCandidates(
+  document: ProseMirrorNode,
+  text: string,
+  cursorOffset = text.length,
+  excludedPosition = -1,
+): SceneHeadingSmartTypeCandidates | null {
+  const analysis = analyzeSceneHeading(text, cursorOffset);
+  if (analysis.part === "INTRO") return makeContext("SCENE_INTRO", SCENE_INTROS, analysis.query);
+  if (analysis.part === "LOCATION") {
+    return makeContext(
+      "LOCATION",
+      collectKnownValuesFromDocument(document, "LOCATION", excludedPosition),
+      analysis.query,
+    );
+  }
+  return makeContext(
+    "TIME",
+    uniqueValues([
+      ...STANDARD_TIMES,
+      ...collectKnownValuesFromDocument(document, "TIME", excludedPosition),
+    ]),
+    analysis.query,
+  );
+}
+
+export function applySceneHeadingSmartTypeSuggestion(
+  text: string,
+  kind: SceneHeadingSmartTypeKind,
+  suggestion: string,
+  cursorOffset = text.length,
+): string {
+  if (kind === "SCENE_INTRO") return `${suggestion} `;
+  const analysis = analyzeSceneHeading(text, cursorOffset);
+  if (kind === "LOCATION") return `${analysis.intro} ${suggestion} - `;
+  return `${analysis.intro} ${analysis.location} - ${suggestion}`;
+}
+
+function makeContext<Kind extends SmartTypeKind>(
+  kind: Kind,
   values: readonly string[],
   query: string,
-): SmartTypeCandidates | null {
+): (Omit<SmartTypeCandidates, "kind"> & { kind: Kind }) | null {
   const normalizedQuery = normalizeValue(query);
   const items = uniqueValues(values)
     .filter((value) => {
@@ -297,9 +328,17 @@ function collectKnownValues(
   kind: "CHARACTER" | "LOCATION" | "TIME",
   excludedPosition: number,
 ): string[] {
+  return collectKnownValuesFromDocument(editor.state.doc, kind, excludedPosition);
+}
+
+function collectKnownValuesFromDocument(
+  document: ProseMirrorNode,
+  kind: "CHARACTER" | "LOCATION" | "TIME",
+  excludedPosition: number,
+): string[] {
   const values: string[] = [];
 
-  editor.state.doc.descendants((node, position) => {
+  document.descendants((node, position) => {
     if (node.type.name !== "paragraph" || position === excludedPosition) {
       return;
     }

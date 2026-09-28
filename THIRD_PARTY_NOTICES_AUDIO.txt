@@ -1,0 +1,36 @@
+Senario — Lecture audio locale
+
+Kokoro-82M v1.0 — hexgrad and contributors — Apache License 2.0.
+Official model: https://huggingface.co/hexgrad/Kokoro-82M
+ONNX conversion: onnx-community/Kokoro-82M-v1.0-ONNX, revision
+1939ad2a8e416c0acfeecc08a694d14ef25f2231. Quantized model, original ff_siwis voice.
+Apache 2.0 full text is included in licenses/audio/Apache-2.0.txt.
+
+French voice attribution: SIWIS French Speech Synthesis Database (2017).
+Junichi Yamagishi, Pierre-Edouard Honnet, Philip Garner, Alexandros Lazaridis.
+University of Edinburgh, Centre for Speech Technology Research.
+https://doi.org/10.7488/ds/1705 — Creative Commons Attribution 4.0:
+https://creativecommons.org/licenses/by/4.0/
+SIWIS was part of the Kokoro training data. This application uses the trained
+voice preset, not a redistribution of the original recordings.
+
+ONNX Runtime 1.22.0 — Microsoft Corporation — MIT License.
+https://github.com/microsoft/onnxruntime/tree/v1.22.0
+Full upstream LICENSE and ThirdPartyNotices.txt accompany the native runtime.
+ort 2.0.0-rc.10 — pyke.io — MIT OR Apache-2.0.
+hound — RustAudio contributors — Apache-2.0.
+sha2 — RustCrypto contributors — MIT OR Apache-2.0.
+reqwest — Sean McArthur and contributors — MIT OR Apache-2.0.
+
+eSpeak NG 1.52.0 — eSpeak NG contributors — GNU GPL version 3 or later.
+https://github.com/espeak-ng/espeak-ng/tree/1.52.0
+This unmodified standalone executable communicates with Senario via standard
+input/output. It is not linked into Senario. Its executable and data accompany
+it in audio-runtime/espeak; copyright notices and per-file licences are in
+the corresponding source archive. GPL text also accompanies the executable.
+The corresponding upstream source, including build scripts, is distributed
+alongside it in audio-runtime/espeak-ng-1.52.0-source.zip. No modifications to
+eSpeak NG were made. GPL text: licenses/audio/GPL-3.0.txt.
+
+The voice is synthesized by a machine. Kokoro, SIWIS, Microsoft and eSpeak NG
+do not endorse Senario. The license notices do not grant trademark rights.

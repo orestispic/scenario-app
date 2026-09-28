@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseAiTokenBudgets } from './aiTokenUsage';
+import { parseAiTokenBudgets, shouldRequestAiTokenUsage } from './aiTokenUsage';
 import { createAuthenticatedCommercialApi } from './authenticatedApi';
 
 const window = { usedTokens: 10, reservedTokens: 15, limitTokens: 100, usedPercent: 12.34, reservedPercent: 15, costUsedPercent: 1.2, resetsAt: '2026-10-01T00:00:00Z' };
@@ -20,5 +20,12 @@ describe('budgets IA autoritaires', () => {
     expect(() => parseAiTokenBudgets({ ...budgets, daily: { ...window, usedPercent: NaN } })).toThrow();
     expect(() => parseAiTokenBudgets({ ...budgets, daily: { ...window, usedTokens: -1 } })).toThrow();
     expect(() => parseAiTokenBudgets({ ...budgets, daily: { ...window, usedPercent: 101 } })).toThrow();
+  });
+
+  it('ne demande les budgets que pour une session active, en ligne et visible', () => {
+    expect(shouldRequestAiTokenUsage(true, true, false)).toBe(true);
+    expect(shouldRequestAiTokenUsage(false, true, false)).toBe(false);
+    expect(shouldRequestAiTokenUsage(true, false, false)).toBe(false);
+    expect(shouldRequestAiTokenUsage(true, true, true)).toBe(false);
   });
 });
