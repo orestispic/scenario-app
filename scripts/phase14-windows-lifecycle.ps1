@@ -101,11 +101,21 @@ try {
   $taskDocument = Join-Path $taskRoot 'preserved.scenario'
   [IO.File]::WriteAllText($taskDocument, '{"formatVersion":1,"title":"Phase 14","content":{"type":"doc","content":[]}}')
   $taskBefore = (Get-FileHash -LiteralPath $taskDocument -Algorithm SHA256).Hash
+  # Simulate another app taking the extension after Senario was installed.
+  # The disposable runner contains no real user associations.
+  $taskForeignProgId = 'SenarioNativeTest.OtherApplication'
+  (Get-Item -LiteralPath 'HKCU:\Software\Classes\.scenario').SetValue('', $taskForeignProgId)
+  New-Item -Path 'HKCU:\Software\Classes\.scenario\OpenWithProgids' -Force | Out-Null
+  (Get-Item -LiteralPath 'HKCU:\Software\Classes\.scenario\OpenWithProgids').SetValue($taskForeignProgId, '')
   $taskUninstallProcess = Start-Process -FilePath $taskUninstaller -ArgumentList '/S' -PassThru -WindowStyle Hidden
   if (!$taskUninstallProcess.WaitForExit(120000)) { throw 'Uninstall timeout' }
   $taskDeadline = [DateTime]::UtcNow.AddSeconds(60)
   while ((Test-Path -LiteralPath $taskExe) -and [DateTime]::UtcNow -lt $taskDeadline) { Start-Sleep -Milliseconds 500 }
   if (Test-Path -LiteralPath $taskExe) { throw 'Uninstall did not remove the binary' }
+  if ((Get-Item -LiteralPath 'HKCU:\Software\Classes\.scenario').GetValue('') -ne $taskForeignProgId) { throw 'Uninstall overwrote another application association.' }
+  if ((Get-Item -LiteralPath 'HKCU:\Software\Classes\.scenario\OpenWithProgids').GetValueNames() -notcontains $taskForeignProgId) { throw 'Uninstall removed another application OpenWith entry.' }
+  if (Test-Path -LiteralPath 'HKCU:\Software\Classes\ScenarioApp.Project') { throw 'Uninstall left its own association behind.' }
+  Write-Output 'PASS: uninstall preserves the newer foreign association and OpenWith entry, and removes its own ProgID.'
   Test-Vault 'verify'
   Install-Senario $taskCandidate
   Verify-Version $taskExpectedVersion
