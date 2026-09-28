@@ -107,12 +107,18 @@ try {
   Set-Item -LiteralPath 'HKCU:\Software\Classes\.scenario' -Value $taskForeignProgId
   New-Item -Path 'HKCU:\Software\Classes\.scenario\OpenWithProgids' -Force | Out-Null
   New-ItemProperty -LiteralPath 'HKCU:\Software\Classes\.scenario\OpenWithProgids' -Name $taskForeignProgId -Value '' -PropertyType String -Force | Out-Null
-  $taskUninstallProcess = Start-Process -FilePath $taskUninstaller -ArgumentList '/S' -PassThru -WindowStyle Hidden
-  if (!$taskUninstallProcess.WaitForExit(120000)) { throw 'Uninstall timeout' }
+  Write-Output "Association before uninstall: $((Get-Item -LiteralPath 'HKCU:\Software\Classes\.scenario').GetValue(''))"
+  # NSIS relaunches its uninstaller from a temporary directory. WaitForExit on
+  # the launcher alone can return before its child finishes the registry hooks.
+  # -Wait follows the whole process tree; the CI job has a 45-minute upper bound.
+  $taskUninstallProcess = Start-Process -FilePath $taskUninstaller -ArgumentList '/S' -PassThru -WindowStyle Hidden -Wait
+  if ($taskUninstallProcess.ExitCode -ne 0) { throw 'Uninstall failed' }
   $taskDeadline = [DateTime]::UtcNow.AddSeconds(60)
   while ((Test-Path -LiteralPath $taskExe) -and [DateTime]::UtcNow -lt $taskDeadline) { Start-Sleep -Milliseconds 500 }
   if (Test-Path -LiteralPath $taskExe) { throw 'Uninstall did not remove the binary' }
-  if ((Get-Item -LiteralPath 'HKCU:\Software\Classes\.scenario').GetValue('') -ne $taskForeignProgId) { throw 'Uninstall overwrote another application association.' }
+  $taskAssociationAfterUninstall = (Get-Item -LiteralPath 'HKCU:\Software\Classes\.scenario').GetValue('')
+  Write-Output "Association after completed uninstall: $taskAssociationAfterUninstall"
+  if ($taskAssociationAfterUninstall -ne $taskForeignProgId) { throw 'Uninstall overwrote another application association.' }
   if ((Get-Item -LiteralPath 'HKCU:\Software\Classes\.scenario\OpenWithProgids').GetValueNames() -notcontains $taskForeignProgId) { throw 'Uninstall removed another application OpenWith entry.' }
   if (Test-Path -LiteralPath 'HKCU:\Software\Classes\ScenarioApp.Project') { throw 'Uninstall left its own association behind.' }
   Write-Output 'PASS: uninstall preserves the newer foreign association and OpenWith entry, and removes its own ProgID.'
