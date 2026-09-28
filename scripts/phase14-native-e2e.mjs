@@ -1,15 +1,19 @@
 // Real packaged WebView2 + Rust commands on an ephemeral Windows CI runner.
 import assert from 'node:assert/strict';
 import { spawn, execFileSync } from 'node:child_process';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
+import { createHash } from 'node:crypto';
+import { createLargeFixture } from './native-large-fixture.mjs';
 assert.equal(process.env.GITHUB_ACTIONS, 'true', 'Use an isolated CI runner');
 assert.equal(process.env.RUNNER_ENVIRONMENT, 'github-hosted', 'Use a disposable GitHub-hosted runner');
 const mode = process.argv[2];
-assert.ok(['seed', 'verify', 'reinstalled'].includes(mode));
+assert.ok(['seed', 'verify', 'reinstalled', 'large'].includes(mode));
 const root = join(process.env.RUNNER_TEMP, 'senario-phase14');
 await mkdir(root, { recursive: true });
 const statePath = join(root, 'native-state.json');
+const largePath = join(root, 'large-images.scenario');
+const fixture = mode === 'large' ? await createLargeFixture(largePath) : null;
 const scope = 'https://scenario-commercial-api-production.ore-picard.workers.dev|https://rtqlsnwfbtnscilfdirv.supabase.co';
 const profile = join(root, mode === 'reinstalled' ? 'fresh-webview' : 'webview');
 // WebView2 150+ ignores environment overrides for elevated hosts (CI runners).
@@ -18,7 +22,7 @@ const policy = 'HKLM\\SOFTWARE\\Policies\\Microsoft\\Edge\\WebView2\\';
 for (const [name, value] of [['AdditionalBrowserArguments', '--remote-debugging-port=19314 --remote-debugging-address=127.0.0.1'], ['UserDataFolder', profile]]) {
   execFileSync('reg.exe', ['add', policy + name, '/v', 'scenario-app.exe', '/t', 'REG_SZ', '/d', value, '/f', '/reg:64'], { windowsHide: true });
 }
-const child = spawn(join(process.env.LOCALAPPDATA, 'senario', 'scenario-app.exe'), [], {
+const child = spawn(join(process.env.LOCALAPPDATA, 'senario', 'scenario-app.exe'), mode === 'large' ? [largePath] : [], {
   windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'],
   env: { ...process.env },
 });
@@ -45,7 +49,7 @@ try {
     const key = ++id;
     const result = await Promise.race([new Promise((resolve, reject) => {
       waiting.set(key, { resolve, reject }); socket.send(JSON.stringify({ id: key, method: 'Runtime.evaluate', params: { expression, awaitPromise: true, returnByValue: true } }));
-    }), delay(15000).then(() => { throw new Error('Native evaluation timeout'); })]);
+    }), delay(60000).then(() => { throw new Error('Native evaluation timeout'); })]);
     assert.equal(result.exceptionDetails, undefined, 'Native command or renderer failed');
     return result.result.value;
   }
@@ -55,7 +59,37 @@ try {
   }
   assert.equal(await evaluate("Boolean(document.querySelector('.scenario-editor'))"), true, 'Free editor must open');
   const invoke = (command, args) => evaluate(`window.__TAURI_INTERNALS__.invoke(${JSON.stringify(command)}, ${JSON.stringify(args)})`);
-  if (mode === 'seed') {
+  if (mode === 'large') {
+    assert.ok(fixture.bytes > 32 * 1024 * 1024);
+    for (let i = 0; i < 100; i++) {
+      if (await evaluate("document.querySelector('.scenario-editor')?.textContent.includes('RECETTE GROS PROJET')")) break;
+      await delay(300);
+    }
+    assert.equal(await evaluate("document.querySelector('.scenario-editor')?.textContent.includes('RECETTE GROS PROJET')"), true, 'Large file must open through the real editor startup path');
+    const result = await evaluate(`(async () => {
+      const invoke = window.__TAURI_INTERNALS__.invoke;
+      const contents = await invoke('read_scenario_streamed', { path: ${JSON.stringify(largePath)} });
+      const file = JSON.parse(contents), assets = Object.values(file.technicalImageAssets);
+      const decode = src => new Promise((resolve, reject) => { const image = new Image(); image.onload = () => resolve([image.naturalWidth, image.naturalHeight]); image.onerror = () => reject(new Error('Native image cannot be decoded')); image.src = src; });
+      const dimensions = [];
+      for (const asset of [assets[0], assets.at(-1)]) dimensions.push(await decode(asset.dataUrl));
+      await invoke('write_scenario_streamed', { path: ${JSON.stringify(join(root, 'large-portable.scenario'))}, kind: 'write_scenario', contents });
+      const again = JSON.parse(await invoke('read_scenario_streamed', { path: ${JSON.stringify(join(root, 'large-portable.scenario'))} }));
+      return { ipcBytes: new TextEncoder().encode(contents).length, images: assets.length, dimensions, ids: Object.keys(again.technicalImageAssets) };
+    })()`);
+    assert.equal(result.images, fixture.images); assert.ok(result.ipcBytes < 128 * 1024);
+    assert.deepEqual(result.dimensions, [[240, 240], [240, 240]]);
+    assert.deepEqual(result.ids.sort(), [...fixture.ids].sort());
+    // Inspect the actual saved portable bytes independently of the app/cache.
+    const saved = JSON.parse(await readFile(join(root, 'large-portable.scenario'), 'utf8'));
+    for (const [id, asset] of Object.entries(saved.technicalImageAssets)) {
+      assert.ok(asset.dataUrl.startsWith('data:image/png;base64,'));
+      assert.equal(createHash('sha256').update(Buffer.from(asset.dataUrl.split(',')[1], 'base64')).digest('hex'), id);
+    }
+    const evidence = { mode, sourceBytes: fixture.bytes, savedBytes: (await stat(join(root, 'large-portable.scenario'))).size, ...result, portableImageHashesVerified: true, actualPngDecode: true };
+    await writeFile(join(root, 'large-project-evidence.json'), JSON.stringify(evidence, null, 2));
+    console.log(`PASS large project: ${fixture.bytes} bytes, ${result.images} images, ${result.ipcBytes} bytes across IPC, real PNG decode and portable image hashes verified.`);
+  } else if (mode === 'seed') {
     const fingerprint = await evaluate("localStorage.getItem('scenario-local-device-fingerprint') || (() => { const value = crypto.randomUUID() + crypto.randomUUID(); localStorage.setItem('scenario-local-device-fingerprint', value); return value; })()");
     await writeFile(statePath, JSON.stringify({ fingerprint }));
   } else {

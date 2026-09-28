@@ -1,3 +1,4 @@
+import { cacheNativeImage, isNativeImageUrl, portableImageUrl } from '../document/nativeImages';
 export const TECHNICAL_IMAGE_MAX_BYTES = 70 * 1024;
 export const TECHNICAL_IMAGE_LEGACY_MAX_BYTES = 300 * 1024;
 export const TECHNICAL_IMAGE_REFERENCE_PREFIX = 'senario-image:';
@@ -111,7 +112,7 @@ export function normalizeTechnicalImageAssets(value: unknown): TechnicalImageAss
       || sizeBytes < 1 || sizeBytes > TECHNICAL_IMAGE_LEGACY_MAX_BYTES
       || !Number.isSafeInteger(width) || width < 1 || width > 16_384
       || !Number.isSafeInteger(height) || height < 1 || height > 16_384
-      || !dataUrl.startsWith(`data:${contentType};base64,`)
+      || (!dataUrl.startsWith(`data:${contentType};base64,`) && !isNativeImageUrl(dataUrl))
       || dataUrl.length > Math.ceil(TECHNICAL_IMAGE_LEGACY_MAX_BYTES * 4 / 3) + 128) continue;
     assets[id] = { id, contentType: contentType as TechnicalImageAsset['contentType'], sizeBytes, width, height, dataUrl };
   }
@@ -153,7 +154,7 @@ export async function technicalImageAssetFromBytes(
     sizeBytes: bytes.byteLength,
     width,
     height,
-    dataUrl: `data:${contentType};base64,${bytesToBase64(bytes)}`,
+    dataUrl: await cacheNativeImage(`data:${contentType};base64,${bytesToBase64(bytes)}`),
   };
 }
 
@@ -219,10 +220,11 @@ export async function optimizeTechnicalImage(
   }
 }
 
-export function technicalImageAssetBytes(asset: TechnicalImageAsset): Uint8Array {
-  const separator = asset.dataUrl.indexOf(',');
+export async function technicalImageAssetBytes(asset: TechnicalImageAsset): Promise<Uint8Array> {
+  const dataUrl = await portableImageUrl(asset.dataUrl);
+  const separator = dataUrl.indexOf(',');
   if (separator < 0) throw new Error('Données d’image invalides.');
-  return base64ToBytes(asset.dataUrl.slice(separator + 1));
+  return base64ToBytes(dataUrl.slice(separator + 1));
 }
 
 export function hydrateTechnicalBreakdownImages<T>(value: T, assets: TechnicalImageAssets): T {

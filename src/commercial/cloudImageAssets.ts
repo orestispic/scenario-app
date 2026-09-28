@@ -1,4 +1,5 @@
 import type { ScenarioFile } from '../document/scenarioFile';
+import { cacheNativeImage, portableImageUrl } from '../document/nativeImages';
 import {
   collectTechnicalImageAssetIds,
   TECHNICAL_IMAGE_LEGACY_MAX_BYTES,
@@ -23,7 +24,8 @@ export async function uploadCloudImageAssets(
   for (const assetId of ids) {
     const asset = assets[assetId];
     if (!asset) throw new Error('Une image du découpage est absente de la copie locale. Aucune version incomplète n’a été envoyée.');
-    const separator = asset.dataUrl.indexOf(',');
+    const dataUrl = await portableImageUrl(asset.dataUrl);
+    const separator = dataUrl.indexOf(',');
     if (separator < 0) throw new Error('Données d’image invalides.');
     await api.ensureCloudImageAsset(scenarioId, {
       assetId,
@@ -31,7 +33,7 @@ export async function uploadCloudImageAssets(
       sizeBytes: asset.sizeBytes,
       width: asset.width,
       height: asset.height,
-      contentBase64: asset.dataUrl.slice(separator + 1),
+      contentBase64: dataUrl.slice(separator + 1),
     }, `image-${scenarioId}-${assetId}`);
   }
 }
@@ -115,7 +117,8 @@ export async function hydrateCloudImageAssets(
   const loaded: TechnicalImageAsset[] = [];
   for (const assetId of ids) {
     if (retainedBytes > 30 * 1024 * 1024) throw new Error('Cette version dépasse 30 Mio. Utilisez la récupération Cloud pour conserver ses données.');
-    const asset = await downloadCloudImageAsset(api, scenarioId, assetId, signal, fetcher);
+    const downloaded = await downloadCloudImageAsset(api, scenarioId, assetId, signal, fetcher);
+    const asset = { ...downloaded, dataUrl: await cacheNativeImage(downloaded.dataUrl) };
     retainedBytes += new TextEncoder().encode(JSON.stringify(asset)).byteLength + assetId.length + 4;
     if (retainedBytes > 30 * 1024 * 1024) throw new Error('Cette version dépasse 30 Mio. Utilisez la récupération Cloud pour conserver ses données.');
     loaded.push(asset);
@@ -126,6 +129,6 @@ export async function hydrateCloudImageAssets(
   };
 }
 
-export function validateTechnicalImageAssetPayload(asset: TechnicalImageAsset): boolean {
-  return technicalImageAssetBytes(asset).byteLength === asset.sizeBytes;
+export async function validateTechnicalImageAssetPayload(asset: TechnicalImageAsset): Promise<boolean> {
+  return (await technicalImageAssetBytes(asset)).byteLength === asset.sizeBytes;
 }

@@ -1,4 +1,5 @@
 import { jsPDF } from 'jspdf';
+import { portableImageUrl } from './nativeImages';
 import type { SceneBreakdown } from '../editor/breakdownModel';
 import type { ScenarioScene } from '../editor/sceneTimelineModel';
 import type { TechnicalBreakdown, TechnicalColumn, TechnicalShot } from '../editor/technicalBreakdownModel';
@@ -376,7 +377,8 @@ export async function createTechnicalBreakdownPdf(
   const groups = partitionTechnicalColumns(columns, canvas.contentWidth, options.contentSize);
   const imageSources = [...new Set(breakdown.shots.flatMap(shot => columns.flatMap(column =>
     column.kind === 'image' && shot.values[column.id] ? [shot.values[column.id]] : [])))];
-  const imageSizeEntries = await Promise.all(imageSources.map(async src => [src, await imageDimensions(src)] as const));
+  const imageSizeEntries: Array<readonly [string, ImageDimensions]> = [];
+  for (const src of imageSources) imageSizeEntries.push([src, await imageDimensions(src)]);
   const imageSizes = new Map(imageSizeEntries);
 
   if (!columns.length) {
@@ -468,7 +470,8 @@ export async function createTechnicalBreakdownPdf(
             let imageHeight = imageWidth / ratio;
             if (imageHeight > availableHeight) { imageHeight = availableHeight; imageWidth = imageHeight * ratio; }
             try {
-              pdf.addImage(imageSource, imageFormat(imageSource), x + (widths[columnIndex] - imageWidth) / 2, canvas.y + (rowHeight - imageHeight) / 2, imageWidth, imageHeight, undefined, 'FAST');
+              const portableSource = await portableImageUrl(imageSource);
+              pdf.addImage(portableSource, imageFormat(portableSource), x + (widths[columnIndex] - imageWidth) / 2, canvas.y + (rowHeight - imageHeight) / 2, imageWidth, imageHeight, undefined, 'FAST');
             } catch {
               pdf.setFont(PDF_UNICODE_FONT, 'normal');
               pdf.setFontSize(Math.max(6.5, text.fontSize - 1));

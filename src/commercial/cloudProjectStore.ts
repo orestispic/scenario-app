@@ -18,7 +18,7 @@ export interface CloudProjectStore {
   deleteAccount(accountId: string): Promise<void>;
 }
 
-/** User-owned .scenario copies only: no bearer tokens, URLs, tickets or raw operations. */
+/** User-owned copies; native images reference the durable local store. No bearer tokens, remote signed URLs, tickets or raw operations. */
 export class IndexedDbCloudProjectStore implements CloudProjectStore {
   private async database(): Promise<IDBDatabase> {
     return new Promise((resolve, reject) => {

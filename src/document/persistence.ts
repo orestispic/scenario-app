@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { nativeImageStoreAvailable } from './nativeImages';
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { INTERCHANGE_FORMATS, type InterchangeFormat } from './interchange';
 import { assertInterchangeSize } from './interchangeCommon';
@@ -123,6 +124,10 @@ function persist(command: string, args: Record<string, unknown>): Promise<void> 
   const pending = writes.catch(() => undefined).then(async () => {
     if (typeof args.contents === 'string') validateBrowserScenario(args.contents);
     if (nativePersistenceAvailable()) {
+      if (nativeImageStoreAvailable() && ['write_scenario', 'write_autosave', 'write_backup'].includes(command)) {
+        await invoke<void>('write_scenario_streamed', { ...args, path: args.path ?? null, kind: command });
+        return;
+      }
       await invoke<void>(command, args);
       return;
     }
@@ -213,7 +218,7 @@ export async function choosePdfToOpen(): Promise<string | null> {
 }
 
 export async function readScenario(path: string): Promise<string> {
-  return invoke<string>("read_scenario", { path });
+  return invoke<string>(nativeImageStoreAvailable() ? 'read_scenario_streamed' : 'read_scenario', { path });
 }
 
 export async function readPdf(path: string): Promise<number[]> {
@@ -260,7 +265,7 @@ export async function writeBackup(contents: string): Promise<void> {
 
 export async function readRecovery(): Promise<string | null> {
   return nativePersistenceAvailable()
-    ? invoke<string | null>("read_recovery")
+    ? invoke<string | null>(nativeImageStoreAvailable() ? 'read_recovery_streamed' : 'read_recovery')
     : readBrowserRecord(BROWSER_RECOVERY_KEY);
 }
 

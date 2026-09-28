@@ -1,4 +1,6 @@
 import { UiIcon } from '../ui/UiIcon';
+import { nativeImageStoreAvailable, portableScenarioChunks } from '../document/nativeImages';
+import { chooseScenarioToSave, writeScenario } from '../document/persistence';
 import { UiSelect } from '../ui/UiSelect';
 import { UiButton, UiDialog, UiEmptyState, UiFeedback, UiIconButton, UiTabs, type UiFeedbackMessage } from '../ui';
 import { isTauri } from '@tauri-apps/api/core';
@@ -94,7 +96,13 @@ function CloudScenarioIcon({ updatedAt, pages }: { updatedAt: string; pages: num
 function CloudFolderIcon() {
   return <span className="cloud-folder-icon" aria-hidden="true"><svg viewBox="0 0 72 58"><path d="M3 13a6 6 0 0 1 6-6h20l7 8h27a6 6 0 0 1 6 6v28a6 6 0 0 1-6 6H9a6 6 0 0 1-6-6z"/><path d="M3 23h66"/></svg></span>;
 }
-export function downloadScenario(file: ScenarioFile) {
+export async function downloadScenario(file: ScenarioFile) {
+  if (nativeImageStoreAvailable()) {
+    const path = await chooseScenarioToSave(file.title);
+    if (!path) throw new Error('Téléchargement annulé ; la copie actuelle est conservée.');
+    await writeScenario(path, JSON.stringify(file));
+    return;
+  }
   const url = URL.createObjectURL(new Blob([JSON.stringify(file, null, 2)], { type: 'application/vnd.scenario+json' }));
   const a = document.createElement('a'); a.href = url;
   a.download = `${file.title.replace(/[\\/:*?"<>|]/g, '-') || 'Scenario'}.scenario`;
@@ -522,7 +530,7 @@ export function CloudProjectsPanel({ apiFactory, editor, onClose, onSignIn, embe
   async function openProject(project: CloudProject) {
     await run(async () => {
       if (cloudAccess === false && project.role === 'owner') {
-        downloadScenario(await hydrateCloudImageAssets(api, project.id, await api.readCurrentProjectDocument(project.id)));
+        await downloadScenario(await hydrateCloudImageAssets(api, project.id, await api.readCurrentProjectDocument(project.id)));
         return;
       }
       await cloudProjectRuntime.open(api, accountId, project.id, editor);
@@ -534,10 +542,10 @@ export function CloudProjectsPanel({ apiFactory, editor, onClose, onSignIn, embe
     if (!selected) return;
     if (!canDownloadCloudProject(selected)) throw new Error('Un lecteur ne peut pas télécharger de copie locale du projet.');
     if (cloudAccess === false && selected.role === 'owner') {
-      downloadScenario(await hydrateCloudImageAssets(api, selected.id, await api.readCurrentProjectDocument(selected.id)));
+      await downloadScenario(await hydrateCloudImageAssets(api, selected.id, await api.readCurrentProjectDocument(selected.id)));
       return;
     }
-    downloadScenario(await downloadCloudProject(api, selected));
+    await downloadScenario(await downloadCloudProject(api, selected));
   }
 
   async function downloadRecoveryArchive() {
@@ -594,7 +602,11 @@ export function CloudProjectsPanel({ apiFactory, editor, onClose, onSignIn, embe
             names.add(name.toLocaleLowerCase('fr-FR'));
             const entry = new ZipDeflate(name, { level: 6 });
             zip.add(entry);
-            entry.push(strToU8(JSON.stringify(file, null, 2)), true);
+            for await (const chunk of portableScenarioChunks(file)) {
+              entry.push(strToU8(chunk), false);
+              await writeChain;
+            }
+            entry.push(new Uint8Array(), true);
             // Flush each project before hydrating the next one. Supporting
             // browsers therefore never retain the complete archive in memory.
             await writeChain;
@@ -801,8 +813,8 @@ export function CloudProjectsPanel({ apiFactory, editor, onClose, onSignIn, embe
             <details><summary>Sauvegardes de la version initiale ({versions.length})</summary>{selected.realtimeStudioId && <p className="cloud-help">Pour préserver les modifications collaboratives, une ancienne version se récupère comme fichier indépendant ; elle ne remplace pas le projet partagé.</p>}{[...versions].reverse().map((v) => <div className="cloud-version" key={v.id}><span>Version {v.versionNumber} · {new Date(v.createdAt).toLocaleString('fr-FR')}</span>{selected.role !== 'viewer' && <button disabled={busy} onClick={() => void run(async () => downloadScenario(await loadCloudProjectFile(api, v, new AbortController().signal)))}>Télécharger</button>}{selected.role !== 'viewer' && !selected.realtimeStudioId && <button disabled={busy || (runtime?.rootProjectId ?? runtime?.project?.id) === selected.id} onClick={() => setRestoreId(v.id)}>Restaurer</button>}</div>)}{restoreId && <div className="cloud-notice"><p>Restaurer cette sauvegarde dans la version initiale ? L’historique sera conservé.</p><button disabled={busy} onClick={() => void run(async () => { await api.restoreCloudVersion(selected.id, restoreId, crypto.randomUUID()); await refresh(); await select(selected); }, 'Version restaurée.')} >Confirmer la restauration</button><button onClick={() => setRestoreId('')}>Annuler</button></div>}</details>
           </>}
         </aside></div>
-        {runtime?.project && <div className="cloud-current" aria-live="polite"><div className="cloud-current-summary"><strong>{runtime.project.title} · {statusLabel[runtime.status]}</strong>{runtime.status === 'realtime' && <span>{live?.status === 'online' ? `${live.presence.length} membre(s) présent(s)` : live?.status === 'read_only' ? 'Lecture seule' : live?.status === 'reconnecting' ? 'Reconnexion…' : live?.status === 'conflict' || live?.status === 'recovery_required' ? 'Conflit · copie locale conservée' : 'Connexion…'}{live?.syncLag ? ` · ${live.syncLag} modification(s) en attente` : ''}</span>}<p>{runtime.message || 'Le projet cloud est à jour.'}</p></div>{runtime.project.role !== 'viewer' && <div className="cloud-current-actions"><button onClick={() => downloadScenario(editor.readFile())}>Télécharger ma copie locale</button>{runtime.status === 'conflict' && <button disabled={busy} onClick={() => void run(async () => { downloadScenario(editor.readFile()); await cloudProjectRuntime.open(api, accountId, runtime.rootProjectId ?? runtime.project!.id, editor, true, runtime.activeBranchId); })}>Conserver ma copie et ouvrir la version cloud</button>}<button onClick={() => void run(async () => { await cloudProjectRuntime.close(); editor.setReadOnly(false); }, 'Le scénario ouvert est maintenant une copie locale indépendante.')}>Continuer comme copie locale</button></div>}</div>}
-        <details className="cloud-local-copies" onToggle={(e) => { if (e.currentTarget.open) void cloudProjectStore.list(accountId).then(setCopies); }}><summary>Copies conservées sur cet appareil ({downloadableCopies.length})</summary><p>Ces fichiers restent sur cet appareil après une déconnexion. Vous pouvez les télécharger pour les garder ailleurs.</p>{[...downloadableCopies].sort((a,b) => b.savedAt.localeCompare(a.savedAt)).map((c) => <div className="cloud-version" key={c.projectId}><span>{c.file.title} · {new Date(c.savedAt).toLocaleString('fr-FR')}</span><button onClick={() => downloadScenario(c.file)}>Télécharger</button></div>)}</details>
+        {runtime?.project && <div className="cloud-current" aria-live="polite"><div className="cloud-current-summary"><strong>{runtime.project.title} · {statusLabel[runtime.status]}</strong>{runtime.status === 'realtime' && <span>{live?.status === 'online' ? `${live.presence.length} membre(s) présent(s)` : live?.status === 'read_only' ? 'Lecture seule' : live?.status === 'reconnecting' ? 'Reconnexion…' : live?.status === 'conflict' || live?.status === 'recovery_required' ? 'Conflit · copie locale conservée' : 'Connexion…'}{live?.syncLag ? ` · ${live.syncLag} modification(s) en attente` : ''}</span>}<p>{runtime.message || 'Le projet cloud est à jour.'}</p></div>{runtime.project.role !== 'viewer' && <div className="cloud-current-actions"><button onClick={() => void run(async () => { await downloadScenario(editor.readFile()); })}>Télécharger ma copie locale</button>{runtime.status === 'conflict' && <button disabled={busy} onClick={() => void run(async () => { await downloadScenario(editor.readFile()); await cloudProjectRuntime.open(api, accountId, runtime.rootProjectId ?? runtime.project!.id, editor, true, runtime.activeBranchId); })}>Conserver ma copie et ouvrir la version cloud</button>}<button onClick={() => void run(async () => { await cloudProjectRuntime.close(); editor.setReadOnly(false); }, 'Le scénario ouvert est maintenant une copie locale indépendante.')}>Continuer comme copie locale</button></div>}</div>}
+        <details className="cloud-local-copies" onToggle={(e) => { if (e.currentTarget.open) void cloudProjectStore.list(accountId).then(setCopies); }}><summary>Copies conservées sur cet appareil ({downloadableCopies.length})</summary><p>Ces fichiers restent sur cet appareil après une déconnexion. Vous pouvez les télécharger pour les garder ailleurs.</p>{[...downloadableCopies].sort((a,b) => b.savedAt.localeCompare(a.savedAt)).map((c) => <div className="cloud-version" key={c.projectId}><span>{c.file.title} · {new Date(c.savedAt).toLocaleString('fr-FR')}</span><button onClick={() => void run(async () => { await downloadScenario(c.file); })}>Télécharger</button></div>)}</details>
       </>}
       <UiDialog open={contactsOpen} onOpenChange={(open) => { setContactsOpen(open); if (!open) setContactToRemove(null); }}
         title="Contacts" description="Seuls vos contacts acceptés peuvent recevoir un projet."

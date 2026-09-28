@@ -1,5 +1,8 @@
 mod audio;
 mod session_vault;
+mod scenario_stream;
+#[cfg(all(test, windows))]
+mod native_updater_test;
 use serde::{Deserialize, Serialize};
 use std::{
     env,
@@ -332,6 +335,10 @@ fn write_internal_file(path: PathBuf, contents: String, label: &str) -> Result<(
 }
 
 fn write_bytes_atomically(path: PathBuf, contents: &[u8], label: &str) -> Result<(), String> {
+    write_stream_atomically(path, label, |file| file.write_all(contents).map_err(|e| e.to_string()))
+}
+
+fn write_stream_atomically(path: PathBuf, label: &str, write: impl FnOnce(&mut fs::File) -> Result<(), String>) -> Result<(), String> {
     let directory = path
         .parent()
         .ok_or_else(|| format!("Dossier invalide pour {label}."))?;
@@ -350,7 +357,8 @@ fn write_bytes_atomically(path: PathBuf, contents: &[u8], label: &str) -> Result
         .create_new(true)
         .open(&temporary)
         .map_err(|error| format!("Impossible de préparer {label} : {error}"))?;
-    if let Err(error) = file.write_all(contents).and_then(|_| file.sync_all()) {
+    if let Err(error) = write(&mut file).and_then(|_| file.sync_all().map_err(|e| e.to_string())) {
+        drop(file);
         let _ = fs::remove_file(&temporary);
         return Err(format!("Impossible d’écrire {label} : {error}"));
     }
@@ -539,6 +547,17 @@ fn normalize_prompts(prompts: Vec<AiPrompt>) -> Vec<AiPrompt> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .manage(scenario_stream::ImageStore::default())
+        .register_uri_scheme_protocol("senario-image", |context, request| {
+            let path = request.uri().path().trim_start_matches('/');
+            let image = scenario_stream::serve(context.app_handle(), &format!("http://senario-image.localhost/{path}"));
+            match image {
+                Ok((mime, bytes)) => tauri::http::Response::builder()
+                    .header("Content-Type", mime).header("Cache-Control", "no-store")
+                    .header("X-Content-Type-Options", "nosniff").body(bytes).unwrap(),
+                Err(_) => tauri::http::Response::builder().status(404).body(Vec::new()).unwrap(),
+            }
+        })
         .manage(std::sync::Arc::new(audio::AudioState::default()))
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(ClosePermission::default())
@@ -566,6 +585,11 @@ pub fn run() {
             session_vault::write_pending_account_closure,
             session_vault::clear_pending_account_closure,
             launched_scenario_path,
+            scenario_stream::read_scenario_streamed,
+            scenario_stream::read_recovery_streamed,
+            scenario_stream::write_scenario_streamed,
+            scenario_stream::cache_scenario_image,
+            scenario_stream::read_scenario_image,
             read_scenario,
             read_pdf,
             read_interchange_file,

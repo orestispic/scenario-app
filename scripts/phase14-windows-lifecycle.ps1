@@ -137,9 +137,15 @@ try {
     node scripts/phase14-native-e2e.mjs verify
     if ($LASTEXITCODE -ne 0) { throw 'Rollback native app test failed' }
     if ((Get-FileHash -LiteralPath $taskDocument -Algorithm SHA256).Hash -ne $taskBefore) { throw 'Document changed during rollback' }
-    Install-Senario $taskCandidate
+    node scripts/native-updater-test.mjs $taskCandidate
+    if ($LASTEXITCODE -ne 0) { throw 'Native network updater test failed' }
     Verify-Version $taskExpectedVersion
-    Write-Output 'PASS: previous-version installer upgrade and rollback. Tauri network update remains a separate test.'
+    Verify-Resources
+    Test-Vault 'verify'
+    node scripts/phase14-native-e2e.mjs verify
+    if ($LASTEXITCODE -ne 0) { throw 'Updated native app test failed' }
+    if ((Get-FileHash -LiteralPath $taskDocument -Algorithm SHA256).Hash -ne $taskBefore) { throw 'Document changed during network update' }
+    Write-Output 'PASS: previous-version installer upgrade, rollback, then real Tauri network update using an ephemeral fixture signing key.'
   } else { Write-Output 'NOT TESTED: upgrade from a previous version, rollback and Tauri network update.' }
   Write-Output "PASS: production $taskExpectedVersion installation, uninstall, reinstall, system-vault identity and refresh token preserved, document unchanged."
 } finally { if ($taskVaultSeeded) { Test-Vault 'cleanup' } }

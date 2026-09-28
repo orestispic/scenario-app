@@ -1367,7 +1367,7 @@ export function TechnicalBreakdown({
           type="file" accept="image/*" hidden onChange={event => { void setImage(shot, column, event.target.files?.[0]); event.currentTarget.value = ''; }} />
         {optimizingImageKey === inputKey ? <span className="technical-image-optimizing">Optimisation…</span> : imageSource ? <>
           <button className="technical-thumbnail" type="button" title="Agrandir l’image" onClick={event => { event.stopPropagation(); setImagePreview({ src: imageSource, label: `Plan ${scene.index + 1}.${shotIndex + 1}` }); }}>
-            <img src={imageSource} alt="" />
+            <img src={imageSource} alt="" loading="lazy" decoding="async" />
           </button>
           {!readOnly && <span className="technical-image-actions">
             <UiIconButton label="Remplacer l’image" tooltip="Remplacer l’image" onClick={event => { event.stopPropagation(); fileInputs.current.get(inputKey)?.click(); }}><UiIcon name="edit" /></UiIconButton>

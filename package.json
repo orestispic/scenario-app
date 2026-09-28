@@ -1,7 +1,7 @@
 {
   "name": "scenario-app",
   "private": true,
-  "version": "0.1.17",
+  "version": "0.1.18",
   "type": "module",
   "scripts": {
     "audio:prepare": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/prepare-audio.ps1",

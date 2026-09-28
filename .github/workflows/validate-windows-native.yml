@@ -6,6 +6,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
   native:
@@ -31,11 +32,22 @@ jobs:
       - run: npm test -- --run
       - run: npm run audio:prepare
       - run: node scripts/build-windows-candidate.mjs
+      - name: Retrouver la référence 0.1.17 réellement testée
+        uses: actions/download-artifact@v4
+        with:
+          name: windows-internal-unsigned-evidence
+          run-id: 36459361449
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/senario-baseline
       - name: Installer, relire les fichiers et réinstaller dans le runner jetable
         shell: pwsh
         run: |
           $taskVersion = (Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json).version
-          ./scripts/phase14-windows-lifecycle.ps1 -Installer "src-tauri/target/release/bundle/nsis/senario_${taskVersion}_x64-setup.exe"
+          $taskBaseline = @(Get-ChildItem -LiteralPath "$env:RUNNER_TEMP/senario-baseline" -Filter 'senario_0.1.17_x64-setup-UNSIGNED.exe' -Recurse -File)
+          if ($taskBaseline.Count -ne 1) { throw 'Expected exactly one pinned historical installer.' }
+          ./scripts/phase14-windows-lifecycle.ps1 -Installer "src-tauri/target/release/bundle/nsis/senario_${taskVersion}_x64-setup.exe" -PreviousInstaller $taskBaseline[0].FullName -PreviousVersion '0.1.17' -PreviousSha256 '488dcf5bc61c4048ecb45f2a9ace2ebbf03ee142cd9a94f56d890e52c3243f9f' -AllowUnsignedBaselineForTesting
+      - name: Ouvrir et sauver un vrai projet avec images au-delà de 32 Mio
+        run: node scripts/phase14-native-e2e.mjs large
       - uses: actions/upload-artifact@v4
         if: always()
         with:
