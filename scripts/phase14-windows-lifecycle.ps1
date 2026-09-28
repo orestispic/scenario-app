@@ -104,9 +104,9 @@ try {
   # Simulate another app taking the extension after Senario was installed.
   # The disposable runner contains no real user associations.
   $taskForeignProgId = 'SenarioNativeTest.OtherApplication'
-  (Get-Item -LiteralPath 'HKCU:\Software\Classes\.scenario').SetValue('', $taskForeignProgId)
+  Set-Item -LiteralPath 'HKCU:\Software\Classes\.scenario' -Value $taskForeignProgId
   New-Item -Path 'HKCU:\Software\Classes\.scenario\OpenWithProgids' -Force | Out-Null
-  (Get-Item -LiteralPath 'HKCU:\Software\Classes\.scenario\OpenWithProgids').SetValue($taskForeignProgId, '')
+  New-ItemProperty -LiteralPath 'HKCU:\Software\Classes\.scenario\OpenWithProgids' -Name $taskForeignProgId -Value '' -PropertyType String -Force | Out-Null
   $taskUninstallProcess = Start-Process -FilePath $taskUninstaller -ArgumentList '/S' -PassThru -WindowStyle Hidden
   if (!$taskUninstallProcess.WaitForExit(120000)) { throw 'Uninstall timeout' }
   $taskDeadline = [DateTime]::UtcNow.AddSeconds(60)
