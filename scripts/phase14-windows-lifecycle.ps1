@@ -51,7 +51,30 @@ function Verify-Resources {
     if (!(Test-Path -LiteralPath (Join-Path $taskInstall $taskRelative) -PathType Leaf)) { throw "Missing installed resource: $taskRelative" }
   }
   $taskIcon = (Get-Item -LiteralPath 'HKCU:\Software\Classes\ScenarioApp.Project\DefaultIcon').GetValue('')
-  if ($taskIcon -ne ('"' + (Join-Path $taskInstall 'scenario-file-icon.ico') + '",0')) { throw 'The .scenario icon does not point to the installed resource.' }
+  Write-Output "Installed .scenario icon: $taskIcon"
+  # NSIS can use an 8.3 user-directory alias while LOCALAPPDATA uses its long
+  # spelling. Compare the actual Windows paths, not their registry spellings.
+  if ($taskIcon -notmatch '^"(?<iconPath>.+)",0$') { throw 'Invalid .scenario icon registry value.' }
+  $taskIconPath = $Matches.iconPath
+  if (!(Test-Path -LiteralPath $taskIconPath -PathType Leaf)) { throw 'Registered .scenario icon is missing.' }
+  if (-not ('Senario.PathNames' -as [type])) {
+    Add-Type -TypeDefinition @'
+using System;
+using System.Text;
+using System.Runtime.InteropServices;
+namespace Senario { public static class PathNames {
+  [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+  public static extern uint GetLongPathName(string path, StringBuilder output, uint length);
+} }
+'@
+  }
+  function Get-LongNativePath([string]$Path) {
+    $taskBuffer = [Text.StringBuilder]::new(32768)
+    $taskLength = [Senario.PathNames]::GetLongPathName($Path, $taskBuffer, $taskBuffer.Capacity)
+    if (!$taskLength -or $taskLength -ge $taskBuffer.Capacity) { throw 'Cannot resolve installed icon path.' }
+    return [IO.Path]::GetFullPath($taskBuffer.ToString())
+  }
+  if ((Get-LongNativePath $taskIconPath) -ne (Get-LongNativePath (Join-Path $taskInstall 'scenario-file-icon.ico'))) { throw 'The .scenario icon does not point to the installed resource.' }
 }
 try {
   # The historical public artifacts were private-beta builds with a different

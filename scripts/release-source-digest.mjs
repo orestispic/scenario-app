@@ -24,7 +24,8 @@ export function releaseSourceDigest(root) {
   const digest = createHash('sha256');
   for (const relative of files.sort()) {
     const bytes = readFileSync(join(root, relative));
-    const content = /\.(?:ts|tsx|js|mjs|json|toml|lock|yml|yaml|ps1|rs|css|html|nsh|txt|md)$/i.test(relative)
+    const content = /\.(?:ts|tsx|js|mjs|json|toml|lock|yml|yaml|ps1|rs|css|html|nsh|txt|md|svg)$/i.test(relative)
+      || /(?:^|\/)(?:THIRD_PARTY_NOTICES|LICENSE|NOTICE|_headers|_redirects)$/.test(relative)
       ? Buffer.from(bytes.toString('utf8').replace(/\r\n/g, '\n')) : bytes;
     digest.update(relative + '\0' + content.length + '\0');
     digest.update(content);
