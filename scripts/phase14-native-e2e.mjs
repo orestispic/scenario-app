@@ -47,11 +47,14 @@ try {
   socket.onmessage = event => { const message = JSON.parse(event.data); if (message.id) { const pending = waiting.get(message.id); waiting.delete(message.id); if (message.error) pending?.reject(new Error(message.error.message)); else pending?.resolve(message.result); } };
   async function evaluate(expression) {
     const key = ++id;
-    const result = await Promise.race([new Promise((resolve, reject) => {
-      waiting.set(key, { resolve, reject }); socket.send(JSON.stringify({ id: key, method: 'Runtime.evaluate', params: { expression, awaitPromise: true, returnByValue: true } }));
-    }), delay(60000).then(() => { throw new Error('Native evaluation timeout'); })]);
-    assert.equal(result.exceptionDetails, undefined, 'Native command or renderer failed');
-    return result.result.value;
+    let timeout;
+    try {
+      const result = await Promise.race([new Promise((resolve, reject) => {
+        waiting.set(key, { resolve, reject }); socket.send(JSON.stringify({ id: key, method: 'Runtime.evaluate', params: { expression, awaitPromise: true, returnByValue: true } }));
+      }), new Promise((_, reject) => { timeout = setTimeout(() => reject(new Error('Native evaluation timeout')), 60000); })]);
+      assert.equal(result.exceptionDetails, undefined, 'Native command or renderer failed');
+      return result.result.value;
+    } finally { clearTimeout(timeout); waiting.delete(key); }
   }
   for (let i = 0; i < 100; i++) {
     if (await evaluate("Boolean(document.querySelector('.scenario-editor'))")) break;
@@ -66,6 +69,22 @@ try {
       await delay(300);
     }
     assert.equal(await evaluate("document.querySelector('.scenario-editor')?.textContent.includes('RECETTE GROS PROJET')"), true, 'Large file must open through the real editor startup path');
+    const beforeSave = (await stat(largePath)).mtimeMs;
+    await evaluate("window.dispatchEvent(new KeyboardEvent('keydown', { key: 's', code: 'KeyS', ctrlKey: true, bubbles: true })); true");
+    let savedByEditor = false;
+    for (let i = 0; i < 100; i++) {
+      try { savedByEditor = (await stat(largePath)).mtimeMs > beforeSave; } catch { /* atomic replacement */ }
+      if (savedByEditor) break;
+      await delay(300);
+    }
+    assert.equal(savedByEditor, true, 'Ctrl+S must save the large document through the real editor');
+    assert.equal(createHash('sha256').update(await readFile(`${largePath}.bak`)).digest('hex'), fixture.sha256, 'The complete original large file must survive in .bak');
+    const editorSave = JSON.parse(await readFile(largePath, 'utf8'));
+    assert.equal(Object.keys(editorSave.technicalImageAssets ?? {}).length, fixture.images, 'Editor serialization must retain every referenced image');
+    for (const [id, asset] of Object.entries(editorSave.technicalImageAssets)) {
+      assert.ok(asset.dataUrl.startsWith('data:image/png;base64,'));
+      assert.equal(createHash('sha256').update(Buffer.from(asset.dataUrl.split(',')[1], 'base64')).digest('hex'), id);
+    }
     const result = await evaluate(`(async () => {
       const invoke = window.__TAURI_INTERNALS__.invoke;
       const contents = await invoke('read_scenario_streamed', { path: ${JSON.stringify(largePath)} });
@@ -77,7 +96,7 @@ try {
       const again = JSON.parse(await invoke('read_scenario_streamed', { path: ${JSON.stringify(join(root, 'large-portable.scenario'))} }));
       return { ipcBytes: new TextEncoder().encode(contents).length, images: assets.length, dimensions, ids: Object.keys(again.technicalImageAssets) };
     })()`);
-    assert.equal(result.images, fixture.images); assert.ok(result.ipcBytes < 128 * 1024);
+    assert.equal(result.images, fixture.images); assert.ok(result.ipcBytes < 512 * 1024);
     assert.deepEqual(result.dimensions, [[240, 240], [240, 240]]);
     assert.deepEqual(result.ids.sort(), [...fixture.ids].sort());
     // Inspect the actual saved portable bytes independently of the app/cache.
@@ -86,7 +105,7 @@ try {
       assert.ok(asset.dataUrl.startsWith('data:image/png;base64,'));
       assert.equal(createHash('sha256').update(Buffer.from(asset.dataUrl.split(',')[1], 'base64')).digest('hex'), id);
     }
-    const evidence = { mode, sourceBytes: fixture.bytes, savedBytes: (await stat(join(root, 'large-portable.scenario'))).size, ...result, portableImageHashesVerified: true, actualPngDecode: true };
+    const evidence = { mode, sourceBytes: fixture.bytes, sourceSha256: fixture.sha256, savedBytes: (await stat(join(root, 'large-portable.scenario'))).size, ...result, portableImageHashesVerified: true, actualPngDecode: true, editorCtrlSSave: true, editorImageHashesVerified: true, completeOriginalBakVerified: true };
     await writeFile(join(root, 'large-project-evidence.json'), JSON.stringify(evidence, null, 2));
     console.log(`PASS large project: ${fixture.bytes} bytes, ${result.images} images, ${result.ipcBytes} bytes across IPC, real PNG decode and portable image hashes verified.`);
   } else if (mode === 'seed') {
@@ -101,7 +120,8 @@ try {
     await invoke('write_scenario', { path, contents });
     assert.equal(await invoke('read_scenario', { path }), contents);
   }
-  console.log(`PASS packaged Windows ${mode}: editor opens, ${mode === 'seed' ? 'legacy identity captured' : 'same device identity and native file save/reopen'}`);
+  await invoke('clear_recovery', {});
+  console.log(`PASS packaged Windows ${mode}: editor opens, ${mode === 'seed' ? 'legacy identity captured' : mode === 'large' ? 'large project and real images survive editor save' : 'same device identity and native file save/reopen'}`);
 } finally {
   socket?.close();
   child.kill();

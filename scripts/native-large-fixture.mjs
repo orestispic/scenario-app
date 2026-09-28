@@ -14,8 +14,8 @@ function chunk(type, bytes) {
 }
 export async function createLargeFixture(path) {
   const handle = await open(path, 'wx');
-  const ids = []; let bytes = 0;
-  const write = async value => { bytes += Buffer.byteLength(value); await handle.write(value); };
+  const ids = []; let bytes = 0; const digest = createHash('sha256');
+  const write = async value => { bytes += Buffer.byteLength(value); digest.update(value); await handle.write(value); };
   try {
     await write('{"formatVersion":1,"title":"Recette images 0.1.18","technicalImageAssets":{');
     for (let i = 0; i < 192; i++) {
@@ -29,8 +29,12 @@ export async function createLargeFixture(path) {
       const id = createHash('sha256').update(png).digest('hex'); ids.push(id);
       await write(`${i ? ',' : ''}${JSON.stringify(id)}:${JSON.stringify({ id, contentType: 'image/png', width: 240, height: 240, sizeBytes: png.length, dataUrl: `data:image/png;base64,${png.toString('base64')}` })}`);
     }
-    const content = { type: 'doc', content: [{ type: 'paragraph', attrs: { blockId: 'large-fixture', scenarioType: 'ACTION' }, content: [{ type: 'text', text: 'RECETTE GROS PROJET : 192 images intactes' }] }] };
+    const technicalBreakdownData = JSON.stringify({ version: 1,
+      columns: [{ id: 'image', kind: 'image', name: 'Image', width: 80, widthMode: 'auto', hidden: false }],
+      shots: ids.map((id, index) => ({ id: `shot-${index}`, sceneId: 'large-fixture', values: { image: `senario-image:${id}` } })),
+    });
+    const content = { type: 'doc', content: [{ type: 'paragraph', attrs: { blockId: 'large-fixture', scenarioType: 'SCENE_HEADING', technicalBreakdownData }, content: [{ type: 'text', text: 'INT. RECETTE GROS PROJET - JOUR' }] }] };
     await write(`},"content":${JSON.stringify(content)},"characters":[],"locations":[],"times":[],"comments":[],"savedAt":"2026-09-28T00:00:00Z"}`);
-    return { bytes, images: ids.length, ids };
+    return { bytes, images: ids.length, ids, sha256: digest.digest('hex') };
   } finally { await handle.close(); }
 }

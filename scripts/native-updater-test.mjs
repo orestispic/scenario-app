@@ -9,7 +9,10 @@ assert.equal(process.env.GITHUB_ACTIONS, 'true');
 assert.equal(process.env.RUNNER_ENVIRONMENT, 'github-hosted');
 const bytes = await readFile(process.argv[2]);
 const version = JSON.parse(await readFile('src-tauri/tauri.conf.json', 'utf8')).version;
-const installedVersion = () => execFileSync('pwsh', ['-NoProfile', '-Command', "(Get-Item -LiteralPath (Join-Path $env:LOCALAPPDATA 'senario/scenario-app.exe')).VersionInfo.ProductVersion"], { encoding: 'utf8', windowsHide: true }).trim().match(/^\d+\.\d+\.\d+/)?.[0];
+const installedVersion = () => {
+  try { return execFileSync('pwsh', ['-NoProfile', '-Command', "(Get-Item -LiteralPath (Join-Path $env:LOCALAPPDATA 'senario/scenario-app.exe') -ErrorAction Stop).VersionInfo.ProductVersion"], { encoding: 'utf8', windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] }).trim().match(/^\d+\.\d+\.\d+/)?.[0]; }
+  catch { return null; } // The installer can briefly replace the executable.
+};
 const baseline = installedVersion(); assert.equal(baseline, '0.1.17'); assert.equal(version, '0.1.18');
 const { privateKey, publicKey } = generateKeyPairSync('ed25519');
 const keyId = Buffer.alloc(8, 42), rawKey = publicKey.export({ type: 'spki', format: 'der' }).subarray(-32);
@@ -31,7 +34,7 @@ const server = createServer((req, res) => {
 });
 await new Promise(resolve => server.listen(0, '127.0.0.1', resolve)); origin = `http://127.0.0.1:${server.address().port}`;
 async function probe() {
-  const child = spawn('cargo', ['test', '--manifest-path', 'src-tauri/Cargo.toml', '--lib', 'native_updater_probe', '--', '--ignored', '--nocapture', '--test-threads=1'], {
+  const child = spawn('cargo', ['test', '--manifest-path', 'src-tauri/Cargo.toml', '--features', 'native-validation', '--lib', 'native_updater_probe', '--', '--ignored', '--nocapture', '--test-threads=1'], {
     windowsHide: true, stdio: 'inherit', env: { ...process.env, SENARIO_UPDATER_TEST_ENDPOINT: `${origin}/latest.json`, SENARIO_UPDATER_TEST_PUBKEY: pubkey, SENARIO_UPDATER_TEST_MODE: mode, SENARIO_UPDATER_TEST_INSTALLED_VERSION: baseline },
   });
   const timeout = setTimeout(() => child.kill(), 240_000);

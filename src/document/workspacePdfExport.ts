@@ -469,8 +469,8 @@ export async function createTechnicalBreakdownPdf(
             let imageWidth = availableWidth;
             let imageHeight = imageWidth / ratio;
             if (imageHeight > availableHeight) { imageHeight = availableHeight; imageWidth = imageHeight * ratio; }
+            const portableSource = await portableImageUrl(imageSource);
             try {
-              const portableSource = await portableImageUrl(imageSource);
               pdf.addImage(portableSource, imageFormat(portableSource), x + (widths[columnIndex] - imageWidth) / 2, canvas.y + (rowHeight - imageHeight) / 2, imageWidth, imageHeight, undefined, 'FAST');
             } catch {
               pdf.setFont(PDF_UNICODE_FONT, 'normal');

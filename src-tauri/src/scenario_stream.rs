@@ -32,25 +32,43 @@ fn token(value: &str) -> Result<&str, String> {
     if key.len() != 64 || !key.bytes().all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase()) { return Err("Référence locale invalide.".into()); }
     Ok(key)
 }
+fn publish_immutable(path: &Path, bytes: &[u8]) -> Result<(), String> {
+    let temporary = path.with_file_name(format!(".image-{}", uuid::Uuid::new_v4()));
+    let result = (|| {
+        let mut file = fs::OpenOptions::new().write(true).create_new(true).open(&temporary).map_err(|e| e.to_string())?;
+        file.write_all(bytes).and_then(|_| file.sync_all()).map_err(|e| e.to_string())?;
+        drop(file);
+        if let Err(error) = fs::hard_link(&temporary, path) {
+            if error.kind() != std::io::ErrorKind::AlreadyExists { return Err(error.to_string()); }
+        }
+        Ok(())
+    })();
+    let _ = fs::remove_file(temporary); result
+}
 fn store(root: &Path, value: &str) -> Result<String, String> {
     image_bytes(value)?;
     // A persistent random salt prevents an imported document from guessing URLs
     // of other private images. It also permits stable deduplication after restart.
     let salt_path = root.join("salt");
-    let salt = if salt_path.exists() { fs::read(&salt_path).map_err(|e| e.to_string())? } else {
-        let salt = uuid::Uuid::new_v4().as_bytes().to_vec();
-        fs::write(&salt_path, &salt).map_err(|e| e.to_string())?; salt
-    };
+    if !salt_path.exists() {
+        // Publish a complete salt without replacing another app instance's salt.
+        publish_immutable(&salt_path, uuid::Uuid::new_v4().as_bytes())?;
+    }
+    let salt = super::read_bounded_file(&salt_path, 16)?;
     if salt.len() != 16 { return Err("Cache d’images invalide.".into()); }
     let mut digest = Sha256::new(); digest.update(salt); digest.update(value.as_bytes());
     let key = format!("{:x}", digest.finalize());
     let path = root.join(format!("{key}.json"));
     if !path.exists() {
-        let occupied: u64 = fs::read_dir(root).map_err(|e| e.to_string())?.filter_map(Result::ok)
-            .filter_map(|e| e.metadata().ok()).map(|m| m.len()).sum();
+        let mut occupied = 0u64; let mut files = 0usize;
+        for entry in fs::read_dir(root).map_err(|e| e.to_string())? {
+            let metadata = entry.map_err(|e| e.to_string())?.metadata().map_err(|e| e.to_string())?;
+            occupied += metadata.len(); files += 1;
+        }
+        if files >= 8193 { return Err("Le cache local contient déjà 8192 images. Aucune donnée n’a été effacée.".into()); }
         if occupied + value.len() as u64 + 2 > CACHE_LIMIT { return Err("Le cache local d’images a atteint 2 Gio. Aucune donnée n’a été effacée.".into()); }
         let quoted = serde_json::to_string(value).map_err(|e| e.to_string())?;
-        super::write_bytes_atomically(path, quoted.as_bytes(), "l’image locale")?;
+        publish_immutable(&path, quoted.as_bytes())?;
     }
     Ok(format!("{PREFIX}{key}"))
 }
@@ -60,7 +78,7 @@ fn image_json(root: &Path, url: &str) -> Result<Vec<u8>, String> {
     let value: String = serde_json::from_slice(&bytes).map_err(|_| "Image locale corrompue.")?;
     image_bytes(&value)?;
     // Verify that the persistent cache still contains the bytes named by its URL.
-    let salt = fs::read(root.join("salt")).map_err(|e| e.to_string())?;
+    let salt = super::read_bounded_file(&root.join("salt"), 16)?;
     let mut hash = Sha256::new(); hash.update(salt); hash.update(value.as_bytes());
     if format!("{:x}", hash.finalize()) != token(url)? { return Err("Intégrité de l’image locale invalide.".into()); }
     Ok(bytes)
@@ -97,6 +115,7 @@ fn compact(reader: impl Read, root: &Path) -> Result<String, String> {
         if output.len() > CORE_LIMIT { return Err("Le texte du projet dépasse 32 Mio hors images.".into()); }
     }
     let output = String::from_utf8(output).map_err(|_| "Texte UTF-8 invalide.")?;
+    validate_shape(&output)?;
     let mut parser = serde_json::Deserializer::from_str(output.trim_start_matches('\u{feff}'));
     serde::de::IgnoredAny::deserialize(&mut parser).map_err(|_| "Projet JSON corrompu ou trop imbriqué.")?;
     parser.end().map_err(|_| "Contenu supplémentaire après le projet.")?;
@@ -104,8 +123,30 @@ fn compact(reader: impl Read, root: &Path) -> Result<String, String> {
 }
 use serde::Deserialize;
 
+// Bound structural allocations before either serde_json::Value or JSON.parse.
+fn validate_shape(contents: &str) -> Result<(), String> {
+    let mut quoted = false; let mut escaped = false; let mut depth = 0usize; let mut nodes = 0usize;
+    for byte in contents.bytes() {
+        if quoted {
+            if byte == b'"' && !escaped { quoted = false; }
+            escaped = byte == b'\\' && !escaped;
+        } else if byte == b'"' { quoted = true; escaped = false; }
+        else {
+            match byte {
+                b'{' | b'[' => { depth += 1; nodes += 1; },
+                b'}' | b']' => { depth = depth.saturating_sub(1); },
+                b',' | b':' => { nodes += 1; },
+                _ => {},
+            }
+            if depth > 128 || nodes > 250_000 { return Err("La structure du projet est trop complexe pour être ouverte en sécurité.".into()); }
+        }
+    }
+    Ok(())
+}
+
 fn expand(contents: &str, root: &Path, writer: &mut dyn Write) -> Result<(), String> {
     if contents.len() > CORE_LIMIT { return Err("Le texte du projet dépasse 32 Mio hors images.".into()); }
+    validate_shape(contents)?;
     // Parse only the bounded compact JSON, then serialize recursively to disk.
     let document: serde_json::Value = serde_json::from_str(contents).map_err(|_| "Projet JSON invalide.")?;
     fn emit(value: &serde_json::Value, root: &Path, out: &mut dyn Write, size: &mut u64) -> Result<(), String> {
@@ -144,23 +185,23 @@ fn read(path: &Path, root: &Path) -> Result<String, String> {
     compact(file, root)
 }
 #[tauri::command]
-pub fn read_scenario_streamed(app: AppHandle, state: State<ImageStore>, path: String) -> Result<String, String> {
+pub async fn read_scenario_streamed(app: AppHandle, state: State<'_, ImageStore>, path: String) -> Result<String, String> {
     let _lock = state.0.lock().map_err(|e| e.to_string())?;
     read(Path::new(&path), &cache(&app)?)
 }
 #[tauri::command]
-pub fn read_recovery_streamed(app: AppHandle, state: State<ImageStore>) -> Result<Option<String>, String> {
+pub async fn read_recovery_streamed(app: AppHandle, state: State<'_, ImageStore>) -> Result<Option<String>, String> {
     let path = super::app_storage_path(&app, "autosave/recovery.scenario")?;
     if !path.exists() { return Ok(None); }
-    read_scenario_streamed(app, state, path.to_string_lossy().into_owned()).map(Some)
+    read_scenario_streamed(app, state, path.to_string_lossy().into_owned()).await.map(Some)
 }
 #[tauri::command]
-pub fn cache_scenario_image(app: AppHandle, state: State<ImageStore>, data_url: String) -> Result<String, String> {
+pub async fn cache_scenario_image(app: AppHandle, state: State<'_, ImageStore>, data_url: String) -> Result<String, String> {
     let _lock = state.0.lock().map_err(|e| e.to_string())?;
     store(&cache(&app)?, &data_url)
 }
 #[tauri::command]
-pub fn read_scenario_image(app: AppHandle, url: String) -> Result<String, String> {
+pub async fn read_scenario_image(app: AppHandle, url: String) -> Result<String, String> {
     serde_json::from_slice(&image_json(&cache(&app)?, &url)?).map_err(|e| e.to_string())
 }
 pub fn serve(app: &AppHandle, url: &str) -> Result<(String, Vec<u8>), String> {
@@ -168,7 +209,7 @@ pub fn serve(app: &AppHandle, url: &str) -> Result<(String, Vec<u8>), String> {
     let (mime, bytes) = image_bytes(&value)?; Ok((mime.to_owned(), bytes))
 }
 #[tauri::command]
-pub fn write_scenario_streamed(app: AppHandle, state: State<ImageStore>, path: Option<String>, kind: String, contents: String) -> Result<(), String> {
+pub async fn write_scenario_streamed(app: AppHandle, state: State<'_, ImageStore>, path: Option<String>, kind: String, contents: String) -> Result<(), String> {
     let _lock = state.0.lock().map_err(|e| e.to_string())?;
     let root = cache(&app)?;
     let destination = match kind.as_str() {
@@ -218,10 +259,21 @@ mod tests {
         assert!(compact(compacted.as_bytes(), &root).is_err());
         assert!(compact(&b"{\"title\":\"truncated"[..], &root).is_err());
         assert!(compact(&b"{}{}"[..], &root).is_err());
+        assert!(validate_shape(&format!("[{}0]", "0,".repeat(250_001))).is_err());
+        assert!(validate_shape(&format!("{}{}", "[".repeat(129), "]".repeat(129))).is_err());
         assert!(compact(&b"{\"title\":\"\xff\"}"[..], &root).is_err());
         let url = store(&root, "data:image/png;base64,AQID").unwrap();
         fs::write(root.join(format!("{}.json", token(&url).unwrap())), b"\"data:image/png;base64,AQIE\"").unwrap();
         assert!(expand(&compacted, &root, &mut Vec::new()).is_err());
+        fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn simultaneous_instances_share_the_same_durable_image_identity() {
+        let root = root();
+        let handles: Vec<_> = (0..8).map(|_| { let root = root.clone(); std::thread::spawn(move || store(&root, "data:image/png;base64,AQID").unwrap()) }).collect();
+        let urls: Vec<_> = handles.into_iter().map(|h| h.join().unwrap()).collect();
+        assert!(urls.iter().all(|url| *url == urls[0]));
+        assert!(image_json(&root, &urls[0]).is_ok());
         fs::remove_dir_all(root).unwrap();
     }
     #[test]

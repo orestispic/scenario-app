@@ -32,6 +32,8 @@ jobs:
       - run: npm test -- --run
       - run: npm run audio:prepare
       - run: node scripts/build-windows-candidate.mjs
+      - name: Vérifier aussi les tests Rust de lecture et sauvegarde bornées
+        run: cargo test --manifest-path src-tauri/Cargo.toml --lib
       - name: Retrouver la référence 0.1.17 réellement testée
         uses: actions/download-artifact@v4
         with:

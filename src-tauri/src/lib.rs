@@ -1,7 +1,7 @@
 mod audio;
 mod session_vault;
 mod scenario_stream;
-#[cfg(all(test, windows))]
+#[cfg(all(test, windows, feature = "native-validation"))]
 mod native_updater_test;
 use serde::{Deserialize, Serialize};
 use std::{

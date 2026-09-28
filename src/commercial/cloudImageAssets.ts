@@ -1,5 +1,5 @@
 import type { ScenarioFile } from '../document/scenarioFile';
-import { cacheNativeImage, portableImageUrl } from '../document/nativeImages';
+import { cacheNativeImage, nativeImageStoreAvailable, portableImageUrl } from '../document/nativeImages';
 import {
   collectTechnicalImageAssetIds,
   TECHNICAL_IMAGE_LEGACY_MAX_BYTES,
@@ -114,11 +114,17 @@ export async function hydrateCloudImageAssets(
   // Bound both simultaneous transfers and retained base64 payloads. Leave room
   // for the recovery wrapper and serialization under the native 32 MiB ceiling.
   let retainedBytes = new TextEncoder().encode(JSON.stringify(cloudScenarioFile(file))).byteLength;
+  let portableBytes = retainedBytes;
   const loaded: TechnicalImageAsset[] = [];
   for (const assetId of ids) {
     if (retainedBytes > 30 * 1024 * 1024) throw new Error('Cette version dépasse 30 Mio. Utilisez la récupération Cloud pour conserver ses données.');
     const downloaded = await downloadCloudImageAsset(api, scenarioId, assetId, signal, fetcher);
     const asset = { ...downloaded, dataUrl: await cacheNativeImage(downloaded.dataUrl) };
+    portableBytes += new TextEncoder().encode(JSON.stringify({ ...asset, dataUrl: '' })).byteLength
+      + assetId.length + 4 + `data:${asset.contentType};base64,`.length + Math.ceil(asset.sizeBytes / 3) * 4;
+    if (nativeImageStoreAvailable() && portableBytes > 512 * 1024 * 1024) {
+      throw new Error('Cette version dépasse 512 Mio avec ses images. Conservez les fichiers de récupération Cloud.');
+    }
     retainedBytes += new TextEncoder().encode(JSON.stringify(asset)).byteLength + assetId.length + 4;
     if (retainedBytes > 30 * 1024 * 1024) throw new Error('Cette version dépasse 30 Mio. Utilisez la récupération Cloud pour conserver ses données.');
     loaded.push(asset);
