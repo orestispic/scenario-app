@@ -1,4 +1,5 @@
 $ErrorActionPreference = 'Stop'
+$ProgressPreference = 'SilentlyContinue'
 $projectRoot = Split-Path $PSScriptRoot -Parent
 $audioRoot = Join-Path $projectRoot 'src-tauri/audio-runtime'
 $downloadRoot = Join-Path $projectRoot 'outputs/audio-build'
