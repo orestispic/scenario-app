@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 const invoke = vi.hoisted(() => vi.fn());
 vi.mock('@tauri-apps/api/core', () => ({ invoke }));
-import { cacheNativeImage, isNativeImageUrl, portableScenarioChunks } from './nativeImages';
+import { cacheNativeImage, isNativeImageUrl, nativeImageStoreAvailable, portableScenarioChunks } from './nativeImages';
 import { normalizeTechnicalImageAssets } from '../editor/technicalImageAssets';
 import { writeScenario, readScenario } from './persistence';
 
@@ -26,11 +26,15 @@ describe('native image transport', () => {
     expect(await cacheNativeImage(data)).toBe(data);
     expect(invoke).not.toHaveBeenCalled();
     vi.stubGlobal('window', { __TAURI_INTERNALS__: { invoke: vi.fn() } });
+    vi.stubGlobal('navigator', { platform: 'Win32' });
     invoke.mockResolvedValue('cached');
     expect(await cacheNativeImage(data)).toBe('cached');
     await writeScenario('large.scenario', '{}');
     expect(invoke).toHaveBeenCalledWith('write_scenario_streamed', { kind: 'write_scenario', path: 'large.scenario', contents: '{}' });
     await readScenario('large.scenario');
     expect(invoke).toHaveBeenCalledWith('read_scenario_streamed', { path: 'large.scenario' });
+    vi.stubGlobal('navigator', { platform: 'MacIntel' });
+    expect(nativeImageStoreAvailable()).toBe(false);
+    expect(await cacheNativeImage(data)).toBe(data);
   });
 });

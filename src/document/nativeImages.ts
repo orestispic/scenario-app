@@ -1,6 +1,9 @@
 import { invoke } from '@tauri-apps/api/core';
 
 export function nativeImageStoreAvailable(): boolean {
+  // This delivery validates the WebView2 custom-protocol transport on Windows.
+  // Other native platforms keep their existing portable-data-URL persistence.
+  if (typeof navigator !== 'undefined' && !navigator.platform.startsWith('Win')) return false;
   return typeof window !== 'undefined' && typeof (window as Window & {
     __TAURI_INTERNALS__?: { invoke?: unknown };
   }).__TAURI_INTERNALS__?.invoke === 'function';

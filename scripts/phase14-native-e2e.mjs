@@ -70,13 +70,20 @@ try {
     }
     assert.equal(await evaluate("document.querySelector('.scenario-editor')?.textContent.includes('RECETTE GROS PROJET')"), true, 'Large file must open through the real editor startup path');
     const beforeSave = (await stat(largePath)).mtimeMs;
-    await evaluate("window.dispatchEvent(new KeyboardEvent('keydown', { key: 's', code: 'KeyS', ctrlKey: true, bubbles: true })); true");
     let savedByEditor = false;
     for (let i = 0; i < 100; i++) {
       try { savedByEditor = (await stat(largePath)).mtimeMs > beforeSave; } catch { /* atomic replacement */ }
       if (savedByEditor) break;
+      // Rendering precedes the awaited initial recovery/backup. During that
+      // period the application deliberately blocks file actions. Retry only
+      // until the first actual save; the app also serializes pending saves.
+      if (i % 5 === 0) await evaluate("window.dispatchEvent(new KeyboardEvent('keydown', { key: 's', code: 'KeyS', ctrlKey: true, bubbles: true })); true");
       await delay(300);
     }
+    if (!savedByEditor) await writeFile(join(root, 'large-save-failure.json'), JSON.stringify({
+      body: await evaluate('document.body.innerText.slice(0, 12000)'),
+      sourceBytes: (await stat(largePath)).size,
+    }, null, 2));
     assert.equal(savedByEditor, true, 'Ctrl+S must save the large document through the real editor');
     assert.equal(createHash('sha256').update(await readFile(`${largePath}.bak`)).digest('hex'), fixture.sha256, 'The complete original large file must survive in .bak');
     const editorSave = JSON.parse(await readFile(largePath, 'utf8'));
